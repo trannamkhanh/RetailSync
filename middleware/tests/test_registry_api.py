@@ -1,6 +1,7 @@
 """Registration API on real SQL Server: DS-04 paths, roles, duplicates and validation."""
 
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 import jwt
 import pytest
@@ -132,6 +133,25 @@ def test_store_coordinates_accept_the_boundaries(client, admin_token, db_session
     assert (response.json()["latitude"], response.json()["longitude"]) == (latitude, longitude)
 
 
+def test_store_coordinates_accept_six_decimal_places(client, admin_token, db_session):
+    response = register_store(client, admin_token, latitude=89.999999, longitude=-108.220812)
+
+    assert response.status_code == 201
+    assert (response.json()["latitude"], response.json()["longitude"]) == (89.999999, -108.220812)
+    row = db_session.get(Store, STORE_ID)
+    assert (row.latitude, row.longitude) == (Decimal("89.999999"), Decimal("-108.220812"))
+
+
+def test_ids_accept_letters_digits_hyphen_and_underscore(client, admin_token, db_session):
+    response = register_store(client, admin_token, store_id="DN_1-A", region_id="DN-1_A",
+                              name="Cửa hàng 1")
+
+    assert response.status_code == 201
+    assert (response.json()["store_id"], response.json()["region_id"]) == ("DN_1-A", "DN-1_A")
+    row = db_session.get(Store, "DN_1-A")
+    assert (row.name, row.region_id) == ("Cửa hàng 1", "DN-1_A")
+
+
 def test_created_store_is_audited_in_the_same_transaction(client, admin_token, admin, db_session):
     register_store(client, admin_token)
 
@@ -210,12 +230,23 @@ def test_store_registration_race_returns_409(client, admin_token, db_session, mo
 @pytest.mark.parametrize("overrides,field", [
     ({"store_id": "X" * 11}, "store_id"),
     ({"store_id": None}, "store_id"),
+    ({"store_id": ""}, "store_id"),
+    ({"store_id": "STORE 1"}, "store_id"),
+    ({"store_id": "STORE.1"}, "store_id"),
+    ({"store_id": "STORE\x00"}, "store_id"),
+    ({"store_id": "日本語"}, "store_id"),
     ({"name": "x" * 101}, "name"),
+    ({"name": ""}, "name"),
     ({"latitude": 90.0001}, "latitude"),
     ({"latitude": -90.0001}, "latitude"),
+    ({"latitude": 89.9999999}, "latitude"),
     ({"longitude": 180.0001}, "longitude"),
     ({"longitude": -180.0001}, "longitude"),
+    ({"longitude": 108.1234567}, "longitude"),
     ({"region_id": "R" * 11}, "region_id"),
+    ({"region_id": ""}, "region_id"),
+    ({"region_id": "DN 1"}, "region_id"),
+    ({"region_id": "ĐN"}, "region_id"),
     ({"latitude": "north"}, "latitude"),
 ])
 def test_invalid_store_input_returns_422_naming_the_field(client, admin_token, db_session,
@@ -352,7 +383,15 @@ def test_only_the_admin_role_may_register_terminals(client, db_session, store):
 @pytest.mark.parametrize("overrides,field", [
     ({"pos_id": "P" * 21}, "pos_id"),
     ({"pos_id": None}, "pos_id"),
+    ({"pos_id": ""}, "pos_id"),
+    ({"pos_id": "POS 1"}, "pos_id"),
+    ({"pos_id": "POS.1"}, "pos_id"),
+    ({"pos_id": "日本語"}, "pos_id"),
     ({"store_id": "S" * 11}, "store_id"),
+    ({"store_id": ""}, "store_id"),
+    ({"store_id": "STORE 1"}, "store_id"),
+    ({"store_id": "STORE\x00"}, "store_id"),
+    ({"store_id": "STORE-ĐN1"}, "store_id"),
     ({"cert_fingerprint": "A" * 64}, "cert_fingerprint"),
     ({"cert_fingerprint": "a" * 63}, "cert_fingerprint"),
     ({"cert_fingerprint": "g" * 64}, "cert_fingerprint"),

@@ -6,12 +6,16 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+# Ids are varchar in SQL Server, so non-ASCII characters would be stored as "?".
+ID_PATTERN = r"^[A-Za-z0-9_-]+$"
+
+
 class StoreCreate(BaseModel):
-    store_id: str = Field(max_length=10)
-    name: str = Field(max_length=100)
-    latitude: Decimal = Field(ge=Decimal("-90"), le=Decimal("90"))
-    longitude: Decimal = Field(ge=Decimal("-180"), le=Decimal("180"))
-    region_id: str = Field(max_length=10)
+    store_id: str = Field(min_length=1, max_length=10, pattern=ID_PATTERN)
+    name: str = Field(min_length=1, max_length=100)
+    latitude: Decimal = Field(ge=Decimal("-90"), le=Decimal("90"), decimal_places=6)
+    longitude: Decimal = Field(ge=Decimal("-180"), le=Decimal("180"), decimal_places=6)
+    region_id: str = Field(min_length=1, max_length=10, pattern=ID_PATTERN)
     is_active: bool = True
 
 
@@ -29,8 +33,8 @@ class StoreRead(BaseModel):
 
 
 class PosTerminalCreate(BaseModel):
-    pos_id: str = Field(max_length=20)
-    store_id: str = Field(max_length=10)
+    pos_id: str = Field(min_length=1, max_length=20, pattern=ID_PATTERN)
+    store_id: str = Field(min_length=1, max_length=10, pattern=ID_PATTERN)
     cert_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     status: Literal["ACTIVE", "INACTIVE"] = "ACTIVE"
 
