@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     db_name: str = "RTS_DB"
     mssql_sa_password: SecretStr | None = None
     test_db_name: str = "RTS_DB_TEST"
+    jwt_secret: SecretStr | None = None
 
 
 settings = Settings()
