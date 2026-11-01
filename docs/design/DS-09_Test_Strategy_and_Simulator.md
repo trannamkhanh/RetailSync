@@ -1,6 +1,6 @@
 # DS-09: Test Strategy and Simulator Specification
 
-Status: draft for team review, 1 Nov 2026.
+Status: approved, 1 Nov 2026.
 Baseline: SRS v1.3 (section 4.4), DS-05, Sprint Backlog v1.4. Traces to PB-03, PB-24, PB-28, PB-37 to PB-40, PB-43, PB-44.
 
 ## 1. Test levels

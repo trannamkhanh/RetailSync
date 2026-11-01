@@ -1,9 +1,9 @@
 # DS-06: Forecast, Near-Expiry and Recommendation Logic
 
-Status: draft for team review, 1 Nov 2026.
+Status: approved, 1 Nov 2026.
 Baseline: SRS v1.3 (UC.04, UC.05, UC.06), Database Design v1.3, DS-07. Traces to FR04, FR05, FR06; PB-20 to PB-25.
 
-Numeric parameters in this document are starting values. Keep them in one configuration module so the team can tune them after the first evaluation.
+Numeric parameters in this document are approved starting values. Keep them in one configuration module so the team can tune them after the first evaluation.
 
 ## 1. Daily job order
 
