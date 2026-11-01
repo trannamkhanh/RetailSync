@@ -1091,7 +1091,7 @@ components:
           default: true
     PosTerminal:
       type: object
-      required: [pos_id, store_id, cert_fingerprint]
+      required: [pos_id, store_id]
       properties:
         pos_id:
           type: string
@@ -1100,9 +1100,9 @@ components:
           type: string
           maxLength: 10
         cert_fingerprint:
-          type: string
+          type: [string, 'null']
           pattern: '^[0-9a-f]{64}$'
-          description: SHA-256 of the client certificate, lower-case hex
+          description: SHA-256 of the client certificate, lower-case hex. Optional until PB-48 issues certificates.
         status:
           type: string
           enum: [ACTIVE, INACTIVE]
