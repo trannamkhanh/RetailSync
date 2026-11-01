@@ -137,10 +137,12 @@ at teardown. `client` overrides `get_db` with that session. Tests fail with setu
 instructions rather than skip if SQL Server is unavailable. Identity counters
 can advance after rollback; tests must not assume sequential identity values.
 
-For an entirely container-based test run, from the repository root:
+For an entirely container-based test run, from the repository root. Mount the
+whole repository: the tests read `database/seed` and `scripts`, which are
+outside `middleware/`.
 
 ```powershell
-docker compose run --rm --volume "${PWD}/middleware:/workspace:ro" --workdir /workspace --env PYTHONDONTWRITEBYTECODE=1 middleware sh -c 'pip install -q -r requirements-dev.txt && python -m pytest -p no:cacheprovider -q'
+docker compose run --rm --volume "${PWD}:/repo" --workdir /repo/middleware --env PYTHONDONTWRITEBYTECODE=1 middleware sh -c 'pip install -q -r requirements-dev.txt && python -m pytest -p no:cacheprovider -q'
 ```
 
 Integration contract: import `get_db`, `SessionLocal`, and `Base` from
