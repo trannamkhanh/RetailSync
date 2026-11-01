@@ -1071,21 +1071,28 @@ components:
       properties:
         store_id:
           type: string
+          minLength: 1
           maxLength: 10
+          pattern: '^[A-Za-z0-9_-]+$'
         name:
           type: string
+          minLength: 1
           maxLength: 100
         latitude:
           type: number
           minimum: -90
           maximum: 90
+          description: At most 6 decimal places, as in decimal(9,6).
         longitude:
           type: number
           minimum: -180
           maximum: 180
+          description: At most 6 decimal places, as in decimal(9,6).
         region_id:
           type: string
+          minLength: 1
           maxLength: 10
+          pattern: '^[A-Za-z0-9_-]+$'
         is_active:
           type: boolean
           default: true
@@ -1095,10 +1102,14 @@ components:
       properties:
         pos_id:
           type: string
+          minLength: 1
           maxLength: 20
+          pattern: '^[A-Za-z0-9_-]+$'
         store_id:
           type: string
+          minLength: 1
           maxLength: 10
+          pattern: '^[A-Za-z0-9_-]+$'
         cert_fingerprint:
           type: [string, 'null']
           pattern: '^[0-9a-f]{64}$'
