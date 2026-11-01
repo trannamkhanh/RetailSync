@@ -1,0 +1,1217 @@
+openapi: 3.1.0
+info:
+  title: RetailSync Middleware API (DS-04)
+  version: 1.0.0-draft
+  description: |
+    REST contract between the POS terminals, Staff App, Admin and Auditor clients,
+    the RetailSync Middleware and the HQ demo service.
+
+    Baseline: SRS v1.3, Database Design v1.3, Sprint Backlog v1.4. Sync behaviour is in
+    DS-05 (DS-05_Sync_Consistency_Design.md).
+
+    Conventions:
+    - All Middleware paths are relative to `/api/v1`. All traffic uses HTTPS with TLS 1.2 or higher.
+    - Times are ISO 8601 UTC. Money has two decimals. Field names use snake_case.
+    - JWT tokens are pre-issued; there is no login API in Capstone 1.
+    - Roles: POS, Staff, Manager, HQ, Admin, Auditor. Each operation names its roles in `x-roles`.
+    - A valid token with a role that is not listed gets 403.
+    - Staff and Manager tokens are tied to one store; requests for another store get 403.
+servers:
+  - url: https://middleware.retailsync.local/api/v1
+    description: Regional Middleware (reachable only over the private WAN)
+tags:
+  - name: Health
+  - name: POS
+  - name: Inventory
+  - name: Staff
+  - name: Admin
+  - name: Audit
+  - name: Sync
+  - name: HQ demo
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Service health
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: Service is running
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    examples: [ok]
+
+  /pos/events:
+    post:
+      tags: [POS]
+      summary: Receive a SALE, RETURN or CANCELLATION event
+      description: |
+        PB-05, PB-06, PB-07, PB-09. Target: under 500 ms end to end at p95 (NFR01).
+        Checks run in this order: authentication, field validation, duplicate check, business rules.
+        A CANCELLATION may omit `items`; the Middleware copies them from the original sale.
+        Retry with the same `transaction_id` after a timeout or 503.
+      operationId: postPosEvent
+      x-roles: [POS]
+      security:
+        - mutualTLS: []
+          bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PosEvent'
+            examples:
+              sale:
+                value:
+                  event_type: SALE
+                  transaction_id: TXN-DN1-01-000123
+                  store_id: STORE-DN1
+                  pos_id: POS-DN1-01
+                  timestamp: '2026-11-14T03:15:00Z'
+                  items:
+                    - sku: SKU-0001
+                      quantity: 2
+                      unit_price: 15000.00
+              return:
+                value:
+                  event_type: RETURN
+                  transaction_id: TXN-DN1-01-000124
+                  original_transaction_id: TXN-DN1-01-000123
+                  store_id: STORE-DN1
+                  pos_id: POS-DN1-01
+                  timestamp: '2026-11-14T03:40:00Z'
+                  items:
+                    - sku: SKU-0001
+                      quantity: 1
+                      unit_price: 15000.00
+              cancellation:
+                value:
+                  event_type: CANCELLATION
+                  transaction_id: TXN-DN1-01-000125
+                  original_transaction_id: TXN-DN1-01-000123
+                  store_id: STORE-DN1
+                  pos_id: POS-DN1-01
+                  timestamp: '2026-11-14T03:41:00Z'
+      responses:
+        '200':
+          description: Applied (`OK`), or already applied with the same content (`DUPLICATE`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PosEventResult'
+              examples:
+                ok:
+                  value:
+                    outcome: OK
+                    code: OK
+                    message: Event applied
+                    current_stock:
+                      SKU-0001: 38
+                duplicate:
+                  value:
+                    outcome: DUPLICATE
+                    code: DUPLICATE_IGNORED
+                    message: Transaction already recorded
+                    current_stock:
+                      SKU-0001: 38
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: 'Original sale not found. Code: ORIGINAL_SALE_NOT_FOUND.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: |
+            Rejected by a business rule. Codes: CONFLICT (same transaction_id, different content),
+            INSUFFICIENT_STOCK, RETURN_QTY_EXCEEDED, SALE_ALREADY_CANCELLED, SALE_HAS_RETURNS.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                outcome: REJECTED
+                code: INSUFFICIENT_STOCK
+                message: Not enough non-expired stock for SKU-0001
+        '422':
+          description: 'Invalid event. Codes: INVALID_EVENT, UNREGISTERED_STORE_OR_POS.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /stores/{store_id}/inventory:
+    get:
+      tags: [Inventory]
+      summary: Current stock of a store
+      description: PB-12. Batch and expiry details are included once batches exist (PB-20).
+      operationId: getStoreInventory
+      x-roles: [Staff, Manager]
+      parameters:
+        - $ref: '#/components/parameters/StoreId'
+        - name: sku
+          in: query
+          required: false
+          description: Return only this SKU
+          schema:
+            type: string
+            maxLength: 20
+      responses:
+        '200':
+          description: Stock lines
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [store_id, items]
+                properties:
+                  store_id:
+                    type: string
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/StockLine'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /products/barcode/{barcode}:
+    get:
+      tags: [Staff]
+      summary: Barcode lookup in the staff member's own store
+      description: PB-31.
+      operationId: getProductByBarcode
+      x-roles: [Staff]
+      parameters:
+        - $ref: '#/components/parameters/Barcode'
+      responses:
+        '200':
+          description: Product with own-store stock and batches
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductLookup'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /products/barcode/{barcode}/stock:
+    get:
+      tags: [Staff]
+      summary: Cross-store stock, nearest first
+      description: |
+        PB-35. Read-only, limited to stores of the same Middleware. Target 500 ms.
+        An empty `stores` list means no store is available for lookup.
+      operationId: getCrossStoreStock
+      x-roles: [Staff]
+      parameters:
+        - $ref: '#/components/parameters/Barcode'
+        - name: from_store
+          in: query
+          required: true
+          description: Must be the store of the caller
+          schema:
+            type: string
+            maxLength: 10
+      responses:
+        '200':
+          description: Stores ordered from nearest to farthest
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sku, stores]
+                properties:
+                  sku:
+                    type: string
+                  stores:
+                    type: array
+                    items:
+                      type: object
+                      required: [store_id, name, qty, distance_km]
+                      properties:
+                        store_id:
+                          type: string
+                        name:
+                          type: string
+                        qty:
+                          type: integer
+                          minimum: 0
+                        distance_km:
+                          type: number
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /near-expiry-alerts:
+    get:
+      tags: [Staff]
+      summary: Open near-expiry alerts of the caller's store
+      description: PB-34. EXPIRED alerts first, then fewest days to expiry. days_to_expiry is calculated at read time.
+      operationId: listNearExpiryAlerts
+      x-roles: [Staff]
+      responses:
+        '200':
+          description: Alerts, possibly empty
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NearExpiryAlert'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /recommendations:
+    get:
+      tags: [Staff]
+      summary: PENDING recommendations of the caller's store
+      description: PB-32. Only recommendations that passed or were adjusted by the guardrails.
+      operationId: listRecommendations
+      x-roles: [Staff]
+      responses:
+        '200':
+          description: Recommendations, possibly empty
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RecommendationSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /recommendations/{rec_id}:
+    get:
+      tags: [Staff]
+      summary: Recommendation details
+      description: PB-32.
+      operationId: getRecommendation
+      x-roles: [Staff]
+      parameters:
+        - $ref: '#/components/parameters/RecId'
+      responses:
+        '200':
+          description: Details with reason and guardrail results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecommendationDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /recommendations/{rec_id}/decision:
+    post:
+      tags: [Staff]
+      summary: Accept or reject a recommendation
+      description: PB-33. A decision is final and is written to audit_log. A recommendation that is no longer valid is refused.
+      operationId: decideRecommendation
+      x-roles: [Staff]
+      parameters:
+        - $ref: '#/components/parameters/RecId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision:
+                  type: string
+                  enum: [ACCEPT, REJECT]
+      responses:
+        '200':
+          description: Decision stored
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rec_id, status, decided_at]
+                properties:
+                  rec_id:
+                    type: integer
+                    format: int64
+                  status:
+                    type: string
+                    enum: [ACCEPTED, REJECTED]
+                  decided_at:
+                    type: string
+                    format: date-time
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 'Codes: ALREADY_DECIDED, RECOMMENDATION_EXPIRED (for example the batch is sold out).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /admin/stores:
+    post:
+      tags: [Admin]
+      summary: Register a store
+      description: PB-08.
+      operationId: createStore
+      x-roles: [Admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Store'
+      responses:
+        '201':
+          description: Store registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Store'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: 'Code: ALREADY_EXISTS.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /admin/pos-terminals:
+    post:
+      tags: [Admin]
+      summary: Register a POS terminal
+      description: PB-08, PB-48.
+      operationId: createPosTerminal
+      x-roles: [Admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PosTerminal'
+      responses:
+        '201':
+          description: Terminal registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PosTerminal'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 'Code: ALREADY_EXISTS.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /admin/guardrail-rules:
+    get:
+      tags: [Admin]
+      summary: List guardrail rules
+      description: PB-26.
+      operationId: listGuardrailRules
+      x-roles: [Admin]
+      responses:
+        '200':
+          description: Rules
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GuardrailRule'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/guardrail-rules/{rule_id}:
+    put:
+      tags: [Admin]
+      summary: Change a guardrail rule
+      description: PB-26. New values apply from the next validation. The error names the invalid field.
+      operationId: updateGuardrailRule
+      x-roles: [Admin]
+      parameters:
+        - name: rule_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [threshold, is_active]
+              properties:
+                threshold:
+                  type: number
+                  minimum: 0
+                is_active:
+                  type: boolean
+      responses:
+        '200':
+          description: Rule updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuardrailRule'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /admin/near-expiry-thresholds:
+    get:
+      tags: [Admin]
+      summary: List near-expiry thresholds per category
+      description: PB-21.
+      operationId: listNearExpiryThresholds
+      x-roles: [Admin]
+      responses:
+        '200':
+          description: Thresholds
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NearExpiryThreshold'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/near-expiry-thresholds/{category}:
+    put:
+      tags: [Admin]
+      summary: Set the threshold of a category
+      description: PB-21. Negative or non-integer values are rejected.
+      operationId: setNearExpiryThreshold
+      x-roles: [Admin]
+      parameters:
+        - name: category
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 50
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [threshold_days]
+              properties:
+                threshold_days:
+                  type: integer
+                  minimum: 0
+      responses:
+        '200':
+          description: Threshold stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NearExpiryThreshold'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /audit-logs:
+    get:
+      tags: [Audit]
+      summary: Query the audit log
+      description: PB-04. Read-only.
+      operationId: listAuditLogs
+      x-roles: [Auditor]
+      parameters:
+        - name: user_id
+          in: query
+          schema:
+            type: integer
+        - name: action
+          in: query
+          schema:
+            type: string
+            maxLength: 50
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        '200':
+          description: Entries, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditEntry'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /sync/run:
+    post:
+      tags: [Sync]
+      summary: Aggregate and send to HQ now
+      description: Runs the hourly cycle on demand, for demos and tests. See DS-05.
+      operationId: runSync
+      x-roles: [Admin]
+      responses:
+        '202':
+          description: Cycle finished or already running
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [batches_created, batches_sent, batches_pending]
+                properties:
+                  batches_created:
+                    type: integer
+                  batches_sent:
+                    type: integer
+                  batches_pending:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /hq/snapshot:
+    post:
+      tags: [Sync]
+      summary: HQ snapshot intake (always rejected)
+      description: |
+        PB-13, NFR05. A full HQ stock snapshot is never applied or converted.
+        The attempt is written to audit_log and local stock is unchanged.
+      operationId: postHqSnapshot
+      x-roles: [HQ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Any snapshot body; its content is not used.
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: 'Always returned to an authorized caller. Code: SNAPSHOT_REJECTED.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /sync:
+    servers:
+      - url: https://hq-demo.retailsync.local/api/v1
+        description: HQ demo service (PB-18), own port
+    post:
+      tags: [HQ demo]
+      summary: HQ receives a sync batch
+      description: |
+        Called by the Middleware with its service JWT, timeout 3 seconds.
+        A repeated batch_id with the same content returns ACK and changes no totals.
+      operationId: postSyncBatch
+      x-roles: [Middleware service]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SyncBatchMessage'
+      responses:
+        '200':
+          description: ACK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ack'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: 'NACK. Code: CONFLICT (same batch_id, different content).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Nack'
+        '422':
+          description: 'NACK. Code: INVALID_BATCH.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Nack'
+        '503':
+          description: HQ offline or error scenario
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Nack'
+
+  /demo/batches:
+    servers:
+      - url: https://hq-demo.retailsync.local/api/v1
+    get:
+      tags: [HQ demo]
+      summary: View received batches and totals
+      operationId: getDemoBatches
+      security: []
+      responses:
+        '200':
+          description: Received data
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [batches, totals]
+                properties:
+                  batches:
+                    type: array
+                    items:
+                      type: object
+                      required: [batch_id, store_id, txn_count, received_at, duplicate_count]
+                      properties:
+                        batch_id:
+                          type: string
+                        store_id:
+                          type: string
+                        txn_count:
+                          type: integer
+                        received_at:
+                          type: string
+                          format: date-time
+                        duplicate_count:
+                          type: integer
+                  totals:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SalesLine'
+
+  /demo/mode:
+    servers:
+      - url: https://hq-demo.retailsync.local/api/v1
+    put:
+      tags: [HQ demo]
+      summary: Switch the demo scenario
+      operationId: setDemoMode
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode]
+              properties:
+                mode:
+                  type: string
+                  enum: [ONLINE, OFFLINE, ERROR, SLOW, DROP_ACK]
+                  description: |
+                    ONLINE: normal. OFFLINE: connection refused or 503. ERROR: 500.
+                    SLOW: answers after the 3 second timeout. DROP_ACK: stores the batch, then fails the answer.
+      responses:
+        '200':
+          description: Mode set
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    mutualTLS:
+      type: mutualTLS
+      description: Client certificate whose fingerprint matches pos_terminal.cert_fingerprint (PB-48).
+  parameters:
+    StoreId:
+      name: store_id
+      in: path
+      required: true
+      schema:
+        type: string
+        maxLength: 10
+    Barcode:
+      name: barcode
+      in: path
+      required: true
+      schema:
+        type: string
+        maxLength: 30
+    RecId:
+      name: rec_id
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+  responses:
+    Unauthorized:
+      description: 'Missing, invalid or expired token. Code: UNAUTHORIZED.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: 'Role or store not allowed, or certificate mismatch. Code: FORBIDDEN.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: 'Resource not found. Code: NOT_FOUND.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ValidationError:
+      description: 'Invalid input; `message` names the field. Code: VALIDATION_ERROR.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ServiceUnavailable:
+      description: 'Database error or duplicate check unavailable; nothing was stored. Retry later with the same transaction_id. Code: SERVICE_UNAVAILABLE.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    PosEvent:
+      type: object
+      required: [event_type, transaction_id, store_id, pos_id, timestamp]
+      properties:
+        event_type:
+          type: string
+          enum: [SALE, RETURN, CANCELLATION]
+        transaction_id:
+          type: string
+          maxLength: 40
+          description: Idempotency key
+        original_transaction_id:
+          type: [string, 'null']
+          maxLength: 40
+          description: Required for RETURN and CANCELLATION; a SALE of the same store
+        store_id:
+          type: string
+          maxLength: 10
+        pos_id:
+          type: string
+          maxLength: 20
+        timestamp:
+          type: string
+          format: date-time
+          description: Time on the POS; not part of the content hash
+        items:
+          type: array
+          description: Required for SALE and RETURN; ignored for CANCELLATION
+          items:
+            $ref: '#/components/schemas/PosEventItem'
+    PosEventItem:
+      type: object
+      required: [sku, quantity, unit_price]
+      properties:
+        sku:
+          type: string
+          maxLength: 20
+        quantity:
+          type: integer
+          exclusiveMinimum: 0
+        unit_price:
+          type: number
+          minimum: 0
+    PosEventResult:
+      type: object
+      required: [outcome, code, message, current_stock]
+      properties:
+        outcome:
+          type: string
+          enum: [OK, DUPLICATE]
+        code:
+          type: string
+          enum: [OK, DUPLICATE_IGNORED]
+        message:
+          type: string
+        current_stock:
+          type: object
+          description: Current quantity per SKU of the event
+          additionalProperties:
+            type: integer
+    Error:
+      type: object
+      required: [outcome, code, message]
+      properties:
+        outcome:
+          type: string
+          enum: [REJECTED, ERROR]
+          description: ERROR means the request may be retried
+        code:
+          type: string
+          description: Stable reason code
+        message:
+          type: string
+    StockLine:
+      type: object
+      required: [sku, quantity]
+      properties:
+        sku:
+          type: string
+        quantity:
+          type: integer
+          minimum: 0
+        batches:
+          type: array
+          items:
+            $ref: '#/components/schemas/BatchInfo'
+    BatchInfo:
+      type: object
+      required: [batch_id, expiry_date, quantity]
+      properties:
+        batch_id:
+          type: string
+        expiry_date:
+          type: string
+          format: date
+        quantity:
+          type: integer
+          minimum: 0
+    ProductLookup:
+      type: object
+      required: [sku, barcode, name, category, unit_price, quantity]
+      properties:
+        sku:
+          type: string
+        barcode:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+        unit_price:
+          type: number
+        quantity:
+          type: integer
+          minimum: 0
+        batches:
+          type: array
+          items:
+            $ref: '#/components/schemas/BatchInfo'
+    NearExpiryAlert:
+      type: object
+      required: [alert_id, batch_id, sku, expiry_date, remaining_qty, days_to_expiry, alert_type]
+      properties:
+        alert_id:
+          type: integer
+          format: int64
+        batch_id:
+          type: string
+        sku:
+          type: string
+        expiry_date:
+          type: string
+          format: date
+        remaining_qty:
+          type: integer
+        days_to_expiry:
+          type: integer
+        alert_type:
+          type: string
+          enum: [NEAR_EXPIRY, EXPIRED]
+    RecommendationSummary:
+      type: object
+      required: [rec_id, sku, action_type, status]
+      properties:
+        rec_id:
+          type: integer
+          format: int64
+        sku:
+          type: string
+        action_type:
+          type: string
+          enum: [DISCOUNT, CLEARANCE, REDISTRIBUTION]
+        discount_pct:
+          type: [number, 'null']
+          description: Only for DISCOUNT
+        proposed_qty:
+          type: [integer, 'null']
+          description: Only for CLEARANCE and REDISTRIBUTION
+        status:
+          type: string
+          enum: [PENDING]
+    RecommendationDetail:
+      allOf:
+        - $ref: '#/components/schemas/RecommendationSummary'
+        - type: object
+          required: [reason, guardrail_results]
+          properties:
+            batch_id:
+              type: [string, 'null']
+            expiry_date:
+              type: [string, 'null']
+              format: date
+            reason:
+              type: string
+            guardrail_results:
+              type: array
+              items:
+                type: object
+                required: [rule_type, outcome]
+                properties:
+                  rule_type:
+                    type: string
+                    enum: [MAX_DISCOUNT, MIN_PRICE, MIN_SHELF_LIFE]
+                  outcome:
+                    type: string
+                    enum: [PASSED, ADJUSTED]
+                  original_value:
+                    type: [number, 'null']
+                  adjusted_value:
+                    type: [number, 'null']
+                  message:
+                    type: [string, 'null']
+    Store:
+      type: object
+      required: [store_id, name, latitude, longitude, region_id]
+      properties:
+        store_id:
+          type: string
+          maxLength: 10
+        name:
+          type: string
+          maxLength: 100
+        latitude:
+          type: number
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          minimum: -180
+          maximum: 180
+        region_id:
+          type: string
+          maxLength: 10
+        is_active:
+          type: boolean
+          default: true
+    PosTerminal:
+      type: object
+      required: [pos_id, store_id, cert_fingerprint]
+      properties:
+        pos_id:
+          type: string
+          maxLength: 20
+        store_id:
+          type: string
+          maxLength: 10
+        cert_fingerprint:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: SHA-256 of the client certificate, lower-case hex
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+          default: ACTIVE
+    GuardrailRule:
+      type: object
+      required: [rule_id, rule_type, threshold, is_active]
+      properties:
+        rule_id:
+          type: integer
+        rule_type:
+          type: string
+          enum: [MAX_DISCOUNT, MIN_PRICE, MIN_SHELF_LIFE]
+        threshold:
+          type: number
+          description: MAX_DISCOUNT must be 0 to 100
+        category:
+          type: [string, 'null']
+          description: Empty means all categories
+        is_active:
+          type: boolean
+    NearExpiryThreshold:
+      type: object
+      required: [category, threshold_days]
+      properties:
+        category:
+          type: string
+        threshold_days:
+          type: integer
+          minimum: 0
+    AuditEntry:
+      type: object
+      required: [audit_id, action, entity_name, created_at]
+      properties:
+        audit_id:
+          type: integer
+          format: int64
+        user_id:
+          type: [integer, 'null']
+        action:
+          type: string
+        entity_name:
+          type: string
+        entity_key:
+          type: [string, 'null']
+        details:
+          type: [string, 'null']
+        created_at:
+          type: string
+          format: date-time
+    SalesLine:
+      type: object
+      required: [sku, sold_qty, returned_qty, net_revenue]
+      properties:
+        sku:
+          type: string
+        store_id:
+          type: string
+          description: Present only in HQ totals
+        sold_qty:
+          type: integer
+          minimum: 0
+        returned_qty:
+          type: integer
+          minimum: 0
+        net_revenue:
+          type: number
+    SyncBatchMessage:
+      type: object
+      required: [batch_id, store_id, created_at, txn_count, lines]
+      properties:
+        batch_id:
+          type: string
+          maxLength: 40
+          description: sync_batch_id; idempotency key towards HQ
+        store_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        txn_count:
+          type: integer
+          exclusiveMinimum: 0
+        lines:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/SalesLine'
+    Ack:
+      type: object
+      required: [status, batch_id, duplicate]
+      properties:
+        status:
+          type: string
+          enum: [ACK]
+        batch_id:
+          type: string
+        duplicate:
+          type: boolean
+    Nack:
+      type: object
+      required: [status, code, message]
+      properties:
+        status:
+          type: string
+          enum: [NACK]
+        batch_id:
+          type: [string, 'null']
+        code:
+          type: string
+        message:
+          type: string

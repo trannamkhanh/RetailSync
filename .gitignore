@@ -1,0 +1,16 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+bin/
+obj/
+.vs/
+.vscode/
+*.user
+*.db
+*.sqlite
+*.pem
+*.key
+*.crt
