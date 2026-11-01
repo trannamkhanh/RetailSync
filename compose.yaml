@@ -36,6 +36,12 @@ services:
   middleware:
     build: ./middleware
     env_file: .env
+    environment:
+      DB_HOST: sqlserver
+      SQLSERVER_PORT: 1433
+    depends_on:
+      sqlserver:
+        condition: service_healthy
     ports:
       - "127.0.0.1:8000:8000"
 
