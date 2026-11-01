@@ -20,5 +20,7 @@ for file in "$root"/migrations/*.sql; do
   fi
 done
 
-run -d "$db" -i "$root/seed/001_demo_stores_pos.sql"
+for file in "$root"/seed/*.sql; do
+  run -d "$db" -i "$file"
+done
 echo "Database is up to date"
