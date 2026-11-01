@@ -13,7 +13,7 @@ CREATE TABLE dbo.recommendation (
     discount_pct decimal(5,2) NULL CONSTRAINT ck_recommendation_discount CHECK (discount_pct BETWEEN 0 AND 100),
     proposed_qty int NULL CONSTRAINT ck_recommendation_qty CHECK (proposed_qty > 0),
     reason nvarchar(300) NOT NULL,
-    status varchar(12) NOT NULL CONSTRAINT ck_recommendation_status CHECK (status IN ('GENERATED','BLOCKED','PENDING','ACCEPTED','REJECTED')),
+    status varchar(12) NOT NULL CONSTRAINT ck_recommendation_status CHECK (status IN ('GENERATED','BLOCKED','PENDING','ACCEPTED','REJECTED','EXPIRED')),
     created_at datetime2 NOT NULL CONSTRAINT df_recommendation_created DEFAULT SYSUTCDATETIME()
 );
 CREATE INDEX ix_recommendation_store_status ON dbo.recommendation(store_id, status);

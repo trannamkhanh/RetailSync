@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DS-08 Staff App Wireframes</title>
+<style>
+:root { --ink:#222; --line:#777; --soft:#eee; --mid:#d8d8d8; --note:#555; }
+* { box-sizing:border-box; }
+body { margin:0; padding:24px 16px; background:#fff; color:var(--ink); font:14px/1.4 "Segoe UI",Arial,sans-serif; }
+main { max-width:900px; margin:auto; }
+h1 { font-size:22px; margin:0 0 4px; }
+h2 { font-size:17px; margin:32px 0 8px; }
+p { margin:6px 0; }
+.note { color:var(--note); }
+.window { border:2px solid var(--ink); background:#fff; }
+.title { display:flex; justify-content:space-between; background:var(--mid); padding:6px 10px; font-weight:600; }
+.tabs { display:flex; border-bottom:1px solid var(--line); }
+.tab { padding:8px 14px; border-right:1px solid var(--line); }
+.tab.on { background:var(--soft); font-weight:600; }
+.body { padding:12px; }
+.row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+.input { flex:1; min-width:180px; border:1px solid var(--line); padding:6px 8px; color:var(--note); }
+.btn { border:1px solid var(--ink); padding:6px 14px; background:var(--soft); white-space:nowrap; }
+.btn.main { background:var(--mid); font-weight:600; }
+.box { border:1px solid var(--line); padding:8px 10px; margin-bottom:10px; }
+.box b { display:block; margin-bottom:4px; }
+.cols { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.wrap { overflow-x:auto; }
+table { width:100%; border-collapse:collapse; margin-bottom:10px; }
+th,td { border:1px solid var(--line); padding:5px 8px; text-align:left; white-space:nowrap; }
+th { background:var(--soft); }
+tr.sel td { background:var(--soft); font-weight:600; }
+.status { border-top:1px solid var(--line); padding:5px 10px; color:var(--note); }
+ul { margin:6px 0; padding-left:20px; }
+@media (max-width:600px) { .cols { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<main>
+<h1>DS-08: Staff App Wireframes</h1>
+<p class="note">Draft for team review, 1 Nov 2026. WinForms client of the Staff API (PB-46, PB-47). Traces to FR04, FR07, FR08; UC.04, UC.07, UC.08. Sample data is illustrative.</p>
+
+<h2>Common rules</h2>
+<ul>
+<li>One window with three tabs. The title bar shows the store and staff name from the pre-issued token.</li>
+<li>All calls are asynchronous; the status bar shows loading, errors and the last refresh time.</li>
+<li>401 shows "Token invalid or expired"; 403 shows "This role cannot use this function"; connection errors keep the screen and offer Retry.</li>
+</ul>
+
+<h2>Screen 1: Lookup (barcode and nearby stores)</h2>
+<p class="note">PB-31, PB-35, PB-46. Calls <code>GET /products/barcode/{barcode}</code> and <code>GET /products/barcode/{barcode}/stock</code>.</p>
+<div class="window">
+  <div class="title"><span>RetailSync Staff App</span><span>STORE-DN1 | Staff: Lan</span></div>
+  <div class="tabs"><div class="tab on">Lookup</div><div class="tab">Near-expiry alerts</div><div class="tab">Recommendations</div></div>
+  <div class="body">
+    <div class="row"><div class="input">Scan or enter barcode</div><div class="btn main">Search</div></div>
+    <div class="cols">
+      <div class="box"><b>Product</b>Fresh milk 1L<br>SKU-0001 | Dairy | 32,000 VND<br>In this store: 40</div>
+      <div class="box"><b>Batches in this store</b>
+        <div class="wrap"><table><tr><th>Batch</th><th>Expiry</th><th>Qty</th></tr><tr><td>B-1042</td><td>05/11/2026</td><td>12</td></tr><tr><td>B-1077</td><td>20/11/2026</td><td>28</td></tr></table></div>
+      </div>
+    </div>
+    <b>Nearby stores (nearest first)</b>
+    <div class="wrap"><table><tr><th>Store</th><th>Distance</th><th>Quantity</th></tr><tr><td>Son Tra</td><td>1.8 km</td><td>0</td></tr><tr><td>Thanh Khe</td><td>4.4 km</td><td>18</td></tr></table></div>
+  </div>
+  <div class="status">Updated 09:15:02</div>
+</div>
+<p class="note">Empty states: "Product not found", "No stores available for lookup", "No store has this product in stock".</p>
+
+<h2>Screen 2: Near-expiry alerts</h2>
+<p class="note">PB-34, PB-46. Calls <code>GET /near-expiry-alerts</code>. EXPIRED first, then fewest days left. Read-only.</p>
+<div class="window">
+  <div class="title"><span>RetailSync Staff App</span><span>STORE-DN1 | Staff: Lan</span></div>
+  <div class="tabs"><div class="tab">Lookup</div><div class="tab on">Near-expiry alerts</div><div class="tab">Recommendations</div></div>
+  <div class="body">
+    <div class="row"><span>3 open alerts</span><div class="btn">Refresh</div></div>
+    <div class="wrap"><table>
+      <tr><th>Urgency</th><th>Product</th><th>Batch</th><th>Expiry</th><th>Days left</th><th>Qty</th></tr>
+      <tr><td><b>EXPIRED</b></td><td>Yogurt 100g</td><td>B-0998</td><td>31/10/2026</td><td>-1</td><td>6</td></tr>
+      <tr><td>Today or tomorrow</td><td>Tofu 300g</td><td>B-1033</td><td>02/11/2026</td><td>1</td><td>14</td></tr>
+      <tr><td>Soon</td><td>Fresh milk 1L</td><td>B-1042</td><td>05/11/2026</td><td>4</td><td>12</td></tr>
+    </table></div>
+  </div>
+  <div class="status">Updated 09:15:40</div>
+</div>
+<p class="note">Empty state: "No near-expiry alerts".</p>
+
+<h2>Screen 3: Recommendations</h2>
+<p class="note">PB-32, PB-33, PB-47. Calls <code>GET /recommendations</code>, <code>GET /recommendations/{rec_id}</code> and <code>POST /recommendations/{rec_id}/decision</code>.</p>
+<div class="window">
+  <div class="title"><span>RetailSync Staff App</span><span>STORE-DN1 | Staff: Lan</span></div>
+  <div class="tabs"><div class="tab">Lookup</div><div class="tab">Near-expiry alerts</div><div class="tab on">Recommendations</div></div>
+  <div class="body">
+    <div class="cols">
+      <div class="wrap"><table>
+        <tr><th>Action</th><th>Product</th><th>Level</th></tr>
+        <tr class="sel"><td>DISCOUNT</td><td>Tofu 300g</td><td>50%</td></tr>
+        <tr><td>CLEARANCE</td><td>Bread 400g</td><td>8 units</td></tr>
+        <tr><td>REDISTRIBUTION</td><td>Rice 5kg</td><td>10 units</td></tr>
+      </table></div>
+      <div class="box"><b>Details</b>
+        Discount 50% on Tofu 300g, batch B-1033<br>Expiry 02/11/2026<br>
+        <b style="margin-top:6px">Reason</b>Batch B-1033 expires in 1 day(s); 10 of 14 units may not sell in time.
+        <b style="margin-top:6px">Guardrails</b>MIN_SHELF_LIFE: passed<br>MAX_DISCOUNT: passed<br>MIN_PRICE: passed
+        <div class="row" style="margin-top:10px;margin-bottom:0"><div class="btn main">Accept</div><div class="btn">Reject</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="status">Updated 09:16:05</div>
+</div>
+<p class="note">Accept and Reject ask for confirmation, because a decision is final. On success the row leaves the list. 409 <code>ALREADY_DECIDED</code> shows "Already decided"; <code>RECOMMENDATION_EXPIRED</code> shows "No longer valid"; both refresh the list. Empty state: "No recommendations to process".</p>
+</main>
+</body>
+</html>
