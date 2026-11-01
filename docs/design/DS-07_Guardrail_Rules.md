@@ -1,11 +1,11 @@
 # DS-07: Guardrail Rules
 
-Status: draft, 1 Nov 2026. Default values need Product Owner approval.
+Status: approved, 1 Nov 2026.
 Baseline: SRS v1.3 (UC.06, BR06), Database Design v1.3 (`guardrail_rule`, `guardrail_result`). Traces to FR06; PB-26, 27, 28.
 
 ## Rules
 
-| Order | Rule | Applies to | Meaning | Violation | Default (draft) |
+| Order | Rule | Applies to | Meaning | Violation | Default |
 |---|---|---|---|---|---|
 | 1 | `MIN_SHELF_LIFE` | Recommendations with a batch | Days left must be at least the threshold | BLOCKED | 1 day |
 | 2 | `MAX_DISCOUNT` | DISCOUNT | `discount_pct` must not exceed the threshold (0 to 100) | ADJUSTED down to the threshold | 50% |
