@@ -9,6 +9,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from decimal import Decimal
+from threading import Barrier
 from uuid import uuid4
 
 import pytest
@@ -492,3 +493,70 @@ def test_two_sessions_cannot_sell_the_last_unit(test_engine) -> None:
             ]
     finally:
         _cleanup(test_engine, store_id, sku, txn_ids)
+
+
+def test_two_sessions_creating_the_same_stock_row_keep_both_changes(test_engine) -> None:
+    store_id = f"TEST-{_uid(5)}"
+    sku = f"TEST-SKU-{_uid(8)}"
+
+    with Session(test_engine) as setup:
+        setup.add(
+            Store(
+                store_id=store_id,
+                name="Test Insert Race Store",
+                latitude=Decimal("10.500000"),
+                longitude=Decimal("106.500000"),
+                region_id="TEST",
+            )
+        )
+        setup.add(
+            Product(
+                sku=sku,
+                barcode=f"BC-{sku}",
+                name="Test Insert Race Product",
+                category="TEST",
+                unit_price=Decimal("10.00"),
+            )
+        )
+        setup.flush()
+        setup.commit()
+
+    barrier = Barrier(2)
+
+    def receive() -> int:
+        with Session(test_engine) as session:
+            barrier.wait(timeout=10)
+            new_quantity = apply_stock_change(
+                session,
+                store_id=store_id,
+                sku=sku,
+                delta=3,
+                movement_type="STOCK_RECEIVED",
+            )
+            session.commit()
+            return new_quantity
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = sorted(pool.map(lambda _: receive(), range(2)))
+
+        # One session inserts the row and returns 3; the other loses the insert
+        # race, retries as an update and returns 6. Neither change is lost.
+        assert outcomes == [3, 6]
+        with Session(test_engine) as verification:
+            assert verification.get(Inventory, (store_id, sku)).quantity == 6
+            movements = (
+                verification.execute(
+                    select(InventoryMovement)
+                    .where(InventoryMovement.store_id == store_id)
+                    .order_by(InventoryMovement.movement_id)
+                )
+                .scalars()
+                .all()
+            )
+            assert [(movement.movement_type, movement.quantity) for movement in movements] == [
+                ("STOCK_RECEIVED", 3),
+                ("STOCK_RECEIVED", 3),
+            ]
+    finally:
+        _cleanup(test_engine, store_id, sku, [])
