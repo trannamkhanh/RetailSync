@@ -111,8 +111,9 @@ New recommendations have status GENERATED. DS-07 then sets BLOCKED or PENDING. T
 
 ### Validity at decision time
 
-A decision is refused with `RECOMMENDATION_EXPIRED` when the batch has no sellable quantity left or has expired. The list endpoint hides such recommendations.
+A recommendation is no longer valid when its batch has no sellable quantity left or has expired.
 
-## 7. Open point
-
-`recommendation.status` has no value for an expired recommendation, so these rows stay PENDING and are filtered out when read. Adding an `EXPIRED` status would be cleaner, but it changes SRS UC.06, UC.07 and Database Design Table 17. Decide before PB-32.
+- A decision on it is refused with `RECOMMENDATION_EXPIRED`, and its status changes to EXPIRED.
+- The daily recommendation run changes such PENDING rows to EXPIRED.
+- The list and detail endpoints do not change data, so they hide invalid rows until one of the two steps above runs.
+- EXPIRED recommendations do not count in the staff acceptance rate.
