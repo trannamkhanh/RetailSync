@@ -31,11 +31,17 @@ Docker health check: `https://localhost:8443/api/v1/health`
 The `middleware` service in Docker serves HTTPS only, on port 8443, with TLS 1.2
 or higher. Native `uvicorn --reload` stays HTTP on port 8000 for local development.
 
-`bash scripts/generate_dev_certs.sh` needs `openssl` (Git Bash includes it). It
-writes a self-signed certificate to `.certs/server.key` and `.certs/server.crt`,
-valid for `localhost`, `127.0.0.1` and `middleware.retailsync.local`. Running it
-again keeps a valid certificate; `RENEW=1 bash scripts/generate_dev_certs.sh`
-replaces it. Never commit `.certs/`.
+`scripts/generate_dev_certs.sh` needs `openssl` and writes a self-signed
+certificate to `.certs/server.key` and `.certs/server.crt`, valid for `localhost`,
+`127.0.0.1` and `middleware.retailsync.local`. Running it again keeps a valid
+certificate; set `RENEW=1` to replace it. Never commit `.certs/`.
+
+Run it from Git Bash, which includes `openssl`. In PowerShell, plain `bash` may
+start WSL instead, so name Git Bash:
+
+```powershell
+& "$env:ProgramFiles\Git\bin\bash.exe" scripts/generate_dev_certs.sh
+```
 
 Check the service against that certificate:
 
@@ -43,8 +49,8 @@ Check the service against that certificate:
 curl.exe --cacert .certs/server.crt https://localhost:8443/api/v1/health
 ```
 
-`docker compose up middleware` needs the certificate. `docker compose run` for
-tests and migrations does not.
+`docker compose up middleware` needs the certificate and exits without it.
+`docker compose run` for tests and migrations does not.
 
 ## Test
 
@@ -137,9 +143,9 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
-Alternatively, from the root, run `bash scripts/generate_dev_certs.sh`, then
+Alternatively, from the root, create the certificate (see HTTPS above), then run
 `docker compose build middleware` followed by `docker compose up -d middleware`,
-which serves HTTPS on port 8443 (see HTTPS above). Compose overrides the database host to
+which serves HTTPS on port 8443. Compose overrides the database host to
 `sqlserver` and its port to `1433`, and waits for database health. Apply migrations
 first. The health endpoint does not prove database connectivity.
 
