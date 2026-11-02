@@ -22,6 +22,8 @@ Content hash: SHA-256 as 64 lower-case hex characters, over compact JSON with so
 - POS event: `store_id`, `pos_id`, `event_type`, `original_transaction_id`, and `items` sorted by `sku`, each with `sku`, `quantity` and `unit_price` to two decimals. `timestamp` is excluded, so a resend has the same hash. A CANCELLATION hashes empty `items`.
 - Batch: `batch_id`, `store_id`, `txn_count`, and `lines` sorted by `sku`, with `net_revenue` to two decimals. `created_at` is excluded.
 
+POS `unit_price` is a JSON string with exactly two decimals; `items` sort by `sku`, then `quantity`, then `unit_price`.
+
 The primary key is the final guard. If two identical events pass the check at the same moment, one insert fails on the key, is rolled back, and is answered as a duplicate.
 
 `sync_batch_id` format: `SB-<store_id>-<yyyyMMddHHmmss UTC>`, at most 28 characters. The same id is kept on every resend.
