@@ -891,24 +891,33 @@ components:
           enum: [SALE, RETURN, CANCELLATION]
         transaction_id:
           type: string
+          minLength: 1
           maxLength: 40
+          pattern: '^[A-Za-z0-9_-]+$'
           description: Idempotency key
         original_transaction_id:
           type: [string, 'null']
+          minLength: 1
           maxLength: 40
+          pattern: '^[A-Za-z0-9_-]+$'
           description: Required for RETURN and CANCELLATION; a SALE of the same store
         store_id:
           type: string
+          minLength: 1
           maxLength: 10
+          pattern: '^[A-Za-z0-9_-]+$'
         pos_id:
           type: string
+          minLength: 1
           maxLength: 20
+          pattern: '^[A-Za-z0-9_-]+$'
         timestamp:
           type: string
           format: date-time
           description: Time on the POS; not part of the content hash
         items:
           type: array
+          maxItems: 100
           description: Required for SALE and RETURN; ignored for CANCELLATION
           items:
             $ref: '#/components/schemas/PosEventItem'
@@ -918,13 +927,18 @@ components:
       properties:
         sku:
           type: string
+          minLength: 1
           maxLength: 20
+          pattern: '^[A-Za-z0-9_-]+$'
         quantity:
           type: integer
           exclusiveMinimum: 0
+          maximum: 1000000
         unit_price:
           type: number
           minimum: 0
+          maximum: 9999999999.99
+          multipleOf: 0.01
     PosEventResult:
       type: object
       required: [outcome, code, message, current_stock]
