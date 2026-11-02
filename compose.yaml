@@ -35,15 +35,18 @@ services:
 
   middleware:
     build: ./middleware
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8443", "--ssl-keyfile", "/certs/server.key", "--ssl-certfile", "/certs/server.crt", "--ssl-ciphers", "ECDHE+AESGCM:ECDHE+CHACHA20"]
     env_file: .env
     environment:
       DB_HOST: sqlserver
       SQLSERVER_PORT: 1433
+    volumes:
+      - ./.certs:/certs:ro
     depends_on:
       sqlserver:
         condition: service_healthy
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:8443:8443"
 
 volumes:
   sqlserver_data:
