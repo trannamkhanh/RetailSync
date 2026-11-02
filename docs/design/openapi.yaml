@@ -596,7 +596,10 @@ paths:
     get:
       tags: [Audit]
       summary: Query the audit log
-      description: PB-04. Read-only.
+      description: |
+        PB-04. Read-only. Filters are optional and combined with AND. `from` and `to` are
+        inclusive; a value without an offset is UTC. Entries are ordered by `created_at`,
+        then `audit_id`, newest first, and `created_at` is returned in UTC with `Z`.
       operationId: listAuditLogs
       x-roles: [Auditor]
       parameters:
@@ -604,11 +607,15 @@ paths:
           in: query
           schema:
             type: integer
+            minimum: 1
+            maximum: 2147483647
         - name: action
           in: query
           schema:
             type: string
+            minLength: 1
             maxLength: 50
+            pattern: '^[A-Za-z0-9_-]+$'
         - name: from
           in: query
           schema:
@@ -643,6 +650,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
 
   /sync/run:
     post:
