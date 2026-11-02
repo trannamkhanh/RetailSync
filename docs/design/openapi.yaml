@@ -147,7 +147,7 @@ paths:
                 code: INSUFFICIENT_STOCK
                 message: Not enough non-expired stock for SKU-0001
         '422':
-          description: 'Invalid event. Codes: INVALID_EVENT, UNREGISTERED_STORE_OR_POS.'
+          description: 'Invalid event. Codes: INVALID_EVENT, UNREGISTERED_STORE_OR_POS. Malformed JSON: VALIDATION_ERROR, answered before authentication.'
           content:
             application/json:
               schema:

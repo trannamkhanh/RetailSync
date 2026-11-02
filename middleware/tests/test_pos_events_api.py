@@ -153,6 +153,14 @@ def _movements(session: Session, txn_id: str) -> list[InventoryMovement]:
     )
 
 
+def _assert_store_unchanged(session: Session, world: World, quantity: int = 10) -> None:
+    session.expire_all()
+    assert _count(session, PosTransaction, store_id=world.store_id) == 0
+    assert _count(session, InventoryMovement, store_id=world.store_id) == 0
+    for sku in world.skus:
+        assert session.get(Inventory, (world.store_id, sku)).quantity == quantity
+
+
 # --- accepted SALE ---------------------------------------------------------
 
 
@@ -538,16 +546,32 @@ def test_authentication_and_role_matrix(client, db_session) -> None:
     assert _count(db_session, PosTransaction, txn_id=payload["transaction_id"]) == 0
 
 
-def test_malformed_json_keeps_the_global_validation_error(client, db_session) -> None:
+@pytest.mark.parametrize("body_kind", ["empty", "array"])
+def test_missing_or_non_object_body_returns_invalid_event(client, db_session, body_kind) -> None:
+    world = _seed(db_session)
+    headers = {"Authorization": f"Bearer {world.token}"}
+
+    if body_kind == "empty":
+        response = client.post(URL, headers=headers)
+    else:
+        response = client.post(URL, json=[], headers=headers)
+
+    _assert_error(response, 422, "INVALID_EVENT")
+    assert "body" in response.json()["message"]
+    _assert_store_unchanged(db_session, world)
+
+
+def test_malformed_json_is_validation_error_before_authentication(client, db_session) -> None:
     world = _seed(db_session)
 
     response = client.post(
         URL,
         content="{not-json",
-        headers={"Authorization": f"Bearer {world.token}", "Content-Type": "application/json"},
+        headers={"Content-Type": "application/json"},
     )
 
     _assert_error(response, 422, "VALIDATION_ERROR")
+    _assert_store_unchanged(db_session, world)
 
 
 # --- latency smoke check ---------------------------------------------------
