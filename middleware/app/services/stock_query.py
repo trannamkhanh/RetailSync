@@ -27,6 +27,7 @@ def stock_lines(session: Session, store_id: str, sku: str | None = None) -> list
     """
     if sku is None:
         return repository.list_store_stock(session, store_id)
-    if not repository.product_exists(session, sku):
+    catalogue_sku = repository.find_catalogue_sku(session, sku)
+    if catalogue_sku is None:
         raise ApiError(404, "NOT_FOUND", f"SKU '{sku}' is not in the product catalogue.")
-    return [(sku, get_stock(session, store_id, sku))]
+    return [(catalogue_sku, get_stock(session, store_id, catalogue_sku))]

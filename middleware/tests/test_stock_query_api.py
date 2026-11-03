@@ -41,9 +41,8 @@ def jwt_secret(monkeypatch):
     monkeypatch.setattr(settings, "jwt_secret", SecretStr(SECRET))
 
 
-def url(store_id: str, sku: str | None = None) -> str:
-    path = f"/api/v1/stores/{store_id}/inventory"
-    return f"{path}?sku={sku}" if sku is not None else path
+def url(store_id: str) -> str:
+    return f"/api/v1/stores/{store_id}/inventory"
 
 
 def bearer(token: str) -> dict[str, str]:
@@ -130,11 +129,10 @@ def empty_headers(world) -> dict[str, str]:
     return bearer(create_token(EMPTY_STAFF, "Staff", EMPTY_STORE_ID))
 
 
-# INV12-1: a Staff token reads every line of its own store, ordered by SKU.
+# INV12-1: all SKUs of the store.
 
 
-def test_inv12_1_staff_reads_every_line_of_own_store_ordered_by_sku(client, world,
-                                                                    staff_headers):
+def test_inv12_1_all_skus_of_the_store(client, world, staff_headers):
     response = client.get(url(STORE_ID), headers=staff_headers)
 
     assert response.status_code == 200
@@ -148,30 +146,20 @@ def test_inv12_1_staff_reads_every_line_of_own_store_ordered_by_sku(client, worl
     }
 
 
-# INV12-2: a Manager token is allowed too.
+# INV12-2: one SKU.
 
 
-def test_inv12_2_manager_reads_own_store(client, world, manager_headers):
-    response = client.get(url(STORE_ID), headers=manager_headers)
-
-    assert response.status_code == 200
-    assert [item["sku"] for item in response.json()["items"]] == [SKU_A, SKU_B, SKU_C]
-
-
-# INV12-3: the sku filter returns exactly one line.
-
-
-def test_inv12_3_sku_filter_returns_one_line(client, world, staff_headers):
-    response = client.get(url(STORE_ID, SKU_B), headers=staff_headers)
+def test_inv12_2_one_sku(client, world, staff_headers):
+    response = client.get(url(STORE_ID), params={"sku": SKU_B}, headers=staff_headers)
 
     assert response.status_code == 200
     assert response.json() == {"store_id": STORE_ID, "items": [{"sku": SKU_B, "quantity": 3}]}
 
 
-# INV12-4: another store is forbidden, and the store check comes first.
+# INV12-3: another store gives 403.
 
 
-def test_inv12_4_another_store_is_forbidden(client, world, staff_headers):
+def test_inv12_3_another_store_gives_403(client, world, staff_headers):
     response = client.get(url(OTHER_STORE_ID), headers=staff_headers)
 
     body = assert_rejected(response, 403, "FORBIDDEN")
@@ -182,32 +170,53 @@ def test_staff_of_another_store_cannot_read_this_store(client, world, other_head
     assert_rejected(client.get(url(STORE_ID), headers=other_headers), 403, "FORBIDDEN")
 
 
-def test_unknown_store_is_forbidden_not_not_found(client, world, staff_headers):
+# INV12-4: an unknown store gives 403 too, not 404.
+
+
+def test_inv12_4_unknown_store_gives_403(client, world, staff_headers):
     assert_rejected(client.get(url("TEST-NOSTORE"), headers=staff_headers), 403, "FORBIDDEN")
 
 
-# INV12-5: a SKU outside the catalogue is not found.
+# INV12-5: a Manager can query.
 
 
-def test_inv12_5_unknown_sku_returns_404(client, world, staff_headers):
-    response = client.get(url(STORE_ID, UNKNOWN_SKU), headers=staff_headers)
+def test_inv12_5_manager_can_query(client, world, manager_headers):
+    response = client.get(url(STORE_ID), headers=manager_headers)
 
-    body = assert_rejected(response, 404, "NOT_FOUND")
-    assert UNKNOWN_SKU in body["message"]
+    assert response.status_code == 200
+    assert [item["sku"] for item in response.json()["items"]] == [SKU_A, SKU_B, SKU_C]
+
+
+# The catalogue value is echoed, not the input: SQL Server ignores case and
+# trailing spaces when it matches the varchar SKU.
+
+
+def test_lower_case_sku_returns_the_catalogue_sku(client, world, staff_headers):
+    response = client.get(url(STORE_ID), params={"sku": SKU_A.lower()}, headers=staff_headers)
+
+    assert response.status_code == 200
+    assert response.json()["items"] == [{"sku": SKU_A, "quantity": 7}]
 
 
 # Stock edge cases.
 
 
+def test_unknown_sku_returns_404(client, world, staff_headers):
+    response = client.get(url(STORE_ID), params={"sku": UNKNOWN_SKU}, headers=staff_headers)
+
+    body = assert_rejected(response, 404, "NOT_FOUND")
+    assert UNKNOWN_SKU in body["message"]
+
+
 def test_catalogue_product_without_a_stock_row_returns_zero(client, world, staff_headers):
-    response = client.get(url(STORE_ID, SKU_NO_STOCK), headers=staff_headers)
+    response = client.get(url(STORE_ID), params={"sku": SKU_NO_STOCK}, headers=staff_headers)
 
     assert response.status_code == 200
     assert response.json()["items"] == [{"sku": SKU_NO_STOCK, "quantity": 0}]
 
 
 def test_stock_of_another_store_is_not_returned(client, world, staff_headers):
-    response = client.get(url(STORE_ID, SKU_OTHER_ONLY), headers=staff_headers)
+    response = client.get(url(STORE_ID), params={"sku": SKU_OTHER_ONLY}, headers=staff_headers)
 
     assert response.status_code == 200
     assert response.json()["items"] == [{"sku": SKU_OTHER_ONLY, "quantity": 0}]
@@ -247,10 +256,33 @@ def test_every_other_role_is_forbidden(client, world, username, api_role):
 
 
 def test_sku_longer_than_20_characters_returns_422(client, world, staff_headers):
-    response = client.get(url(STORE_ID, "X" * 21), headers=staff_headers)
+    response = client.get(url(STORE_ID), params={"sku": "X" * 21}, headers=staff_headers)
 
     body = assert_rejected(response, 422, "VALIDATION_ERROR")
     assert "sku" in body["message"]
+
+
+def test_empty_sku_returns_422(client, world, staff_headers):
+    response = client.get(f"{url(STORE_ID)}?sku=", headers=staff_headers)
+
+    body = assert_rejected(response, 422, "VALIDATION_ERROR")
+    assert "sku" in body["message"]
+
+
+@pytest.mark.parametrize("sku", [SKU_A + " ", " ", "ĐN-1"],
+                         ids=["trailing-space", "blank", "non-ascii"])
+def test_invalid_sku_returns_422(client, world, staff_headers, sku):
+    response = client.get(url(STORE_ID), params={"sku": sku}, headers=staff_headers)
+
+    body = assert_rejected(response, 422, "VALIDATION_ERROR")
+    assert "sku" in body["message"]
+
+
+def test_another_store_with_an_invalid_sku_is_still_403(client, world, staff_headers):
+    """The store check runs before the sku validation on purpose."""
+    response = client.get(url(OTHER_STORE_ID), params={"sku": "X" * 21}, headers=staff_headers)
+
+    assert_rejected(response, 403, "FORBIDDEN")
 
 
 def test_the_query_never_commits(client, world, staff_headers, db_session, monkeypatch):

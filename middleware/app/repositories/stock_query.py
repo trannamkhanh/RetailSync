@@ -16,5 +16,10 @@ def list_store_stock(session: Session, store_id: str) -> list[tuple[str, int]]:
     return [(sku, int(quantity)) for sku, quantity in rows]
 
 
-def product_exists(session: Session, sku: str) -> bool:
-    return session.scalar(select(Product.sku).where(Product.sku == sku)) is not None
+def find_catalogue_sku(session: Session, sku: str) -> str | None:
+    """The SKU as stored in the catalogue, or ``None`` when it is not there.
+
+    SQL Server compares varchar values case-insensitively and ignores trailing
+    spaces, so the caller must answer with this value, not with its own input.
+    """
+    return session.scalar(select(Product.sku).where(Product.sku == sku))
