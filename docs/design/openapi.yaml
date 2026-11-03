@@ -170,7 +170,9 @@ paths:
           description: Return only this SKU
           schema:
             type: string
+            minLength: 1
             maxLength: 20
+            pattern: '^[A-Za-z0-9_-]+$'
       responses:
         '200':
           description: Stock lines
