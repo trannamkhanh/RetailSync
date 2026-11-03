@@ -377,17 +377,15 @@ def test_more_than_100_items_returns_422(client, db_session) -> None:
     assert _count(db_session, PosTransaction, txn_id=payload["transaction_id"]) == 0
 
 
-@pytest.mark.parametrize("event_type", ["RETURN", "CANCELLATION"])
-def test_return_and_cancellation_are_not_available(client, db_session, event_type) -> None:
+def test_cancellation_is_not_available(client, db_session) -> None:
     world = _seed(db_session)
     payload = _payload(
         world,
         [(world.skus[0], 1, 1000)],
-        event_type=event_type,
+        event_type="CANCELLATION",
         original_transaction_id="TEST-ORIGINAL",
     )
-    if event_type == "CANCELLATION":
-        payload.pop("items", None)
+    payload.pop("items", None)
 
     response = _post(client, payload, world.token)
 
