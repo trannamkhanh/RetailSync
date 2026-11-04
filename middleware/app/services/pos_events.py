@@ -19,6 +19,7 @@ from app.services.event_validation import validate_event_source
 from app.services.idempotency import claim_transaction, content_hash, stock_of_transaction
 from app.services.inventory import deduct_items
 from app.services.pos_return import process_return
+from app.services.pos_cancellation import process_cancellation
 
 if TYPE_CHECKING:
     from app.api.schemas.pos import PosEvent
@@ -92,6 +93,7 @@ def _process_sale(session: Session, event: PosEvent, principal: Principal) -> di
 
 
 HANDLERS = {"SALE": _process_sale, "RETURN": process_return}
+HANDLERS["CANCELLATION"] = process_cancellation
 
 
 def process_event(session: Session, event: PosEvent, principal: Principal) -> dict:
