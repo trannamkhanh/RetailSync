@@ -205,7 +205,14 @@ paths:
       operationId: getProductByBarcode
       x-roles: [Staff]
       parameters:
-        - $ref: '#/components/parameters/Barcode'
+        - name: barcode
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 30
+            pattern: '^[A-Za-z0-9-]+$'
       responses:
         '200':
           description: Product with own-store stock and batches
@@ -219,6 +226,9 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+
+        '422':
+          $ref: '#/components/responses/ValidationError'
 
   /products/barcode/{barcode}/stock:
     get:
