@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import create_token
 from app.domain.models import (
-    Inventory, InventoryMovement, PosTerminal, PosTransaction, Product,
+    AuditLog, Inventory, InventoryMovement, PosTerminal, PosTransaction, Product,
     StaffUser, Store, TransactionItem,
 )
 from app.main import app
@@ -156,6 +156,7 @@ def cleanup(engine: Engine, world: World) -> None:
         txns = select(PosTransaction.txn_id).where(PosTransaction.store_id == world.store)
         session.execute(delete(InventoryMovement).where(InventoryMovement.store_id == world.store))
         session.execute(delete(TransactionItem).where(TransactionItem.txn_id.in_(txns)))
+        session.execute(delete(AuditLog).where(AuditLog.entity_key.in_(txns)))
         session.execute(delete(PosTransaction).where(PosTransaction.store_id == world.store))
         session.execute(delete(Inventory).where(Inventory.store_id == world.store))
         session.execute(delete(PosTerminal).where(PosTerminal.store_id == world.store))

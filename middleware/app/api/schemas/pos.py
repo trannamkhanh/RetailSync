@@ -25,7 +25,8 @@ class PosEvent(BaseModel):
     event_type: Literal["SALE", "RETURN", "CANCELLATION"]
     transaction_id: str = Field(min_length=1, max_length=40, pattern=ID_PATTERN)
     original_transaction_id: str | None = Field(
-        default=None, min_length=1, max_length=40, pattern=ID_PATTERN
+        default=None, min_length=1, max_length=40, pattern=ID_PATTERN,
+        validate_default=True,
     )
     store_id: str = Field(min_length=1, max_length=10, pattern=ID_PATTERN)
     pos_id: str = Field(min_length=1, max_length=20, pattern=ID_PATTERN)
@@ -36,17 +37,23 @@ class PosEvent(BaseModel):
 
     @field_validator("original_transaction_id")
     @classmethod
-    def sale_has_no_original_transaction(cls, value: str | None, info: ValidationInfo) -> str | None:
-        if value is not None and info.data.get("event_type") == "SALE":
+    def original_transaction_matches_event_type(
+        cls, value: str | None, info: ValidationInfo
+    ) -> str | None:
+        event_type = info.data.get("event_type")
+        if event_type in ("RETURN", "CANCELLATION") and value is None:
+            raise ValueError(f"is required for {event_type}")
+        if event_type == "SALE" and value is not None:
             raise ValueError("must be absent for SALE")
         return value
 
     @field_validator("items")
     @classmethod
-    def sale_has_at_least_one_item(cls, value: list[PosEventItem],
-                                    info: ValidationInfo) -> list[PosEventItem]:
-        if info.data.get("event_type") == "SALE" and not value:
-            raise ValueError("at least one item is required for SALE")
+    def items_match_event_type(cls, value: list[PosEventItem],
+                               info: ValidationInfo) -> list[PosEventItem]:
+        event_type = info.data.get("event_type")
+        if event_type in ("SALE", "RETURN") and not value:
+            raise ValueError(f"at least one item is required for {event_type}")
         return value
 
 

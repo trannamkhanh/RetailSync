@@ -13,9 +13,12 @@ from sqlalchemy.orm import Session
 from app.core.errors import ApiError
 from app.core.security import Principal
 from app.repositories import pos_events as repository
+from app.repositories.registry import find_user_id
+from app.services.audit import record_audit
 from app.services.event_validation import validate_event_source
 from app.services.idempotency import claim_transaction, content_hash, stock_of_transaction
 from app.services.inventory import deduct_items
+from app.services.pos_return import process_return
 
 if TYPE_CHECKING:
     from app.api.schemas.pos import PosEvent
@@ -88,12 +91,36 @@ def _process_sale(session: Session, event: PosEvent, principal: Principal) -> di
     }
 
 
+HANDLERS = {"SALE": _process_sale, "RETURN": process_return}
+
+
 def process_event(session: Session, event: PosEvent, principal: Principal) -> dict:
     """Apply one POS event in the caller's transaction and return the result body.
 
-    SALE is implemented now. RETURN and CANCELLATION keep their own branches so
-    PB-06 and PB-07 can plug in without rewriting the SALE flow.
+    The handler table keeps each event type separate. RETURN is implemented in
+    ``pos_return``; Sang adds CANCELLATION to the same table.
     """
-    if event.event_type == "SALE":
-        return _process_sale(session, event, principal)
-    raise _unsupported(event.event_type)
+    handler = HANDLERS.get(event.event_type)
+    if handler is None:
+        raise _unsupported(event.event_type)
+    result = handler(session, event, principal)
+    if result.get("outcome") == "OK":
+        _record_stock_change(session, event, principal, result["current_stock"])
+    return result
+
+
+def _record_stock_change(session: Session, event: PosEvent, principal: Principal,
+                         current_stock: dict[str, int]) -> None:
+    """Audit an applied event in the event's transaction, as PB-04-2 requires."""
+    user_id = find_user_id(session, principal.sub)
+    stock_text = ", ".join(
+        f"{sku}={quantity}" for sku, quantity in sorted(current_stock.items())
+    )
+    record_audit(
+        session,
+        "STOCK_CHANGE",
+        "pos_transaction",
+        event.transaction_id,
+        user_id=user_id,
+        details=f"{event.event_type} {event.pos_id}: {stock_text}",
+    )

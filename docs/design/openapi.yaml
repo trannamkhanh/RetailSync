@@ -56,7 +56,7 @@ paths:
       summary: Receive a SALE, RETURN or CANCELLATION event
       description: |
         PB-05, PB-06, PB-07, PB-09. Target: under 500 ms end to end at p95 (NFR01).
-        Checks run in this order: authentication, field validation, duplicate check, business rules.
+        Checks run in this order: authentication, field validation, original sale lookup for RETURN and CANCELLATION, duplicate check, business rules.
         A CANCELLATION may omit `items`; the Middleware copies them from the original sale.
         Retry with the same `transaction_id` after a timeout or 503.
       operationId: postPosEvent
