@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import create_token, require_role
+from app.domain.models import GuardrailRule
 from app.domain.models import Inventory, PosTerminal, Product, StaffUser, Store
 from app.main import app
 
@@ -44,6 +45,10 @@ TERMINALS = ("POST", "/api/v1/admin/pos-terminals")
 AUDIT_LOGS = ("GET", "/api/v1/audit-logs")
 INVENTORY = ("GET", "/api/v1/stores/{store_id}/inventory")
 POS_EVENTS = ("POST", "/api/v1/pos/events")
+GUARDRAIL_RULES = ("GET", "/api/v1/admin/guardrail-rules")
+GUARDRAIL_RULE = ("PUT", "/api/v1/admin/guardrail-rules/{rule_id}")
+# The fixture creates one rule and records its id; identities are not sequential.
+GUARDRAIL_RULE_IDS: dict[str, int] = {}
 
 # Expected status for every protected route on main, by caller.
 #                  POS  Staff  Manager  HQ   Admin  Auditor  no token
@@ -53,6 +58,8 @@ MATRIX = {
     AUDIT_LOGS:   (403, 403,   403,     403, 403,   200,     401),
     INVENTORY:    (403, 200,   200,     403, 403,   403,     401),
     POS_EVENTS:   (200, 403,   403,     403, 403,   403,     401),
+    GUARDRAIL_RULES: (403, 403, 403,   403, 200,   403,     401),
+    GUARDRAIL_RULE:  (403, 403, 403,   403, 200,   403,     401),
 }
 CALLERS = [*ROLES, None]
 
@@ -78,6 +85,11 @@ def world(db_session: Session) -> None:
     for username, db_role, store_id in ACCOUNTS.values():
         db_session.add(StaffUser(username=username, full_name="Auth matrix account",
                                  role=db_role, store_id=store_id))
+    rule = GuardrailRule(rule_type="MAX_DISCOUNT", threshold=Decimal("10.00"),
+                         category="TEST-AM-CAT", is_active=True)
+    db_session.add(rule)
+    db_session.flush()
+    GUARDRAIL_RULE_IDS["rule"] = rule.rule_id
     # The fixture's outer transaction still rolls this back after the test.
     db_session.commit()
 
@@ -113,6 +125,10 @@ REQUESTS: dict[tuple[str, str], Callable[[TestClient, dict], object]] = {
     AUDIT_LOGS: lambda client, headers: client.get(AUDIT_LOGS[1], headers=headers),
     INVENTORY: lambda client, headers: client.get(INVENTORY[1].format(store_id=STORE_ID), headers=headers),
     POS_EVENTS: lambda client, headers: client.post(POS_EVENTS[1], headers=headers, json=sale()),
+    GUARDRAIL_RULES: lambda client, headers: client.get(GUARDRAIL_RULES[1], headers=headers),
+    GUARDRAIL_RULE: lambda client, headers: client.put(
+        GUARDRAIL_RULE[1].format(rule_id=GUARDRAIL_RULE_IDS["rule"]), headers=headers,
+        json={"threshold": 20, "is_active": True}),
 }
 
 
@@ -220,6 +236,7 @@ def test_matrix_allows_exactly_the_ds04_roles():
     assert allowed == {
         STORES: {"Admin"}, TERMINALS: {"Admin"}, AUDIT_LOGS: {"Auditor"},
         INVENTORY: {"Staff", "Manager"}, POS_EVENTS: {"POS"},
+        GUARDRAIL_RULES: {"Admin"}, GUARDRAIL_RULE: {"Admin"},
     }
 
 
