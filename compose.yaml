@@ -40,6 +40,7 @@ services:
     environment:
       DB_HOST: sqlserver
       SQLSERVER_PORT: 1433
+      MTLS_REQUIRED: "true"
     volumes:
       - ./.certs:/certs:ro
     depends_on:
@@ -47,6 +48,23 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:8443:8443"
+
+  # POS terminals reach the middleware only through this gateway (PB-48).
+  # POS_BIND_ADDRESS is the private WAN interface, never a public address.
+  pos-gateway:
+    image: nginx:1.28.0-alpine
+    environment:
+      # Empty when unset, so other compose commands keep working; the
+      # middleware then refuses every POS event (503) until it is set.
+      POS_GATEWAY_SECRET: ${POS_GATEWAY_SECRET:-}
+      NGINX_ENVSUBST_FILTER: ^POS_GATEWAY_SECRET$$
+    volumes:
+      - ./deploy/nginx/pos-gateway.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./.certs:/certs:ro
+    depends_on:
+      - middleware
+    ports:
+      - "${POS_BIND_ADDRESS:-127.0.0.1}:9443:9443"
 
 volumes:
   sqlserver_data:

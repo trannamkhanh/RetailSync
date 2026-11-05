@@ -1,0 +1,47 @@
+# POS gateway (PB-48-1, PB-48-3). When the container starts, the nginx image
+# fills in the gateway secret from the POS_GATEWAY_SECRET environment variable;
+# every other $variable below is nginx's own.
+#
+# POS terminals connect here with TLS 1.2 or 1.3 and a client certificate issued
+# by the development CA. nginx completes the handshake, then answers 400 to a
+# connection without a valid certificate, so nothing reaches the middleware.
+# Only POST /api/v1/pos/events is forwarded; anything else gets 404.
+
+server {
+    listen 9443 ssl;
+    server_name _;
+
+    ssl_certificate     /certs/server.crt;
+    ssl_certificate_key /certs/server.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         ECDHE+AESGCM:ECDHE+CHACHA20;
+    ssl_prefer_server_ciphers on;
+
+    ssl_client_certificate /certs/ca.crt;
+    ssl_verify_client      on;
+    ssl_verify_depth       1;
+
+    location = /api/v1/pos/events {
+        if ($request_method != POST) {
+            return 404;
+        }
+
+        # A fixed URI: the middleware only ever sees the normalised path, even
+        # for a request such as /api/v1/x/../pos/events that nginx matched here.
+        proxy_pass https://middleware:8443/api/v1/pos/events;
+        proxy_ssl_verify              on;
+        proxy_ssl_trusted_certificate /certs/ca.crt;
+        proxy_ssl_name                middleware;
+        proxy_ssl_protocols           TLSv1.2 TLSv1.3;
+
+        # Set on every request, replacing anything the client sent.
+        proxy_set_header X-Client-Cert    $ssl_client_escaped_cert;
+        proxy_set_header X-Gateway-Secret "${POS_GATEWAY_SECRET}";
+        proxy_set_header Host             $host;
+        proxy_set_header X-Forwarded-For  $remote_addr;
+    }
+
+    location / {
+        return 404;
+    }
+}

@@ -31,10 +31,17 @@ Docker health check: `https://localhost:8443/api/v1/health`
 The `middleware` service in Docker serves HTTPS only, on port 8443, with TLS 1.2
 or higher. Native `uvicorn --reload` stays HTTP on port 8000 for local development.
 
-`scripts/generate_dev_certs.sh` needs `openssl` and writes a self-signed
-certificate to `.certs/server.key` and `.certs/server.crt`, valid for `localhost`,
-`127.0.0.1` and `middleware.retailsync.local`. Running it again keeps a valid
-certificate; set `RENEW=1` to replace it. Never commit `.certs/`.
+`scripts/generate_dev_certs.sh` needs `openssl` and writes, in `.certs/`:
+
+| File | Content |
+|---|---|
+| `ca.key`, `ca.crt` | Development CA |
+| `server.key`, `server.crt` | Server certificate of `middleware` and `pos-gateway`, issued by the CA, valid for `localhost`, `127.0.0.1`, `middleware.retailsync.local` and `middleware` |
+| `pos/<pos_id>.key`, `pos/<pos_id>.crt` | Client certificate of each seeded terminal, common name `pos_id` (PB-48) |
+
+Running it again keeps every valid certificate. A server certificate the CA did
+not issue, such as the self-signed one from PB-02-1, is replaced once; set
+`RENEW=1` to replace everything. Never commit `.certs/`.
 
 Run it from Git Bash, which includes `openssl`. In PowerShell, plain `bash` may
 start WSL instead, so name Git Bash:
@@ -46,11 +53,120 @@ start WSL instead, so name Git Bash:
 Check the service against that certificate:
 
 ```powershell
-curl.exe --cacert .certs/server.crt https://localhost:8443/api/v1/health
+curl.exe --ssl-no-revoke --cacert .certs/ca.crt https://localhost:8443/api/v1/health
 ```
+
+Windows `curl.exe` uses Schannel, which looks for revocation data the
+development CA does not publish; `--ssl-no-revoke` skips that lookup.
 
 `docker compose up middleware` needs the certificate and exits without it.
 `docker compose run` for tests and migrations does not.
+
+### POS gateway (mutual TLS, PB-48)
+
+```text
+POS ──(TLS 1.2+, client certificate, port 9443)──> pos-gateway (nginx) ──> middleware:8443
+Staff, Admin, Auditor ──(TLS 1.2+, port 8443)──────────────────────────> middleware:8443
+```
+
+POS terminals send events only through `pos-gateway`. It requires a client
+certificate issued by the development CA: without one, nginx completes the TLS
+handshake and answers 400, so nothing reaches the middleware. It forwards only
+`POST /api/v1/pos/events` (anything else gets 404), verifies the middleware's
+certificate, and sets `X-Client-Cert` and `X-Gateway-Secret` on every request.
+
+In Docker, `MTLS_REQUIRED=true`. The middleware then refuses a POS event with 403
+`FORBIDDEN` when the gateway secret is missing or wrong, when no certificate was
+forwarded, or when the certificate's fingerprint is not the one stored in
+`pos_terminal.cert_fingerprint` for the event's `pos_id`. A POS event sent
+straight to port 8443 is therefore refused. Native runs keep `MTLS_REQUIRED=false`.
+
+`POS_BIND_ADDRESS` is the address `pos-gateway` publishes port 9443 on. It is the
+private WAN interface of the regional server, and never a public address. The
+default, `127.0.0.1`, keeps the gateway local to the machine.
+
+Run once after pulling this change, from the repository root in PowerShell:
+
+1. Add a gateway secret to `.env` (both `middleware` and `pos-gateway` read it):
+
+   ```powershell
+   $bytes = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+   Add-Content .env ("POS_GATEWAY_SECRET=" + (-join ($bytes | ForEach-Object { $_.ToString('x2') })))
+   ```
+
+2. Regenerate the certificates. This adds the CA and the POS certificates and
+   replaces the phase 2 server certificate:
+
+   ```powershell
+   & "$env:ProgramFiles\Git\bin\bash.exe" scripts/generate_dev_certs.sh
+   ```
+
+3. Store the POS certificate fingerprints in `RTS_DB`. It prints names and
+   fingerprints, never keys. Run it again whenever a client certificate is reissued:
+
+   ```powershell
+   docker compose build middleware
+   docker compose run --rm --no-deps --volume "${PWD}:/repo:ro" --workdir /repo middleware python scripts/register_pos_certificates.py
+   ```
+
+4. Start the middleware and the gateway:
+
+   ```powershell
+   docker compose up -d --wait middleware pos-gateway
+   ```
+
+Check TLS on port 9443 (TLS 1.2 and 1.3 connect, TLS 1.1 is refused):
+
+```powershell
+& "$env:ProgramFiles\Git\bin\bash.exe" scripts/check_pos_tls.sh
+```
+
+Check what the gateway forwards: paths with `..`, `.` or encoded characters are
+refused, or reach the middleware as `/api/v1/pos/events`:
+
+```powershell
+docker compose run --rm --no-deps --volume "${PWD}:/repo:ro" --workdir /repo --entrypoint bash middleware scripts/check_pos_gateway.sh
+```
+
+#### Send a test event with a client certificate on Windows
+
+Windows `curl.exe` uses Schannel, which does not send these client
+certificates (with PEM or PKCS#12 files it fails before the request). Use
+either of these from the repository root, after `scripts/issue_demo_tokens.py`
+has written `.tokens/demo_tokens.json` and with a SALE body in `sale.json`.
+
+Python, from the Windows host through port 9443 (standard library only). Tested
+on Windows 11 with Python 3.11.9; Python 3.12 works the same:
+
+```powershell
+@'
+import json, ssl, urllib.error, urllib.request
+
+pos_id = "POS-DN1-01"
+token = json.load(open(".tokens/demo_tokens.json"))[pos_id]
+context = ssl.create_default_context(cafile=".certs/ca.crt")
+context.load_cert_chain(f".certs/pos/{pos_id}.crt", f".certs/pos/{pos_id}.key")
+request = urllib.request.Request(
+    "https://localhost:9443/api/v1/pos/events", data=open("sale.json", "rb").read(), method="POST",
+    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+try:
+    with urllib.request.urlopen(request, context=context) as response:
+        print(response.status, response.read().decode())
+except urllib.error.HTTPError as error:
+    print(error.code, error.read().decode())
+'@ | py -3.12 -
+```
+
+`curl` with OpenSSL, from the middleware image on the compose network. It still
+checks the `localhost` server name. Also tested; put the token in `$token` first:
+
+```powershell
+$token = (Get-Content .tokens\demo_tokens.json -Raw | ConvertFrom-Json).'POS-DN1-01'
+docker compose run --rm --no-deps --volume "${PWD}:/repo:ro" --workdir /repo --entrypoint curl middleware --connect-to localhost:9443:pos-gateway:9443 --cacert .certs/ca.crt --cert .certs/pos/POS-DN1-01.crt --key .certs/pos/POS-DN1-01.key -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary "@sale.json" https://localhost:9443/api/v1/pos/events
+```
+
+Without a client certificate the gateway answers 400. With another terminal's
+certificate, or sent straight to port 8443, the event gets 403 `FORBIDDEN`.
 
 ## Test
 

@@ -93,3 +93,11 @@ def _event_audit_session() -> Session:
 @pytest.fixture(autouse=True)
 def event_audit_test_database(monkeypatch) -> None:
     monkeypatch.setattr(event_audit, "session_factory", _event_audit_session)
+
+
+# Compose sets MTLS_REQUIRED=true for the middleware service, which the
+# container test command runs (PB-48-4). Tests run with it off unless a test
+# turns it on.
+@pytest.fixture(autouse=True)
+def mtls_off_by_default(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "mtls_required", False)
