@@ -26,7 +26,9 @@ server {
             return 404;
         }
 
-        proxy_pass https://middleware:8443;
+        # A fixed URI: the middleware only ever sees the normalised path, even
+        # for a request such as /api/v1/x/../pos/events that nginx matched here.
+        proxy_pass https://middleware:8443/api/v1/pos/events;
         proxy_ssl_verify              on;
         proxy_ssl_trusted_certificate /certs/ca.crt;
         proxy_ssl_name                middleware;
