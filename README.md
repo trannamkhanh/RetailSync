@@ -121,17 +121,51 @@ Check TLS on port 9443 (TLS 1.2 and 1.3 connect, TLS 1.1 is refused):
 & "$env:ProgramFiles\Git\bin\bash.exe" scripts/check_pos_tls.sh
 ```
 
-Send a test event as `POS-DN1-01`. Windows `curl.exe` (Schannel) cannot present
-these client certificates, so use the OpenSSL `curl` in the middleware image. It
-reaches the gateway on the compose network and still checks the `localhost`
-server name. Put a SALE body in `sale.json` at the repository root and the token
-of `POS-DN1-01` from `.tokens/demo_tokens.json` in `$token`:
+Check what the gateway forwards: paths with `..`, `.` or encoded characters are
+refused, or reach the middleware as `/api/v1/pos/events`:
 
 ```powershell
+docker compose run --rm --no-deps --volume "${PWD}:/repo:ro" --workdir /repo --entrypoint bash middleware scripts/check_pos_gateway.sh
+```
+
+#### Send a test event with a client certificate on Windows
+
+Windows `curl.exe` uses Schannel, which does not send these client
+certificates (with PEM or PKCS#12 files it fails before the request). Use
+either of these from the repository root, after `scripts/issue_demo_tokens.py`
+has written `.tokens/demo_tokens.json` and with a SALE body in `sale.json`.
+
+Python, from the Windows host through port 9443 (standard library only). Tested
+on Windows 11 with Python 3.11.9; Python 3.12 works the same:
+
+```powershell
+@'
+import json, ssl, urllib.error, urllib.request
+
+pos_id = "POS-DN1-01"
+token = json.load(open(".tokens/demo_tokens.json"))[pos_id]
+context = ssl.create_default_context(cafile=".certs/ca.crt")
+context.load_cert_chain(f".certs/pos/{pos_id}.crt", f".certs/pos/{pos_id}.key")
+request = urllib.request.Request(
+    "https://localhost:9443/api/v1/pos/events", data=open("sale.json", "rb").read(), method="POST",
+    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+try:
+    with urllib.request.urlopen(request, context=context) as response:
+        print(response.status, response.read().decode())
+except urllib.error.HTTPError as error:
+    print(error.code, error.read().decode())
+'@ | py -3.12 -
+```
+
+`curl` with OpenSSL, from the middleware image on the compose network. It still
+checks the `localhost` server name. Also tested; put the token in `$token` first:
+
+```powershell
+$token = (Get-Content .tokens\demo_tokens.json -Raw | ConvertFrom-Json).'POS-DN1-01'
 docker compose run --rm --no-deps --volume "${PWD}:/repo:ro" --workdir /repo --entrypoint curl middleware --connect-to localhost:9443:pos-gateway:9443 --cacert .certs/ca.crt --cert .certs/pos/POS-DN1-01.crt --key .certs/pos/POS-DN1-01.key -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary "@sale.json" https://localhost:9443/api/v1/pos/events
 ```
 
-Without `--cert` and `--key` the gateway answers 400. With another terminal's
+Without a client certificate the gateway answers 400. With another terminal's
 certificate, or sent straight to port 8443, the event gets 403 `FORBIDDEN`.
 
 ## Test
