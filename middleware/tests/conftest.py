@@ -6,7 +6,6 @@ from functools import lru_cache
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, text
-from sqlalchemy import event
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -74,28 +73,17 @@ def client(db_session: Session) -> Generator[TestClient, None, None]:
 
 # Rejected and duplicate POS events are audited in their own session (PB-04-3).
 # Tests send them to TEST_DB_NAME, never to DB_NAME, and create the engine only
-# when an audit is written, so tests without SQL Server still run.
-EVENT_AUDIT_LOCK_TIMEOUT_MS = 100
-
-
+# when an audit is written, so tests without SQL Server still run. A test whose
+# open transaction holds a row the audit needs, such as an uncommitted
+# staff_user, makes that write time out after event_audit.LOCK_TIMEOUT_MS; it
+# is logged and swallowed, as in production.
 @lru_cache(maxsize=1)
 def _event_audit_engine() -> Engine:
     if settings.test_db_name.casefold() == settings.db_name.casefold() \
             or not settings.test_db_name.upper().endswith("_TEST"):
         raise RuntimeError("TEST_DB_NAME must end with _TEST and differ from DB_NAME.")
-    engine = create_engine(database_url(settings.test_db_name), pool_pre_ping=True,
-                           connect_args={"timeout": 5}, hide_parameters=True)
-
-    # A test's open transaction can hold locks the audit session needs, such as
-    # a staff_user row it has not committed, while it waits for the response.
-    # Failing fast turns that wait into a logged, swallowed audit failure.
-    @event.listens_for(engine, "connect")
-    def _limit_lock_wait(dbapi_connection, _record) -> None:
-        cursor = dbapi_connection.cursor()
-        cursor.execute(f"SET LOCK_TIMEOUT {EVENT_AUDIT_LOCK_TIMEOUT_MS}")
-        cursor.close()
-
-    return engine
+    return create_engine(database_url(settings.test_db_name), pool_pre_ping=True,
+                         connect_args={"timeout": 5}, hide_parameters=True)
 
 
 def _event_audit_session() -> Session:

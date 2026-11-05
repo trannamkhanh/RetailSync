@@ -16,8 +16,6 @@ from app.services.pos_events import process_event
 
 router = APIRouter(prefix="/pos", tags=["POS"])
 
-TRANSACTION_ID_LIMIT = 40
-
 
 def _invalid_event(error: ValidationError) -> ApiError:
     first = error.errors()[0]
@@ -41,9 +39,12 @@ def _parse_event(payload: Any) -> PosEvent:
 
 
 def _raw_transaction_id(payload: Any) -> str | None:
-    """The audit key of a rejected event, even when the body failed validation."""
+    """The transaction id as sent, even when the body failed validation.
+
+    The audit writer decides whether it is a usable key (PB-04-3).
+    """
     value = payload.get("transaction_id") if isinstance(payload, dict) else None
-    return value if isinstance(value, str) and len(value) <= TRANSACTION_ID_LIMIT else None
+    return value if isinstance(value, str) else None
 
 
 @router.post("/events", response_model=PosEventResult)

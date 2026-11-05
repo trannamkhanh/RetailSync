@@ -9,6 +9,8 @@ from collections.abc import Generator
 from dataclasses import dataclass
 from decimal import Decimal
 import logging
+import threading
+from time import perf_counter
 from uuid import uuid4
 
 import pytest
@@ -20,7 +22,8 @@ from sqlalchemy.orm import Session
 
 from app.api import pos as pos_api
 from app.core.config import settings
-from app.core.security import create_token
+from app.core.errors import ApiError
+from app.core.security import Principal, create_token
 from app.domain.models import AuditLog, Inventory, PosTerminal, PosTransaction, Product, StaffUser, Store
 from app.main import app
 from app.services import event_audit
@@ -112,13 +115,14 @@ def audit_rows(db_session: Session, user_id: int, action: str | None = None) -> 
     return list(db_session.scalars(query))
 
 
-def assert_one_rejection(db_session: Session, world: World, txn_id: str | None, response) -> AuditLog:
+def assert_one_rejection(db_session: Session, world: World, txn_id: str | None, response,
+                         details_suffix: str = "") -> AuditLog:
     body = response.json()
     rows = audit_rows(db_session, world.user_id)
     assert [(row.action, row.entity_name, row.entity_key) for row in rows] == [
         ("EVENT_REJECTED", "pos_transaction", txn_id),
     ]
-    assert rows[0].details == f"{body['code']}: {body['message']}"
+    assert rows[0].details == f"{body['code']}: {body['message']}{details_suffix}"
     return rows[0]
 
 
@@ -136,7 +140,7 @@ def test_ps04_3_insufficient_stock_is_audited(client, db_session, world):
     assert db_session.get(PosTransaction, txn_id) is None
 
 
-def test_unknown_sku_is_audited(client, db_session, world):
+def test_pb04_3_unknown_sku_is_audited(client, db_session, world):
     txn_id = f"TEST-TXN-{_uid(10)}"
 
     response = post(client, world, sale(world, txn_id, sku="TEST-SKU-MISSING"))
@@ -145,7 +149,7 @@ def test_unknown_sku_is_audited(client, db_session, world):
     assert_one_rejection(db_session, world, txn_id, response)
 
 
-def test_invalid_body_is_audited_with_its_transaction_id(client, db_session, world):
+def test_pb04_3_invalid_body_is_audited_with_its_transaction_id(client, db_session, world):
     txn_id = f"TEST-TXN-{_uid(10)}"
     body = sale(world, txn_id)
     del body["timestamp"]
@@ -156,7 +160,7 @@ def test_invalid_body_is_audited_with_its_transaction_id(client, db_session, wor
     assert_one_rejection(db_session, world, txn_id, response)
 
 
-def test_unregistered_pos_is_audited(client, db_session, world, pos_account):
+def test_pb04_3_unregistered_pos_is_audited(client, db_session, world, pos_account):
     txn_id = f"TEST-TXN-{_uid(10)}"
     unknown_pos = f"TEST-POS-{_uid()}"
     token = create_token(pos_account.username, "POS", store_id=world.store_id, pos_id=unknown_pos)
@@ -167,7 +171,7 @@ def test_unregistered_pos_is_audited(client, db_session, world, pos_account):
     assert_one_rejection(db_session, world, txn_id, response)
 
 
-def test_conflict_is_audited(client, db_session, world):
+def test_pb04_3_conflict_is_audited(client, db_session, world):
     txn_id = f"TEST-TXN-{_uid(10)}"
     assert post(client, world, sale(world, txn_id, quantity=1)).status_code == 200
 
@@ -177,7 +181,7 @@ def test_conflict_is_audited(client, db_session, world):
     assert_one_rejection(db_session, world, txn_id, response)
 
 
-def test_return_of_unknown_sale_is_audited(client, db_session, world):
+def test_pb04_3_return_of_unknown_sale_is_audited(client, db_session, world):
     txn_id = f"TEST-TXN-{_uid(10)}"
     body = sale(world, txn_id, event_type="RETURN", original_transaction_id=f"TEST-TXN-{_uid(10)}")
 
@@ -187,7 +191,7 @@ def test_return_of_unknown_sale_is_audited(client, db_session, world):
     assert_one_rejection(db_session, world, txn_id, response)
 
 
-def test_rejection_records_the_principal_user_id(client, db_session, world):
+def test_pb04_3_rejection_records_the_principal_user_id(client, db_session, world):
     post(client, world, sale(world, quantity=999))
 
     assert [row.user_id for row in audit_rows(db_session, world.user_id)] == [world.user_id]
@@ -197,16 +201,16 @@ def test_rejection_records_the_principal_user_id(client, db_session, world):
 
 
 @pytest.mark.parametrize("body", [None, [], ["x"], "text"], ids=["empty", "empty-list", "list", "string"])
-def test_body_without_an_object_is_audited_without_key(client, db_session, world, body):
+def test_pb04_3_body_without_an_object_is_audited_without_key(client, db_session, world, body):
     response = client.post(URL, json=body, headers={"Authorization": f"Bearer {world.token}"})
 
     assert (response.status_code, response.json()["code"]) == (422, "INVALID_EVENT")
     assert_one_rejection(db_session, world, None, response)
 
 
-@pytest.mark.parametrize("txn_id", [123, None, ["TXN"], {"id": 1}, "T" * 41],
-                         ids=["number", "null", "list", "object", "41-chars"])
-def test_unusable_transaction_id_is_audited_as_null(client, db_session, world, txn_id):
+@pytest.mark.parametrize("txn_id", [123, None, ["TXN"], {"id": 1}],
+                         ids=["number", "null", "list", "object"])
+def test_pb04_3_non_string_transaction_id_is_audited_as_null(client, db_session, world, txn_id):
     body = sale(world)
     body["transaction_id"] = txn_id
 
@@ -216,19 +220,31 @@ def test_unusable_transaction_id_is_audited_as_null(client, db_session, world, t
     assert_one_rejection(db_session, world, None, response)
 
 
-def test_transaction_id_of_forty_characters_is_kept(client, db_session, world):
+# A varchar key would store "Đ" as "D", an emoji as "?" and keep NUL, so only a
+# valid id becomes the key. Any other string is kept, as JSON, in details.
+@pytest.mark.parametrize(("txn_id", "suffix"), [
+    ("T" * 41, ' [transaction_id: "' + "T" * 41 + '"]'),
+    ("TEST-Đ01", ' [transaction_id: "TEST-Đ01"]'),
+    ("TEST-😀", ' [transaction_id: "TEST-😀"]'),
+    ("TEST-\x00X", ' [transaction_id: "TEST-\\u0000X"]'),
+    ("TEST-1\n", ' [transaction_id: "TEST-1\\n"]'),
+    ("BAD ID 1", ' [transaction_id: "BAD ID 1"]'),
+    ("", ' [transaction_id: ""]'),
+], ids=["41-chars", "non-ascii", "emoji", "nul", "trailing-newline", "space", "empty"])
+def test_pb04_3_invalid_transaction_id_goes_to_details_not_the_key(client, db_session, world, txn_id, suffix):
+    body = sale(world)
+    body["transaction_id"] = txn_id
+
+    response = post(client, world, body)
+
+    assert response.status_code == 422
+    assert_one_rejection(db_session, world, None, response, suffix)
+
+
+def test_pb04_3_transaction_id_of_forty_characters_is_kept(client, db_session, world):
     txn_id = "T" * 30 + _uid(10)
     response = post(client, world, sale(world, txn_id, sku="TEST-SKU-MISSING"))
 
-    assert_one_rejection(db_session, world, txn_id, response)
-
-
-def test_invalid_but_short_transaction_id_is_kept_as_sent(client, db_session, world):
-    txn_id = f"BAD ID {_uid(6)}"
-
-    response = post(client, world, sale(world, txn_id))
-
-    assert response.status_code == 422
     assert_one_rejection(db_session, world, txn_id, response)
 
 
@@ -248,7 +264,7 @@ def test_ps04_4_duplicate_is_audited(client, db_session, world):
     ]
 
 
-def test_each_duplicate_attempt_is_audited(client, db_session, world):
+def test_pb04_3_each_duplicate_attempt_is_audited(client, db_session, world):
     txn_id = f"TEST-TXN-{_uid(10)}"
     for _ in range(3):
         post(client, world, sale(world, txn_id))
@@ -256,7 +272,7 @@ def test_each_duplicate_attempt_is_audited(client, db_session, world):
     assert len(audit_rows(db_session, world.user_id, "DUPLICATE_EVENT")) == 2
 
 
-def test_applied_event_writes_no_rejection_or_duplicate(client, db_session, world):
+def test_pb04_3_applied_event_writes_no_rejection_or_duplicate(client, db_session, world):
     assert post(client, world, sale(world)).json()["outcome"] == "OK"
 
     assert audit_rows(db_session, world.user_id) == []
@@ -265,14 +281,14 @@ def test_applied_event_writes_no_rejection_or_duplicate(client, db_session, worl
 # What is not audited
 
 
-def test_missing_token_is_not_audited(client, db_session, world):
+def test_pb04_3_missing_token_is_not_audited(client, db_session, world):
     response = client.post(URL, json=sale(world))
 
     assert response.status_code == 401
     assert audit_rows(db_session, world.user_id) == []
 
 
-def test_wrong_role_is_not_audited(client, db_session, world):
+def test_pb04_3_wrong_role_is_not_audited(client, db_session, world):
     staff = StaffUser(username=f"TEST-EA-STAFF-{_uid()}", full_name="Event audit staff",
                       role="STORE_STAFF", store_id=world.store_id)
     db_session.add(staff)
@@ -287,7 +303,7 @@ def test_wrong_role_is_not_audited(client, db_session, world):
                              .where(AuditLog.entity_key == txn_id)) == 0
 
 
-def test_database_failure_is_not_audited(db_session, world, monkeypatch):
+def test_pb04_3_database_failure_is_not_audited(db_session, world, monkeypatch):
     def broken(*_args, **_kwargs):
         raise OperationalError("SELECT 1", {}, Exception("database down"))
     monkeypatch.setattr(pos_api, "process_event", broken)
@@ -310,7 +326,7 @@ def _broken_session():
     raise OperationalError("INSERT audit_log", {}, Exception("audit database down"))
 
 
-def test_failing_rejection_audit_keeps_the_response(client, world, monkeypatch, caplog):
+def test_pb04_3_failing_rejection_audit_keeps_the_response(client, world, monkeypatch, caplog):
     txn_id = f"TEST-TXN-{_uid(10)}"
     expected = post(client, world, sale(world, txn_id, quantity=999))
     monkeypatch.setattr(event_audit, "session_factory", _broken_session)
@@ -322,7 +338,7 @@ def test_failing_rejection_audit_keeps_the_response(client, world, monkeypatch, 
     assert any("EVENT_REJECTED" in record.getMessage() and record.exc_info for record in caplog.records)
 
 
-def test_failing_duplicate_audit_keeps_the_response(client, world, monkeypatch, caplog):
+def test_pb04_3_failing_duplicate_audit_keeps_the_response(client, world, monkeypatch, caplog):
     txn_id = f"TEST-TXN-{_uid(10)}"
     post(client, world, sale(world, txn_id))
     expected = post(client, world, sale(world, txn_id))
@@ -335,7 +351,7 @@ def test_failing_duplicate_audit_keeps_the_response(client, world, monkeypatch, 
     assert any("DUPLICATE_EVENT" in record.getMessage() for record in caplog.records)
 
 
-def test_audit_failing_at_commit_keeps_the_response(client, db_session, world, monkeypatch):
+def test_pb04_3_audit_failing_at_commit_keeps_the_response(client, db_session, world, monkeypatch):
     test_factory = event_audit.session_factory
 
     def session_failing_on_commit():
@@ -348,3 +364,64 @@ def test_audit_failing_at_commit_keeps_the_response(client, db_session, world, m
 
     assert (response.status_code, response.json()["code"]) == (409, "INSUFFICIENT_STOCK")
     assert audit_rows(db_session, world.user_id) == []
+
+
+# The audit session bounds its lock waits (NFR01) and leaves the pooled
+# connection's setting as it found it.
+
+
+@pytest.fixture
+def audit_connection(test_engine: Engine, monkeypatch) -> Generator:
+    """A connection with SQL Server's default LOCK_TIMEOUT (-1), as in production."""
+    connection = test_engine.connect()
+    monkeypatch.setattr(event_audit, "session_factory", lambda: Session(bind=connection))
+    try:
+        yield connection
+    finally:
+        connection.close()
+
+
+def lock_timeout(connection) -> int:
+    value = connection.exec_driver_sql("SELECT @@LOCK_TIMEOUT").scalar()
+    connection.rollback()
+    return value
+
+
+def test_pb04_3_audit_gives_up_on_a_held_lock(test_engine, audit_connection, pos_account, caplog):
+    holder = test_engine.connect()
+    holder_transaction = holder.begin()
+    holder.exec_driver_sql("SELECT COUNT(*) FROM dbo.audit_log WITH (TABLOCKX, HOLDLOCK)").scalar()
+    principal = Principal(pos_account.username, "POS", None, None)
+    writer = threading.Thread(target=event_audit.audit_rejected_event,
+                              args=(principal, "TEST-LOCKED", ApiError(409, "CONFLICT", "Locked.")))
+    try:
+        with caplog.at_level(logging.ERROR, logger=event_audit.__name__):
+            started = perf_counter()
+            writer.start()
+            writer.join(timeout=5)
+            waited = perf_counter() - started
+    finally:
+        holder_transaction.rollback()
+        holder.close()
+        writer.join(timeout=10)
+
+    assert waited < 2
+    assert any("EVENT_REJECTED" in record.getMessage() for record in caplog.records)
+    assert lock_timeout(audit_connection) == -1
+    with Session(test_engine) as session:
+        assert session.scalar(select(func.count()).select_from(AuditLog)
+                              .where(AuditLog.entity_key == "TEST-LOCKED")) == 0
+
+
+def test_pb04_3_audit_restores_the_connection_lock_timeout(test_engine, audit_connection, pos_account):
+    audit_connection.exec_driver_sql("SET LOCK_TIMEOUT 1234")
+    # End the transaction SET began, so the audit session owns its own.
+    audit_connection.commit()
+    principal = Principal(pos_account.username, "POS", None, None)
+
+    event_audit.audit_duplicate_event(principal, "TEST-RESTORED")
+
+    assert lock_timeout(audit_connection) == 1234
+    with Session(test_engine) as session:
+        keys = session.scalars(select(AuditLog.entity_key).where(AuditLog.user_id == pos_account.user_id))
+        assert list(keys) == ["TEST-RESTORED"]
