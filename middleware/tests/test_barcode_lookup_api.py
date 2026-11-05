@@ -22,7 +22,7 @@ def world(db_session):
     ])
     db_session.flush()
     tokens = {}
-    for role, db_role in [("Staff", "STORE_STAFF"), ("Manager", "STORE_MANAGER")]:
+    for role, db_role in [("Staff", "STORE_STAFF"), ("Manager", "STORE_MANAGER"), ("Auditor", "AUDITOR")]:
         username = f"TEST-{role}-{suffix}"
         db_session.add(StaffUser(username=username, full_name=role, role=db_role, store_id=store))
         tokens[role] = create_token(username, role, store_id=store)
@@ -57,8 +57,14 @@ def test_stf31_2_unknown_barcode_reads_no_inventory(client, world, monkeypatch):
     assert response.json()["code"] == "NOT_FOUND"
 
 
-def test_stf31_4_manager_forbidden_even_with_invalid_barcode(client, world):
+def test_pb31_manager_forbidden_even_with_invalid_barcode(client, world):
     response = lookup(client, world, "invalid_barcode", role="Manager")
+    assert response.status_code == 403
+    assert response.json()["code"] == "FORBIDDEN"
+
+
+def test_stf31_4_auditor_is_forbidden(client, world):
+    response = lookup(client, world, role="Auditor")
     assert response.status_code == 403
     assert response.json()["code"] == "FORBIDDEN"
 
