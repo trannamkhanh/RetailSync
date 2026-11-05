@@ -49,6 +49,7 @@ GUARDRAIL_RULES = ("GET", "/api/v1/admin/guardrail-rules")
 GUARDRAIL_RULE = ("PUT", "/api/v1/admin/guardrail-rules/{rule_id}")
 # The fixture creates one rule and records its id; identities are not sequential.
 GUARDRAIL_RULE_IDS: dict[str, int] = {}
+BARCODE = ("GET", "/api/v1/products/barcode/{barcode}")
 
 # Expected status for every protected route on main, by caller.
 #                  POS  Staff  Manager  HQ   Admin  Auditor  no token
@@ -60,6 +61,7 @@ MATRIX = {
     POS_EVENTS:   (200, 403,   403,     403, 403,   403,     401),
     GUARDRAIL_RULES: (403, 403, 403,   403, 200,   403,     401),
     GUARDRAIL_RULE:  (403, 403, 403,   403, 200,   403,     401),
+    BARCODE:      (403, 200,   403,     403, 403,   403,     401),
 }
 CALLERS = [*ROLES, None]
 
@@ -129,6 +131,7 @@ REQUESTS: dict[tuple[str, str], Callable[[TestClient, dict], object]] = {
     GUARDRAIL_RULE: lambda client, headers: client.put(
         GUARDRAIL_RULE[1].format(rule_id=GUARDRAIL_RULE_IDS["rule"]), headers=headers,
         json={"threshold": 20, "is_active": True}),
+    BARCODE: lambda client, headers: client.get(BARCODE[1].format(barcode=f"BC-{SKU}"), headers=headers),
 }
 
 
@@ -237,6 +240,7 @@ def test_matrix_allows_exactly_the_ds04_roles():
         STORES: {"Admin"}, TERMINALS: {"Admin"}, AUDIT_LOGS: {"Auditor"},
         INVENTORY: {"Staff", "Manager"}, POS_EVENTS: {"POS"},
         GUARDRAIL_RULES: {"Admin"}, GUARDRAIL_RULE: {"Admin"},
+        BARCODE: {"Staff"},
     }
 
 
