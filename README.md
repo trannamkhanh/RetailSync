@@ -31,10 +31,17 @@ Docker health check: `https://localhost:8443/api/v1/health`
 The `middleware` service in Docker serves HTTPS only, on port 8443, with TLS 1.2
 or higher. Native `uvicorn --reload` stays HTTP on port 8000 for local development.
 
-`scripts/generate_dev_certs.sh` needs `openssl` and writes a self-signed
-certificate to `.certs/server.key` and `.certs/server.crt`, valid for `localhost`,
-`127.0.0.1` and `middleware.retailsync.local`. Running it again keeps a valid
-certificate; set `RENEW=1` to replace it. Never commit `.certs/`.
+`scripts/generate_dev_certs.sh` needs `openssl` and writes, in `.certs/`:
+
+| File | Content |
+|---|---|
+| `ca.key`, `ca.crt` | Development CA |
+| `server.key`, `server.crt` | Server certificate of `middleware` and `pos-gateway`, issued by the CA, valid for `localhost`, `127.0.0.1`, `middleware.retailsync.local` and `middleware` |
+| `pos/<pos_id>.key`, `pos/<pos_id>.crt` | Client certificate of each seeded terminal, common name `pos_id` (PB-48) |
+
+Running it again keeps every valid certificate. A server certificate the CA did
+not issue, such as the self-signed one from PB-02-1, is replaced once; set
+`RENEW=1` to replace everything. Never commit `.certs/`.
 
 Run it from Git Bash, which includes `openssl`. In PowerShell, plain `bash` may
 start WSL instead, so name Git Bash:
@@ -46,11 +53,70 @@ start WSL instead, so name Git Bash:
 Check the service against that certificate:
 
 ```powershell
-curl.exe --cacert .certs/server.crt https://localhost:8443/api/v1/health
+curl.exe --cacert .certs/ca.crt https://localhost:8443/api/v1/health
 ```
 
 `docker compose up middleware` needs the certificate and exits without it.
 `docker compose run` for tests and migrations does not.
+
+### POS gateway (mutual TLS, PB-48)
+
+```text
+POS ──(TLS 1.2+, client certificate, port 9443)──> pos-gateway (nginx) ──> middleware:8443
+Staff, Admin, Auditor ──(TLS 1.2+, port 8443)──────────────────────────> middleware:8443
+```
+
+POS terminals send events only through `pos-gateway`. It requires a client
+certificate issued by the development CA: without one, nginx completes the TLS
+handshake and answers 400, so nothing reaches the middleware. It forwards only
+`POST /api/v1/pos/events` (anything else gets 404), verifies the middleware's
+certificate, and sets `X-Client-Cert` and `X-Gateway-Secret` on every request.
+
+In Docker, `MTLS_REQUIRED=true`. The middleware then refuses a POS event with 403
+`FORBIDDEN` when the gateway secret is missing or wrong, when no certificate was
+forwarded, or when the certificate's fingerprint is not the one stored in
+`pos_terminal.cert_fingerprint` for the event's `pos_id`. A POS event sent
+straight to port 8443 is therefore refused. Native runs keep `MTLS_REQUIRED=false`.
+
+`POS_BIND_ADDRESS` is the address `pos-gateway` publishes port 9443 on. It is the
+private WAN interface of the regional server, and never a public address. The
+default, `127.0.0.1`, keeps the gateway local to the machine.
+
+Run once after pulling this change, from the repository root in PowerShell:
+
+1. Add a gateway secret to `.env` (both `middleware` and `pos-gateway` read it):
+
+   ```powershell
+   $bytes = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+   Add-Content .env ("POS_GATEWAY_SECRET=" + (-join ($bytes | ForEach-Object { $_.ToString('x2') })))
+   ```
+
+2. Regenerate the certificates. This adds the CA and the POS certificates and
+   replaces the phase 2 server certificate:
+
+   ```powershell
+   & "$env:ProgramFiles\Git\bin\bash.exe" scripts/generate_dev_certs.sh
+   ```
+
+3. Store the POS certificate fingerprints in `RTS_DB`. It prints names and
+   fingerprints, never keys. Run it again whenever a client certificate is reissued:
+
+   ```powershell
+   docker compose build middleware
+   docker compose run --rm --no-deps --volume "${PWD}:/repo:ro" --workdir /repo middleware python scripts/register_pos_certificates.py
+   ```
+
+4. Start the middleware and the gateway:
+
+   ```powershell
+   docker compose up -d --wait middleware pos-gateway
+   ```
+
+Check TLS on port 9443 (TLS 1.2 and 1.3 connect, TLS 1.1 is refused):
+
+```powershell
+& "$env:ProgramFiles\Git\bin\bash.exe" scripts/check_pos_tls.sh
+```
 
 ## Test
 
