@@ -1,4 +1,4 @@
-"""POS event endpoint (PB-05): receive a SALE from a registered terminal."""
+"""POS event endpoint (PB-05, PB-04-3): receive an event from a registered terminal."""
 
 from typing import Any
 
@@ -10,10 +10,13 @@ from app.api.schemas.pos import PosEvent, PosEventResult
 from app.core.db import get_db
 from app.core.errors import ApiError
 from app.core.security import Principal, require_role
+from app.services.event_audit import audit_duplicate_event, audit_rejected_event
 from app.services.pos_events import process_event
 
 
 router = APIRouter(prefix="/pos", tags=["POS"])
+
+TRANSACTION_ID_LIMIT = 40
 
 
 def _invalid_event(error: ValidationError) -> ApiError:
@@ -26,6 +29,23 @@ def _invalid_body(message: str) -> ApiError:
     return ApiError(422, "INVALID_EVENT", f"Invalid field 'body': {message}")
 
 
+def _parse_event(payload: Any) -> PosEvent:
+    if payload is None:
+        raise _invalid_body("event body is required.")
+    if not isinstance(payload, dict):
+        raise _invalid_body("event body must be a JSON object.")
+    try:
+        return PosEvent.model_validate(payload)
+    except ValidationError as error:
+        raise _invalid_event(error) from None
+
+
+def _raw_transaction_id(payload: Any) -> str | None:
+    """The audit key of a rejected event, even when the body failed validation."""
+    value = payload.get("transaction_id") if isinstance(payload, dict) else None
+    return value if isinstance(value, str) and len(value) <= TRANSACTION_ID_LIMIT else None
+
+
 @router.post("/events", response_model=PosEventResult)
 def receive_pos_event(payload: Any = Body(default=None),
                       principal: Principal = Depends(require_role("POS")),
@@ -36,17 +56,19 @@ def receive_pos_event(payload: Any = Body(default=None),
     becomes 422 ``INVALID_EVENT`` (DS-04), not the global ``VALIDATION_ERROR``.
     Malformed JSON is rejected by FastAPI before authentication and keeps the
     global handler's ``VALIDATION_ERROR`` code.
+
+    A rejection rolls the event back and is audited in its own transaction, as
+    is a duplicate (PB-04-3). A 401 or 403 from ``require_role`` never reaches
+    this body, and a database failure is not an ``ApiError``: neither is audited.
     """
-    if payload is None:
-        raise _invalid_body("event body is required.")
-    if not isinstance(payload, dict):
-        raise _invalid_body("event body must be a JSON object.")
-
     try:
-        event = PosEvent.model_validate(payload)
-    except ValidationError as error:
-        raise _invalid_event(error) from None
-
-    result = process_event(session, event, principal)
+        event = _parse_event(payload)
+        result = process_event(session, event, principal)
+    except ApiError as error:
+        session.rollback()
+        audit_rejected_event(principal, _raw_transaction_id(payload), error)
+        raise
     session.commit()
+    if result["outcome"] == "DUPLICATE":
+        audit_duplicate_event(principal, event.transaction_id)
     return result
