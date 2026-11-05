@@ -74,7 +74,7 @@ def test_stf31_5_missing_token(client, world):
     assert response.status_code == 401
 
 
-def test_stf31_zero_stock_does_not_expose_other_store(client, db_session, world):
+def test_pb31_zero_stock_does_not_expose_other_store(client, db_session, world):
     db_session.delete(db_session.get(Inventory, (world[0], world[2])))
     db_session.commit()
     response = lookup(client, world)
@@ -84,7 +84,7 @@ def test_stf31_zero_stock_does_not_expose_other_store(client, db_session, world)
 
 
 @pytest.mark.parametrize("barcode", [" ", "bad_code", "é", "x" * 31, "bad.code"])
-def test_stf31_invalid_barcode(client, world, barcode):
+def test_pb31_invalid_barcode(client, world, barcode):
     response = lookup(client, world, barcode)
     assert response.status_code == 422, response.text
     assert response.json()["code"] == "VALIDATION_ERROR"
@@ -92,12 +92,12 @@ def test_stf31_invalid_barcode(client, world, barcode):
 
 
 @pytest.mark.parametrize("barcode", ["A", "A" * 30])
-def test_stf31_valid_length_boundaries(client, db_session, world, barcode):
+def test_pb31_valid_length_boundaries(client, db_session, world, barcode):
     db_session.get(Product, world[2]).barcode = barcode
     db_session.commit()
     assert lookup(client, world, barcode).status_code == 200
 
 
-def test_stf31_empty_path_has_no_lookup_route(client, world):
+def test_pb31_empty_path_has_no_lookup_route(client, world):
     response = client.get("/api/v1/products/barcode/", headers={"Authorization": f"Bearer {world[4]['Staff']}"})
     assert response.status_code == 404
