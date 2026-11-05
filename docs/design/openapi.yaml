@@ -832,7 +832,15 @@ components:
       bearerFormat: JWT
     mutualTLS:
       type: mutualTLS
-      description: Client certificate whose fingerprint matches pos_terminal.cert_fingerprint (PB-48).
+      description: |
+        PB-48. POS terminals reach `POST /pos/events` only through the POS gateway on port 9443,
+        with TLS 1.2 or 1.3 and a client certificate issued by the RetailSync CA. The gateway
+        answers 400 to a connection without a valid certificate and forwards nothing else; the
+        TLS handshake itself completes. It forwards the certificate and a shared gateway secret.
+        The Middleware answers 403 `FORBIDDEN` when the gateway secret is missing or wrong or no
+        certificate was forwarded, before the bearer token is checked, and when the SHA-256 of the
+        certificate in DER form (64 lower-case hex characters) differs from
+        `pos_terminal.cert_fingerprint` of the event's `pos_id`, or that terminal has none.
   parameters:
     StoreId:
       name: store_id
