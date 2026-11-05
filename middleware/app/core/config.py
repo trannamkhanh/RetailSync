@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     mssql_sa_password: SecretStr | None = None
     test_db_name: str = "RTS_DB_TEST"
     jwt_secret: SecretStr | None = None
+    mtls_required: bool = False
+    pos_gateway_secret: SecretStr | None = None
 
 
 settings = Settings()
