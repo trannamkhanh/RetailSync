@@ -377,7 +377,7 @@ def test_more_than_100_items_returns_422(client, db_session) -> None:
     assert _count(db_session, PosTransaction, txn_id=payload["transaction_id"]) == 0
 
 
-def test_cancellation_is_not_available(client, db_session) -> None:
+def test_cancellation_with_unknown_original_is_rejected(client, db_session) -> None:
     world = _seed(db_session)
     payload = _payload(
         world,
@@ -389,8 +389,8 @@ def test_cancellation_is_not_available(client, db_session) -> None:
 
     response = _post(client, payload, world.token)
 
-    _assert_error(response, 422, "INVALID_EVENT")
-    assert "not available" in response.json()["message"]
+    _assert_error(response, 404, "ORIGINAL_SALE_NOT_FOUND")
+    assert response.json()["code"] == "ORIGINAL_SALE_NOT_FOUND"
     assert _count(db_session, PosTransaction, txn_id=payload["transaction_id"]) == 0
 
 
