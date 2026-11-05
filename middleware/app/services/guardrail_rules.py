@@ -13,7 +13,10 @@ from app.repositories.registry import find_user_id
 from app.services.audit import record_audit
 
 
-DIGITS_LIMIT = 12
+# threshold is decimal(12,2): 10 integer digits plus 2 decimals, so the largest
+# value it stores is 9999999999.99. Counting digits is not enough, because a value
+# like 99999999999 has 11 digits and still overflows the column.
+MAX_THRESHOLD = Decimal("10000000000")
 
 
 def list_rules(session: Session) -> list[GuardrailRule]:
@@ -44,8 +47,9 @@ def _validate_threshold(rule_type: str, threshold: Decimal) -> None:
         raise _invalid_threshold("must not be negative.")
     if threshold.as_tuple().exponent < -2:
         raise _invalid_threshold("must have at most two decimal places.")
-    if len(threshold.as_tuple().digits) > DIGITS_LIMIT:
-        raise _invalid_threshold(f"must have at most {DIGITS_LIMIT} digits.")
+    if threshold >= MAX_THRESHOLD:
+        raise _invalid_threshold("must be below 10000000000, the largest value decimal(12,2) "
+                                 "can store.")
     if rule_type == "MAX_DISCOUNT" and threshold > 100:
         raise _invalid_threshold("MAX_DISCOUNT must be between 0 and 100.")
     if rule_type == "MIN_SHELF_LIFE" and threshold != threshold.to_integral_value():
