@@ -53,8 +53,11 @@ start WSL instead, so name Git Bash:
 Check the service against that certificate:
 
 ```powershell
-curl.exe --cacert .certs/ca.crt https://localhost:8443/api/v1/health
+curl.exe --ssl-no-revoke --cacert .certs/ca.crt https://localhost:8443/api/v1/health
 ```
+
+Windows `curl.exe` uses Schannel, which looks for revocation data the
+development CA does not publish; `--ssl-no-revoke` skips that lookup.
 
 `docker compose up middleware` needs the certificate and exits without it.
 `docker compose run` for tests and migrations does not.
@@ -117,6 +120,19 @@ Check TLS on port 9443 (TLS 1.2 and 1.3 connect, TLS 1.1 is refused):
 ```powershell
 & "$env:ProgramFiles\Git\bin\bash.exe" scripts/check_pos_tls.sh
 ```
+
+Send a test event as `POS-DN1-01`. Windows `curl.exe` (Schannel) cannot present
+these client certificates, so use the OpenSSL `curl` in the middleware image. It
+reaches the gateway on the compose network and still checks the `localhost`
+server name. Put a SALE body in `sale.json` at the repository root and the token
+of `POS-DN1-01` from `.tokens/demo_tokens.json` in `$token`:
+
+```powershell
+docker compose run --rm --no-deps --volume "${PWD}:/repo:ro" --workdir /repo --entrypoint curl middleware --connect-to localhost:9443:pos-gateway:9443 --cacert .certs/ca.crt --cert .certs/pos/POS-DN1-01.crt --key .certs/pos/POS-DN1-01.key -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary "@sale.json" https://localhost:9443/api/v1/pos/events
+```
+
+Without `--cert` and `--key` the gateway answers 400. With another terminal's
+certificate, or sent straight to port 8443, the event gets 403 `FORBIDDEN`.
 
 ## Test
 
