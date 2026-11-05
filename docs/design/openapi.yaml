@@ -841,6 +841,9 @@ components:
         certificate was forwarded, before the bearer token is checked, and when the SHA-256 of the
         certificate in DER form (64 lower-case hex characters) differs from
         `pos_terminal.cert_fingerprint` of the event's `pos_id`, or that terminal has none.
+        A terminal with no stored fingerprint, such as an unregistered `pos_id`, therefore gets 403
+        `FORBIDDEN` at this certificate check, which runs after field validation and before the
+        422 `UNREGISTERED_STORE_OR_POS` check.
   parameters:
     StoreId:
       name: store_id
