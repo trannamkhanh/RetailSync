@@ -510,6 +510,7 @@ paths:
             schema:
               type: object
               required: [threshold, is_active]
+              additionalProperties: false
               properties:
                 threshold:
                   type: number
@@ -1156,10 +1157,17 @@ components:
           enum: [MAX_DISCOUNT, MIN_PRICE, MIN_SHELF_LIFE]
         threshold:
           type: number
-          description: MAX_DISCOUNT must be 0 to 100
+          description: |
+            MAX_DISCOUNT is 0 to 100. MIN_PRICE and MIN_SHELF_LIFE are 0 or more.
+            At most two decimal places and 12 digits in total; MIN_SHELF_LIFE is a
+            whole number of days.
         category:
           type: [string, 'null']
-          description: Empty means all categories
+          description: |
+            Empty means all categories. When the all-category rule and a category rule
+            of the same type are both active, the category rule can only tighten it:
+            MAX_DISCOUNT must not be above and MIN_PRICE or MIN_SHELF_LIFE must not be
+            below the all-category threshold.
         is_active:
           type: boolean
     NearExpiryThreshold:
