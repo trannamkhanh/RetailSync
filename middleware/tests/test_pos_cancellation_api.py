@@ -67,7 +67,7 @@ def test_pos07_1_reverses_real_sale_copies_prices_and_audits_once(client, db_ses
     assert "CANCELLATION" in audits[0].details
 
 
-def test_pos07_2_second_cancellation_with_new_id_is_rejected(client, db_session):
+def test_pos07_4_second_cancellation_with_new_id_is_rejected(client, db_session):
     world = seed_sale(db_session)
     assert post(client, cancellation(world), world.token).status_code == 200
     event = cancellation(world)
@@ -78,7 +78,7 @@ def test_pos07_2_second_cancellation_with_new_id_is_rejected(client, db_session)
         assert stock(db_session, world, sku) == quantity
 
 
-def test_pos07_3_sale_with_return_cannot_be_cancelled(client, db_session):
+def test_pos07_5_sale_with_return_cannot_be_cancelled(client, db_session):
     world = seed_sale(db_session)
     returned = return_payload(world, [(world.skus[0], 1, 10)])
     assert post(client, returned, world.token).status_code == 200
@@ -90,7 +90,7 @@ def test_pos07_3_sale_with_return_cannot_be_cancelled(client, db_session):
 
 
 @pytest.mark.parametrize("source", ["unknown", "other-store", "not-sale"])
-def test_pos07_4_original_must_be_sale_of_same_store(client, db_session, source):
+def test_pos07_6_original_must_be_sale_of_same_store(client, db_session, source):
     world = seed_sale(db_session)
     original = "TEST-NO-SALE"
     if source == "other-store":
@@ -107,7 +107,7 @@ def test_pos07_4_original_must_be_sale_of_same_store(client, db_session, source)
     assert_not_saved(db_session, event)
 
 
-def test_pos07_5_return_after_cancellation_is_rejected(client, db_session):
+def test_pb07_return_after_cancellation_is_rejected(client, db_session):
     world = seed_sale(db_session)
     assert post(client, cancellation(world), world.token).status_code == 200
     event = return_payload(world, [(world.skus[0], 1, 10)])
@@ -116,7 +116,7 @@ def test_pos07_5_return_after_cancellation_is_rejected(client, db_session):
     assert stock(db_session, world, world.skus[0]) == 12
 
 
-def test_pos07_6_resend_ignores_items_and_changes_stock_once(client, db_session):
+def test_pb07_resend_ignores_items_and_changes_stock_once(client, db_session):
     world = seed_sale(db_session)
     event = cancellation(world)
     assert post(client, event, world.token).status_code == 200
@@ -134,14 +134,14 @@ def test_pos07_6_resend_ignores_items_and_changes_stock_once(client, db_session)
 
 
 @pytest.mark.parametrize("original", [None, "", " ", "é"])
-def test_pos07_4_invalid_reference_is_422(client, db_session, original):
+def test_pb07_invalid_reference_is_422(client, db_session, original):
     world = seed_sale(db_session)
     event = cancellation(world, original_transaction_id=original)
     assert_error(post(client, event, world.token), 422, "INVALID_EVENT")
     assert_not_saved(db_session, event)
 
 
-def test_pos07_1_failure_after_stock_change_rolls_back_and_can_retry(client, db_session, monkeypatch):
+def test_pb07_failure_after_stock_change_rolls_back_and_can_retry(client, db_session, monkeypatch):
     world = seed_sale(db_session)
     event = cancellation(world)
     def fail(*args):
@@ -156,7 +156,7 @@ def test_pos07_1_failure_after_stock_change_rolls_back_and_can_retry(client, db_
     assert post(client, event, world.token).status_code == 200
 
 
-def test_pos07_1_corrected_lock_order(client, db_session, monkeypatch):
+def test_pb07_corrected_lock_order(client, db_session, monkeypatch):
     world = seed_sale(db_session)
     calls = []
     for name in ("require_original_sale", "lock_original_sale", "claim_transaction"):
@@ -185,7 +185,7 @@ def cleanup(engine, world, txn_ids):
 
 
 @pytest.mark.parametrize("competitor", ["RETURN", "CANCELLATION", "SAME-ID"])
-def test_pos07_6_concurrent_events_serialize_without_deadlock(test_engine, monkeypatch, competitor):
+def test_pb07_concurrent_events_serialize_without_deadlock(test_engine, monkeypatch, competitor):
     with Session(test_engine) as session:
         world = seed_sale(session, sold={f"TEST-SKU-{uid(8)}": 2})
     first = cancellation(world)
