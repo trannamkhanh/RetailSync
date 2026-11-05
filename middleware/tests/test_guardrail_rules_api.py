@@ -137,13 +137,12 @@ def test_rec26_2_deactivation(client, admin_headers, db_session):
 # REC26-3
 
 
-@pytest.mark.parametrize("threshold", [101, -1])
-def test_rec26_3_max_discount_out_of_range(client, admin_headers, db_session, threshold):
+def test_rec26_3_max_discount_101_is_rejected(client, admin_headers, db_session):
     rule = all_category_rule(db_session, "MAX_DISCOUNT")
     before = rule.threshold
 
     body = assert_rejected(update(client, admin_headers, rule.rule_id,
-                                  threshold=threshold, is_active=True),
+                                  threshold=101, is_active=True),
                            422, "VALIDATION_ERROR")
 
     assert "threshold" in body["message"]
@@ -153,9 +152,50 @@ def test_rec26_3_max_discount_out_of_range(client, admin_headers, db_session, th
 # REC26-4
 
 
-@pytest.mark.parametrize("threshold", [1.5, -1])
-def test_rec26_4_min_shelf_life_is_whole_days(client, admin_headers, db_session, threshold):
+@pytest.mark.parametrize("rule_type", ["MAX_DISCOUNT", "MIN_PRICE", "MIN_SHELF_LIFE"])
+def test_rec26_4_negative_threshold_is_rejected(client, admin_headers, db_session, rule_type):
+    rule = all_category_rule(db_session, rule_type)
+    before = rule.threshold
+
+    body = assert_rejected(update(client, admin_headers, rule.rule_id,
+                                  threshold=-1, is_active=True),
+                           422, "VALIDATION_ERROR")
+
+    assert "threshold" in body["message"]
+    assert stored(db_session, rule.rule_id).threshold == before
+
+
+# Threshold cases outside the REC26 sheet.
+
+
+def test_pb26_min_shelf_life_must_be_whole_days(client, admin_headers, db_session):
     rule = all_category_rule(db_session, "MIN_SHELF_LIFE")
+    before = rule.threshold
+
+    body = assert_rejected(update(client, admin_headers, rule.rule_id,
+                                  threshold=1.5, is_active=True),
+                           422, "VALIDATION_ERROR")
+
+    assert "threshold" in body["message"]
+    assert stored(db_session, rule.rule_id).threshold == before
+
+
+def test_pb26_min_price_accepts_the_largest_decimal_12_2_value(client, admin_headers, db_session):
+    rule = all_category_rule(db_session, "MIN_PRICE")
+
+    response = update(client, admin_headers, rule.rule_id, threshold=9999999999.99,
+                      is_active=True)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["threshold"] == 9999999999.99
+    assert stored(db_session, rule.rule_id).threshold == Decimal("9999999999.99")
+
+
+@pytest.mark.parametrize("threshold", [99999999999, 10000000000, 1e10],
+                         ids=["eleven-digits", "large-int", "scientific"])
+def test_pb26_threshold_above_decimal_12_2_is_rejected(client, admin_headers, db_session,
+                                                       threshold):
+    rule = all_category_rule(db_session, "MIN_PRICE")
     before = rule.threshold
 
     body = assert_rejected(update(client, admin_headers, rule.rule_id,
@@ -166,11 +206,11 @@ def test_rec26_4_min_shelf_life_is_whole_days(client, admin_headers, db_session,
     assert stored(db_session, rule.rule_id).threshold == before
 
 
-# REC26-5
+# Validation cases outside the REC26 sheet.
 
 
 @pytest.mark.parametrize("rule_type", ["MAX_DISCOUNT", "MIN_PRICE", "MIN_SHELF_LIFE"])
-def test_rec26_5_three_decimals_are_rejected(client, admin_headers, db_session, rule_type):
+def test_pb26_three_decimals_are_rejected(client, admin_headers, db_session, rule_type):
     rule = all_category_rule(db_session, rule_type)
     before = rule.threshold
 
@@ -182,7 +222,7 @@ def test_rec26_5_three_decimals_are_rejected(client, admin_headers, db_session, 
     assert stored(db_session, rule.rule_id).threshold == before
 
 
-def test_rec26_5_extra_field_is_rejected(client, admin_headers, db_session):
+def test_pb26_extra_field_is_rejected(client, admin_headers, db_session):
     rule = create_rule(db_session, "MAX_DISCOUNT", 10)
 
     body = assert_rejected(update(client, admin_headers, rule.rule_id, threshold=20,
@@ -193,7 +233,7 @@ def test_rec26_5_extra_field_is_rejected(client, admin_headers, db_session):
     assert float(stored(db_session, rule.rule_id).threshold) == 10.0
 
 
-def test_rec26_5_missing_field_is_rejected(client, admin_headers, db_session):
+def test_pb26_missing_field_is_rejected(client, admin_headers, db_session):
     rule = create_rule(db_session, "MAX_DISCOUNT", 10)
 
     response = client.put(RULE_URL.format(rule_id=rule.rule_id), headers=admin_headers,
@@ -201,6 +241,9 @@ def test_rec26_5_missing_field_is_rejected(client, admin_headers, db_session):
 
     body = assert_rejected(response, 422, "VALIDATION_ERROR")
     assert "is_active" in body["message"]
+
+
+# REC26-5
 
 
 def test_rec26_5_unknown_rule_returns_404(client, admin_headers):
@@ -211,17 +254,17 @@ def test_rec26_5_unknown_rule_returns_404(client, admin_headers):
 
 
 @pytest.mark.parametrize("rule_id", [0, 2_147_483_648])
-def test_rec26_5_rule_id_out_of_range_is_422(client, admin_headers, rule_id):
+def test_pb26_rule_id_out_of_range_is_422(client, admin_headers, rule_id):
     body = assert_rejected(update(client, admin_headers, rule_id, threshold=10, is_active=True),
                            422, "VALIDATION_ERROR")
 
     assert "rule_id" in body["message"]
 
 
-# REC26-6
+# Tightening rule (DS-07); not in the REC26 sheet.
 
 
-def test_rec26_6_category_max_discount_may_not_pass_the_all_category_rule(
+def test_pb26_tightening_category_max_discount_may_not_pass_the_all_category_rule(
         client, admin_headers, db_session):
     all_rule = all_category_rule(db_session, "MAX_DISCOUNT")
     category_rule = create_rule(db_session, "MAX_DISCOUNT", Decimal(all_rule.threshold) - 10)
@@ -234,7 +277,7 @@ def test_rec26_6_category_max_discount_may_not_pass_the_all_category_rule(
     assert stored(db_session, category_rule.rule_id).threshold == Decimal(all_rule.threshold) - 10
 
 
-def test_rec26_6_all_category_rule_may_not_drop_below_a_category_rule(
+def test_pb26_tightening_all_category_rule_may_not_drop_below_a_category_rule(
         client, admin_headers, db_session):
     all_rule = all_category_rule(db_session, "MAX_DISCOUNT")
     category_rule = create_rule(db_session, "MAX_DISCOUNT", Decimal(all_rule.threshold) - 10)
@@ -247,7 +290,8 @@ def test_rec26_6_all_category_rule_may_not_drop_below_a_category_rule(
     assert stored(db_session, category_rule.rule_id).threshold == Decimal(all_rule.threshold) - 10
 
 
-def test_rec26_6_a_category_rule_may_equal_the_all_category_rule(client, admin_headers, db_session):
+def test_pb26_tightening_category_rule_may_equal_the_all_category_rule(client, admin_headers,
+                                                                       db_session):
     all_rule = all_category_rule(db_session, "MAX_DISCOUNT")
     category_rule = create_rule(db_session, "MAX_DISCOUNT", Decimal(all_rule.threshold) - 10)
 
@@ -258,7 +302,7 @@ def test_rec26_6_a_category_rule_may_equal_the_all_category_rule(client, admin_h
 
 
 @pytest.mark.parametrize("rule_type", ["MIN_PRICE", "MIN_SHELF_LIFE"])
-def test_rec26_6_category_rule_may_not_go_below_the_all_category_rule(
+def test_pb26_tightening_category_rule_may_not_go_below_the_all_category_rule(
         client, admin_headers, db_session, rule_type):
     all_rule = all_category_rule(db_session, rule_type)
     category_rule = create_rule(db_session, rule_type, Decimal(all_rule.threshold) + 5)
@@ -271,7 +315,7 @@ def test_rec26_6_category_rule_may_not_go_below_the_all_category_rule(
     assert "threshold" in body["message"]
 
 
-def test_rec26_6_inactive_rules_are_not_tightened(client, admin_headers, db_session):
+def test_pb26_tightening_ignores_inactive_rules(client, admin_headers, db_session):
     all_rule = all_category_rule(db_session, "MAX_DISCOUNT")
     category_rule = create_rule(db_session, "MAX_DISCOUNT", Decimal(all_rule.threshold) - 10)
 
@@ -319,6 +363,9 @@ def test_missing_token_returns_401(client):
     assert_rejected(update(client, {}, 1, threshold=10, is_active=True), 401, "UNAUTHORIZED")
 
 
+# REC26-6: a Staff token is refused. The same check covers the other roles.
+
+
 @pytest.mark.parametrize("username,api_role", [
     ("TEST-gr-pos", "POS"),
     ("TEST-gr-staff", "Staff"),
@@ -326,7 +373,7 @@ def test_missing_token_returns_401(client):
     ("TEST-gr-hq", "HQ"),
     ("TEST-gr-auditor", "Auditor"),
 ], ids=["pos", "staff", "manager", "hq", "auditor"])
-def test_every_other_role_is_forbidden(client, admin, db_session, username, api_role):
+def test_rec26_6_other_roles_are_forbidden(client, admin, db_session, username, api_role):
     db_role = {"POS": "POS_SYSTEM", "Staff": "STORE_STAFF", "Manager": "STORE_MANAGER",
                "HQ": "HQ_OPERATOR", "Auditor": "AUDITOR"}[api_role]
     db_session.add(StaffUser(username=username, full_name="Guardrail caller", role=db_role))
