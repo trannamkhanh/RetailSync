@@ -9,8 +9,9 @@ Regional middleware between POS terminals and HQ: realtime multi-store inventory
 | `middleware/` | FastAPI service; modules follow the Architecture module view |
 | `database/` | Versioned SQL Server migrations, HQ mock tables, seed data |
 | `docs/design/` | DS-04 OpenAPI contract, DS-05 sync design, DS-07 guardrail rules |
+| `clients/demo-pos/` | WinForms demo POS with monitor panels (PB-45 part 1) |
 
-Planned: `hq-demo/` (PB-18), `pos-demo/` and `staff-app/` (WinForms clients, PB-45, PB-46, PB-47).
+Planned: `hq-demo/` (PB-18) and `staff-app/` (WinForms client, PB-46, PB-47).
 
 ## Run
 
