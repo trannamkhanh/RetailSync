@@ -16,3 +16,6 @@ obj/
 *.crt
 .tokens/
 .certs/
+appsettings.Local.json
+TestResults/
+*.trx
