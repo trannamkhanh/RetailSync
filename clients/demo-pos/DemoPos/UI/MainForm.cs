@@ -10,7 +10,7 @@ namespace DemoPos.UI;
 /// <summary>The demo screen: POS, monitor panels, terminals table and request log.</summary>
 public sealed class MainForm : Form
 {
-    private sealed record PendingRequest(TerminalConfig Terminal, string RawBody);
+    private sealed record PendingRequest(TerminalConfig Terminal, string RawBody, bool ClearCartOnSuccess);
 
     private readonly LoadedConfig _loaded;
     private readonly AppConfig _config;
@@ -784,14 +784,8 @@ public sealed class MainForm : Form
             }).ToList();
             var posEvent = PosEvents.Sale(terminal.StoreId, terminal.PosId, eventItems);
             var raw = PosEventJson.Serialize(posEvent);
-            var result = await SendCoreAsync(terminal, posEvent, raw, addHistory: true);
-            if (result.Outcome is PosOutcome.OK)
-            {
-                _cart.Clear();
-                UpdateCartTotal();
-            }
-
-            return result;
+            return await SendCoreAsync(terminal, posEvent, raw, addHistory: true,
+                clearCartOnSuccess: true);
         }
         catch (Exception error)
         {
@@ -807,7 +801,8 @@ public sealed class MainForm : Form
 
     private async Task<PosResult> SendCoreAsync(TerminalConfig terminal, PosEvent posEvent,
                                                 string rawBody, bool addHistory,
-                                                TerminalClient? clientOverride = null)
+                                                TerminalClient? clientOverride = null,
+                                                bool clearCartOnSuccess = false)
     {
         PosResult result;
         if (_mockMode)
@@ -822,7 +817,17 @@ public sealed class MainForm : Form
 
         _resultPanel.ShowResult(result);
         UpdateTerminalResult(terminal, result);
-        _pendingRetry = result.CanRetry ? new PendingRequest(terminal, rawBody) : null;
+        _pendingRetry = result.CanRetry
+            ? new PendingRequest(terminal, rawBody, clearCartOnSuccess)
+            : null;
+
+        // Keep Pay and Retry consistent: a successful SALE empties the cart
+        // exactly once, whether it succeeded on the first send or on Retry.
+        if (clearCartOnSuccess && posEvent.EventType == EventTypes.Sale && result.IsSuccess)
+        {
+            _cart.Clear();
+            UpdateCartTotal();
+        }
 
         if (addHistory)
         {
@@ -1074,7 +1079,8 @@ public sealed class MainForm : Form
         try
         {
             var posEvent = PosEventJson.Deserialize(pending.RawBody);
-            await SendCoreAsync(pending.Terminal, posEvent, pending.RawBody, addHistory: true);
+            await SendCoreAsync(pending.Terminal, posEvent, pending.RawBody, addHistory: true,
+                clearCartOnSuccess: pending.ClearCartOnSuccess);
         }
         catch (Exception error)
         {
