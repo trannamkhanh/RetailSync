@@ -220,3 +220,37 @@ def stock_changes(session: Session, txn_id: str) -> list[AuditLog]:
             .order_by(AuditLog.audit_id)
         )
     )
+
+
+def assert_ledger_balanced(session: Session, store_id: str, skus: list[str],
+                           opening: dict[str, int]) -> None:
+    """Check on-hand stock against its movement ledger for an isolated store.
+
+    A transaction may move several SKUs, so the once-only check is per
+    transaction and SKU: each ``(txn_id, sku)`` has at most one movement.
+    """
+    assert set(skus) == set(opening)
+    session.expire_all()
+    for sku in skus:
+        inventory = session.get(Inventory, (store_id, sku))
+        assert inventory is not None, f"missing inventory row for {store_id}/{sku}"
+        assert inventory.quantity >= 0, f"negative stock for {store_id}/{sku}"
+        movement_total = session.scalar(
+            select(func.coalesce(func.sum(InventoryMovement.quantity), 0)).where(
+                InventoryMovement.store_id == store_id,
+                InventoryMovement.sku == sku,
+            )
+        )
+        assert inventory.quantity == opening[sku] + int(movement_total)
+
+    repeated_movements = session.execute(
+        select(InventoryMovement.txn_id, InventoryMovement.sku)
+        .where(
+            InventoryMovement.store_id == store_id,
+            InventoryMovement.txn_id.is_not(None),
+            InventoryMovement.sku.in_(skus),
+        )
+        .group_by(InventoryMovement.txn_id, InventoryMovement.sku)
+        .having(func.count() > 1)
+    ).all()
+    assert not repeated_movements, f"multiple stock movements for one transaction/SKU: {repeated_movements}"
