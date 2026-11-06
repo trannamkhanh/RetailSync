@@ -11,10 +11,12 @@ from app.api.pos import router as pos_router
 from app.api.products import router as products_router
 from app.core.config import API_PREFIX
 from app.core.errors import register_error_handlers
+from app.core.pos_logging import PosRequestLoggingMiddleware
 
 
 app = FastAPI(title="RetailSync Middleware", version="0.1.0")
 register_error_handlers(app)
+app.add_middleware(PosRequestLoggingMiddleware, failure_status=503)
 app.include_router(admin_router, prefix=API_PREFIX)
 app.include_router(audit_router, prefix=API_PREFIX)
 app.include_router(guardrails_router, prefix=API_PREFIX)
