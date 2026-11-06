@@ -256,6 +256,23 @@ def test_unknown_store_or_terminal_returns_422(client, db_session) -> None:
     assert _count(db_session, PosTransaction, txn_id=payload["transaction_id"]) == 0
 
 
+def test_pos08_8_inactive_pos_is_rejected(client, db_session) -> None:
+    world = _seed(db_session)
+    terminal = db_session.get(PosTerminal, world.pos_id)
+    terminal.status = "INACTIVE"
+    db_session.flush()
+    payload = _payload(world, [(world.skus[0], 1, 1000)])
+
+    response = _post(client, payload, world.token)
+
+    _assert_error(response, 422, "UNREGISTERED_STORE_OR_POS")
+    assert _count(db_session, PosTransaction, txn_id=payload["transaction_id"]) == 0
+    assert _count(db_session, TransactionItem, txn_id=payload["transaction_id"]) == 0
+    assert _count(db_session, InventoryMovement, txn_id=payload["transaction_id"]) == 0
+    db_session.expire_all()
+    assert db_session.get(Inventory, (world.store_id, world.skus[0])).quantity == 10
+
+
 def test_token_for_another_terminal_or_without_scope_returns_403(client, db_session) -> None:
     world = _seed(db_session)
     other_pos = f"TEST-POS-{_uid(8)}"
