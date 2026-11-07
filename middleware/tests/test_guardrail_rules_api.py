@@ -394,3 +394,48 @@ def test_the_list_never_commits(client, admin_headers, db_session, monkeypatch):
 
     commit.assert_not_called()
     assert float(stored(db_session, rule.rule_id).threshold) == 10.0
+
+
+def test_pb26_threshold_must_be_a_json_number(client, admin_headers, db_session):
+    rule = create_rule(db_session, "MAX_DISCOUNT", 10)
+
+    body = assert_rejected(
+        update(client, admin_headers, rule.rule_id, threshold="40", is_active=True),
+        422, "VALIDATION_ERROR")
+
+    assert "threshold" in body["message"]
+    assert float(stored(db_session, rule.rule_id).threshold) == 10.0
+
+
+def test_pb26_threshold_boolean_is_rejected(client, admin_headers, db_session):
+    rule = create_rule(db_session, "MAX_DISCOUNT", 10)
+
+    body = assert_rejected(
+        update(client, admin_headers, rule.rule_id, threshold=True, is_active=True),
+        422, "VALIDATION_ERROR")
+
+    assert "threshold" in body["message"]
+    assert float(stored(db_session, rule.rule_id).threshold) == 10.0
+
+
+@pytest.mark.parametrize("value", [1, "yes", "true"], ids=["one", "yes", "text-true"])
+def test_pb26_is_active_must_be_a_json_boolean(client, admin_headers, db_session, value):
+    rule = create_rule(db_session, "MAX_DISCOUNT", 10)
+
+    body = assert_rejected(
+        update(client, admin_headers, rule.rule_id, threshold=20, is_active=value),
+        422, "VALIDATION_ERROR")
+
+    assert "is_active" in body["message"]
+    assert float(stored(db_session, rule.rule_id).threshold) == 10.0
+
+
+def test_pb26_negative_zero_is_stored_as_zero(client, admin_headers, db_session):
+    rule = create_rule(db_session, "MAX_DISCOUNT", 10)
+
+    response = update(client, admin_headers, rule.rule_id, threshold=-0.0, is_active=True)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["threshold"] == 0.0
+    assert stored(db_session, rule.rule_id).threshold == Decimal("0")
+

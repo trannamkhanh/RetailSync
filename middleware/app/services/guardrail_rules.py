@@ -97,6 +97,9 @@ def update_rule(session: Session, rule_id: int, threshold: Decimal, is_active: b
     rule = repository.get_rule(session, rule_id)
     if rule is None:
         raise ApiError(404, "NOT_FOUND", f"Guardrail rule {rule_id} does not exist.")
+    if threshold == 0:
+        # A JSON -0 reaches us as Decimal("-0.0"); store it as plain 0.
+        threshold = Decimal("0")
     _validate_threshold(rule.rule_type, threshold)
     _check_tightening(repository.list_rules(session), rule, threshold, is_active)
 

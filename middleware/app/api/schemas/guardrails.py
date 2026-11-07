@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class GuardrailRuleRead(BaseModel):
@@ -23,7 +23,15 @@ class GuardrailRuleUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     threshold: Decimal = Field(ge=Decimal("0"))
-    is_active: bool
+    is_active: bool = Field(strict=True)
+
+    @field_validator("threshold", mode="before")
+    @classmethod
+    def _threshold_is_a_json_number(cls, value: object) -> object:
+        """DS-04 says number; a JSON string or boolean must not be coerced."""
+        if isinstance(value, (str, bool)):
+            raise ValueError("must be a JSON number, not a string or a boolean.")
+        return value
 
 
 class GuardrailRuleList(BaseModel):
