@@ -169,6 +169,16 @@ docker compose run --rm --no-deps --volume "${PWD}:/repo:ro" --workdir /repo --e
 Without a client certificate the gateway answers 400. With another terminal's
 certificate, or sent straight to port 8443, the event gets 403 `FORBIDDEN`.
 
+#### Database locks on the POS path (PB-04-5)
+
+Each single wait for a database lock while a POS event is handled, from the
+token's account lookup to the audit insert, lasts at most `POS_LOCK_TIMEOUT_MS`
+(default 2000, positive values only). This is a limit per lock wait, not per
+request: an event that meets several held locks can wait longer in total. When a
+wait times out, the event is rolled back and the POS gets 503
+`SERVICE_UNAVAILABLE`, and it resends the same `transaction_id`. Each timeout is
+logged as one warning line containing `SQL 1222`, without a traceback.
+
 ## Test
 
 ```bash
