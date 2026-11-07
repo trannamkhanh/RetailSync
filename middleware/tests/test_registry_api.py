@@ -259,6 +259,33 @@ def test_invalid_store_input_returns_422_naming_the_field(client, admin_token, d
     assert count(db_session, Store, Store.store_id == STORE_ID) == 0
 
 
+def test_pb08_fifty_emoji_in_a_store_name_are_accepted(client, admin_token, db_session):
+    name = "\U0001F600" * 50
+
+    response = register_store(client, admin_token, name=name)
+
+    assert response.status_code == 201, response.text
+    assert response.json()["name"] == name
+    assert count(db_session, Store, Store.store_id == STORE_ID) == 1
+
+
+def test_pb08_a_fifty_first_emoji_returns_422_naming_name(client, admin_token, db_session):
+    response = register_store(client, admin_token, name="\U0001F600" * 51)
+
+    body = assert_error(response, 422, "VALIDATION_ERROR")
+    assert "name" in body["message"]
+    assert count(db_session, Store, Store.store_id == STORE_ID) == 0
+
+
+def test_pb08_one_hundred_ascii_characters_still_fit_a_store_name(client, admin_token, db_session):
+    name = "x" * 100
+
+    response = register_store(client, admin_token, name=name)
+
+    assert response.status_code == 201, response.text
+    assert response.json()["name"] == name
+
+
 def test_missing_store_field_returns_422(client, admin_token):
     payload = store_payload()
     del payload["store_id"]
