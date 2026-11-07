@@ -7,7 +7,11 @@ from sqlalchemy.orm import Session
 
 
 def find_sale(session: Session, store_id: str, txn_id: str) -> Any | None:
-    """Read a SALE of this store without taking a lock."""
+    """Read a SALE of this store without taking a lock.
+
+    The whole result is read, as in ``lock_sale``, so an error SQL Server
+    reports after the first row is not discarded.
+    """
     return session.execute(
         text(
             """
@@ -17,7 +21,7 @@ def find_sale(session: Session, store_id: str, txn_id: str) -> Any | None:
             """
         ),
         {"txn_id": txn_id, "store_id": store_id},
-    ).first()
+    ).one_or_none()
 
 
 def lock_sale(session: Session, store_id: str, txn_id: str) -> Any | None:
@@ -25,6 +29,14 @@ def lock_sale(session: Session, store_id: str, txn_id: str) -> Any | None:
 
     A RETURN and a CANCELLATION of the same sale therefore run one after the
     other: the second waits here until the first commits or rolls back.
+
+    The result is read to the end with ``one_or_none`` on purpose. The plan can
+    scan, stream the matching row and only then report the deadlock victim
+    (1205) while it finishes. ``first()`` closes the cursor after that row and
+    loses the error, so the request would continue in the transaction SQL
+    Server already rolled back; the claim is gone and the item insert then
+    fails with FK 547. Reading to the end makes the 1205 reach the handler,
+    which rolls the request back and answers 503 SERVICE_UNAVAILABLE.
     """
     return session.execute(
         text(
@@ -35,7 +47,7 @@ def lock_sale(session: Session, store_id: str, txn_id: str) -> Any | None:
             """
         ),
         {"txn_id": txn_id, "store_id": store_id},
-    ).first()
+    ).one_or_none()
 
 
 def sold_quantities(session: Session, txn_id: str) -> dict[str, int]:
