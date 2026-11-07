@@ -5,7 +5,7 @@ rejection that rolled the event back is still recorded. A failed write is
 logged and swallowed: it never changes the response (DS-05 section 3).
 """
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 import json
 import logging
@@ -32,29 +32,50 @@ LOCK_TIMEOUT_MS = 200
 _AUDIT_KEY = re.compile(r"[A-Za-z0-9_-]{1,40}")
 
 
-@contextmanager
-def _lock_wait_limited(session: Session) -> Iterator[None]:
-    """Bound each lock wait of this write, then restore the connection's setting.
+def bound_lock_waits(session: Session, timeout_ms: int) -> Callable[[], None]:
+    """Set LOCK_TIMEOUT on the session's connection; return a function that restores it.
 
-    The raw cursor still works after a failed flush, and the restore runs
-    before the session can hand the connection back to the pool.
+    Call the function before the session commits or rolls back, while it still
+    holds the connection: the raw cursor works even after a failed flush, and
+    the connection then goes back to the pool with its previous setting. A
+    second call does nothing. Also used by the POS router.
     """
     cursor = session.connection().connection.cursor()
     try:
         previous = int(cursor.execute("SELECT @@LOCK_TIMEOUT").fetchone()[0])
-        cursor.execute(f"SET LOCK_TIMEOUT {LOCK_TIMEOUT_MS}")
-        try:
-            yield
-        finally:
-            cursor.execute(f"SET LOCK_TIMEOUT {previous}")
-    finally:
+        cursor.execute(f"SET LOCK_TIMEOUT {int(timeout_ms)}")
+    except BaseException:
         cursor.close()
+        raise
+    restored = False
+
+    def restore() -> None:
+        nonlocal restored
+        if restored:
+            return
+        restored = True
+        try:
+            cursor.execute(f"SET LOCK_TIMEOUT {previous}")
+        finally:
+            cursor.close()
+
+    return restore
+
+
+@contextmanager
+def lock_wait_limited(session: Session, timeout_ms: int) -> Iterator[None]:
+    """Bound each lock wait in the block. Flush inside it; commit or roll back after it."""
+    restore = bound_lock_waits(session, timeout_ms)
+    try:
+        yield
+    finally:
+        restore()
 
 
 def _write(principal: Principal, action: str, transaction_id: str | None, details: str | None) -> None:
     try:
         with session_factory() as session:
-            with _lock_wait_limited(session):
+            with lock_wait_limited(session, LOCK_TIMEOUT_MS):
                 user_id = find_user_id(session, principal.sub)
                 record_audit(session, action, "pos_transaction", transaction_id, user_id, details)
                 session.flush()

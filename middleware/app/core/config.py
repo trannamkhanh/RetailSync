@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from pydantic import SecretStr
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,6 +25,10 @@ class Settings(BaseSettings):
     jwt_secret: SecretStr | None = None
     mtls_required: bool = False
     pos_gateway_secret: SecretStr | None = None
+    # Longest wait for each single lock on the POS path. A request that meets
+    # several held locks can wait longer in total. 0 or -1 would mean no wait
+    # or no limit, so only a positive value is accepted.
+    pos_lock_timeout_ms: int = Field(default=2000, gt=0)
 
 
 settings = Settings()
