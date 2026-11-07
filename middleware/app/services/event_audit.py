@@ -33,16 +33,17 @@ _AUDIT_KEY = re.compile(r"[A-Za-z0-9_-]{1,40}")
 
 
 @contextmanager
-def _lock_wait_limited(session: Session) -> Iterator[None]:
-    """Bound each lock wait of this write, then restore the connection's setting.
+def lock_wait_limited(session: Session, timeout_ms: int) -> Iterator[None]:
+    """Bound each lock wait in the block, then restore the connection's setting.
 
-    The raw cursor still works after a failed flush, and the restore runs
-    before the session can hand the connection back to the pool.
+    Flush inside the block and commit or roll back after it: the raw cursor
+    still works after a failed flush, and the restore runs before the session
+    can hand the connection back to the pool. Also used by the POS router.
     """
     cursor = session.connection().connection.cursor()
     try:
         previous = int(cursor.execute("SELECT @@LOCK_TIMEOUT").fetchone()[0])
-        cursor.execute(f"SET LOCK_TIMEOUT {LOCK_TIMEOUT_MS}")
+        cursor.execute(f"SET LOCK_TIMEOUT {int(timeout_ms)}")
         try:
             yield
         finally:
@@ -54,7 +55,7 @@ def _lock_wait_limited(session: Session) -> Iterator[None]:
 def _write(principal: Principal, action: str, transaction_id: str | None, details: str | None) -> None:
     try:
         with session_factory() as session:
-            with _lock_wait_limited(session):
+            with lock_wait_limited(session, LOCK_TIMEOUT_MS):
                 user_id = find_user_id(session, principal.sub)
                 record_audit(session, action, "pos_transaction", transaction_id, user_id, details)
                 session.flush()

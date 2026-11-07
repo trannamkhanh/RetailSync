@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     jwt_secret: SecretStr | None = None
     mtls_required: bool = False
     pos_gateway_secret: SecretStr | None = None
+    pos_lock_timeout_ms: int = 2000
 
 
 settings = Settings()

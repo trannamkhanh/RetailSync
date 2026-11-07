@@ -1,21 +1,29 @@
-"""POS event endpoint (PB-05, PB-04-3, PB-48-4): receive an event from a registered terminal."""
+"""POS event endpoint (PB-05, PB-04-3, PB-48-4, PB-04-5): receive an event from a registered terminal."""
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends
 from pydantic import ValidationError
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.api.schemas.pos import PosEvent, PosEventResult
 from app.core.client_cert import require_gateway, require_terminal_certificate
+from app.core.config import settings
 from app.core.db import get_db
 from app.core.errors import ApiError
 from app.core.security import Principal, require_role
-from app.services.event_audit import audit_duplicate_event, audit_rejected_event
+from app.services.event_audit import audit_duplicate_event, audit_rejected_event, lock_wait_limited
 from app.services.pos_events import process_event
 
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/pos", tags=["POS"])
+
+# SQL Server: "Lock request time out period exceeded."
+LOCK_TIMEOUT_ERROR = 1222
 
 
 def _invalid_event(error: ValidationError) -> ApiError:
@@ -37,6 +45,16 @@ def _parse_event(payload: Any) -> PosEvent:
         return PosEvent.model_validate(payload)
     except ValidationError as error:
         raise _invalid_event(error) from None
+
+
+def _is_lock_timeout(error: DBAPIError) -> bool:
+    return f"({LOCK_TIMEOUT_ERROR})" in str(error.orig)
+
+
+def _busy() -> ApiError:
+    return ApiError(503, "SERVICE_UNAVAILABLE",
+                    "The database is busy and nothing was stored. Retry with the same transaction_id.",
+                    outcome="ERROR")
 
 
 def _raw_transaction_id(payload: Any) -> str | None:
@@ -67,15 +85,29 @@ def receive_pos_event(payload: Any = Body(default=None),
     With ``MTLS_REQUIRED`` on, ``require_gateway`` runs before ``require_role``
     and refuses a request that skipped the gateway. Once the body is parsed, the
     certificate must belong to the event's terminal; that 403 is audited (PB-48-4).
+
+    Each lock wait in the event, the STOCK_CHANGE insert included, lasts at most
+    ``POS_LOCK_TIMEOUT_MS`` (NFR01). A lock timeout rolls the event back and
+    answers 503, so the POS resends the same ``transaction_id``; it is not a
+    rejection and is not audited (PB-04-5).
     """
     try:
-        event = _parse_event(payload)
-        require_terminal_certificate(session, event.pos_id, fingerprint)
-        result = process_event(session, event, principal)
+        with lock_wait_limited(session, settings.pos_lock_timeout_ms):
+            event = _parse_event(payload)
+            require_terminal_certificate(session, event.pos_id, fingerprint)
+            result = process_event(session, event, principal)
+            session.flush()
     except ApiError as error:
         session.rollback()
         audit_rejected_event(principal, _raw_transaction_id(payload), error)
         raise
+    except DBAPIError as error:
+        if not _is_lock_timeout(error):
+            raise
+        session.rollback()
+        logger.warning("POS event %r waited %s ms for a lock and was rolled back",
+                       _raw_transaction_id(payload), settings.pos_lock_timeout_ms)
+        raise _busy() from None
     session.commit()
     if result["outcome"] == "DUPLICATE":
         audit_duplicate_event(principal, event.transaction_id)
