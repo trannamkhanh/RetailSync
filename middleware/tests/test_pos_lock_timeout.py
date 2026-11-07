@@ -14,7 +14,7 @@ from time import perf_counter
 
 import pytest
 from fastapi.testclient import TestClient
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 from sqlalchemy import Engine, create_engine, delete, select, text
 from sqlalchemy.orm import Session
 
@@ -25,11 +25,13 @@ from app.domain.models import (
     Product, StaffUser, Store, TransactionItem,
 )
 from app.main import app
+from app.core.security import create_token
 from tests.pos_test_support import World, assert_error, post, sale_payload, seed_sale, uid
 
 
 SECRET = "test-only-secret-with-enough-length-for-hs256"
 AUDIT_TABLE_LOCK = "SELECT TOP 1 * FROM dbo.audit_log WITH (TABLOCKX, HOLDLOCK)"
+ACCOUNT_TABLE_LOCK = "SELECT TOP 1 * FROM dbo.staff_user WITH (TABLOCKX, HOLDLOCK)"
 INVENTORY_ROW_LOCK = ("SELECT quantity FROM dbo.inventory WITH (UPDLOCK, ROWLOCK) "
                       "WHERE store_id = :store_id AND sku = :sku")
 
@@ -135,13 +137,17 @@ def connection_lock_timeout(pos_engine: Engine) -> int:
             "SELECT lock_timeout FROM sys.dm_exec_sessions WHERE session_id = @@SPID").scalar()
 
 
-@pytest.mark.parametrize("lock", ["audit_log", "inventory"])
+@pytest.mark.parametrize("lock", ["audit_log", "inventory", "staff_user"])
 def test_pb04_5_lock_held_lock_gives_503_then_the_resend_applies(test_engine, world, pos_engine,
                                                                  pos_client, lock):
     sku = world.skus[0]
     payload = sale_payload(world, [(sku, 1, "10.00")])
-    sql, params = ((AUDIT_TABLE_LOCK, {}) if lock == "audit_log"
-                   else (INVENTORY_ROW_LOCK, {"store_id": world.store_id, "sku": sku}))
+    # staff_user is read by require_role, before the event body runs.
+    sql, params = {
+        "audit_log": (AUDIT_TABLE_LOCK, {}),
+        "inventory": (INVENTORY_ROW_LOCK, {"store_id": world.store_id, "sku": sku}),
+        "staff_user": (ACCOUNT_TABLE_LOCK, {}),
+    }[lock]
     timeout = settings.pos_lock_timeout_ms / 1000
 
     response, waited = send_while_locked(test_engine, pos_client, payload, world.token, sql, params)
@@ -149,6 +155,7 @@ def test_pb04_5_lock_held_lock_gives_503_then_the_resend_applies(test_engine, wo
     assert waited is not None and waited < timeout + 1, f"waited {waited}s while the lock was held"
     assert waited >= timeout - 0.2
     assert_error(response, 503, "SERVICE_UNAVAILABLE")
+    assert "Retry with the same transaction_id" in response.json()["message"]
     assert_nothing_stored(test_engine, world, payload["transaction_id"], sku)
     assert connection_lock_timeout(pos_engine) == -1
 
@@ -173,6 +180,17 @@ def test_pb04_5_lock_connection_returns_with_default_timeout(test_engine, world,
     assert connection_lock_timeout(pos_engine) == -1
 
 
+def test_pb04_5_lock_connection_returns_with_default_timeout_after_401_and_403(world, pos_engine, pos_client):
+    payload = sale_payload(world, [(world.skus[0], 1, "10.00")])
+
+    unknown = post(pos_client, payload, create_token(f"TEST-NOBODY-{uid()}", "POS"))
+    assert_error(unknown, 401, "UNAUTHORIZED")
+    assert connection_lock_timeout(pos_engine) == -1
+    wrong_role = post(pos_client, payload, create_token(world.username, "Staff"))
+    assert_error(wrong_role, 403, "FORBIDDEN")
+    assert connection_lock_timeout(pos_engine) == -1
+
+
 def test_pb04_5_lock_timeout_is_configurable(test_engine, world, pos_engine, pos_client, monkeypatch):
     monkeypatch.setattr(settings, "pos_lock_timeout_ms", 500)
     sku = world.skus[0]
@@ -187,3 +205,13 @@ def test_pb04_5_lock_timeout_is_configurable(test_engine, world, pos_engine, pos
 
 def test_pb04_5_lock_timeout_defaults_to_2000_ms():
     assert Settings(_env_file=None).pos_lock_timeout_ms == 2000
+
+
+@pytest.mark.parametrize("value", [0, -1, -5, "abc", ""])
+def test_pb04_5_lock_timeout_must_be_a_positive_number_of_ms(value):
+    with pytest.raises(ValidationError, match="pos_lock_timeout_ms"):
+        Settings(_env_file=None, pos_lock_timeout_ms=value)
+
+
+def test_pb04_5_lock_timeout_of_one_ms_is_accepted():
+    assert Settings(_env_file=None, pos_lock_timeout_ms=1).pos_lock_timeout_ms == 1

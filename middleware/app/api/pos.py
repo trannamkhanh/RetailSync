@@ -1,5 +1,6 @@
 """POS event endpoint (PB-05, PB-04-3, PB-48-4, PB-04-5): receive an event from a registered terminal."""
 
+from collections.abc import Callable, Generator
 import logging
 from typing import Any
 
@@ -14,7 +15,7 @@ from app.core.config import settings
 from app.core.db import get_db
 from app.core.errors import ApiError
 from app.core.security import Principal, require_role
-from app.services.event_audit import audit_duplicate_event, audit_rejected_event, lock_wait_limited
+from app.services.event_audit import audit_duplicate_event, audit_rejected_event, bound_lock_waits
 from app.services.pos_events import process_event
 
 
@@ -57,6 +58,33 @@ def _busy() -> ApiError:
                     outcome="ERROR")
 
 
+def _log_lock_timeout(stage: str) -> None:
+    """One line per lock timeout, without a traceback, so they can be counted."""
+    logger.warning("POS request timed out after %s ms waiting for a lock (SQL %s) %s; rolled back, answered 503",
+                   settings.pos_lock_timeout_ms, LOCK_TIMEOUT_ERROR, stage)
+
+
+def bounded_lock_waits(session: Session = Depends(get_db)) -> Generator[Callable[[], None], None, None]:
+    """Bound each lock wait from the start of the request (PB-04-5).
+
+    Declared before ``require_role`` on the route, so the account lookup there
+    runs under ``POS_LOCK_TIMEOUT_MS`` too; FastAPI gives both the same session.
+    Yields the restore function: the route calls it before it commits or rolls
+    back. On a 401, 403 or error raised before that, it runs here instead,
+    while ``get_db`` still holds the connection.
+    """
+    restore = bound_lock_waits(session, settings.pos_lock_timeout_ms)
+    try:
+        yield restore
+    except DBAPIError as error:
+        if not _is_lock_timeout(error):
+            raise
+        _log_lock_timeout("during the account lookup")
+        raise _busy() from None
+    finally:
+        restore()
+
+
 def _raw_transaction_id(payload: Any) -> str | None:
     """The transaction id as sent, even when the body failed validation.
 
@@ -69,6 +97,7 @@ def _raw_transaction_id(payload: Any) -> str | None:
 @router.post("/events", response_model=PosEventResult)
 def receive_pos_event(payload: Any = Body(default=None),
                       fingerprint: str | None = Depends(require_gateway),
+                      restore_lock_timeout: Callable[[], None] = Depends(bounded_lock_waits),
                       principal: Principal = Depends(require_role("POS")),
                       session: Session = Depends(get_db)) -> dict:
     """Validate the body, apply the event and commit one transaction.
@@ -86,17 +115,20 @@ def receive_pos_event(payload: Any = Body(default=None),
     and refuses a request that skipped the gateway. Once the body is parsed, the
     certificate must belong to the event's terminal; that 403 is audited (PB-48-4).
 
-    Each lock wait in the event, the STOCK_CHANGE insert included, lasts at most
-    ``POS_LOCK_TIMEOUT_MS`` (NFR01). A lock timeout rolls the event back and
-    answers 503, so the POS resends the same ``transaction_id``; it is not a
-    rejection and is not audited (PB-04-5).
+    Each single lock wait, from the account lookup to the STOCK_CHANGE insert,
+    lasts at most ``POS_LOCK_TIMEOUT_MS`` (NFR01); a request that meets several
+    held locks can wait longer in total. A lock timeout rolls the event back
+    and answers 503, so the POS resends the same ``transaction_id``; it is not
+    a rejection and is not audited (PB-04-5).
     """
     try:
-        with lock_wait_limited(session, settings.pos_lock_timeout_ms):
+        try:
             event = _parse_event(payload)
             require_terminal_certificate(session, event.pos_id, fingerprint)
             result = process_event(session, event, principal)
             session.flush()
+        finally:
+            restore_lock_timeout()
     except ApiError as error:
         session.rollback()
         audit_rejected_event(principal, _raw_transaction_id(payload), error)
@@ -105,8 +137,7 @@ def receive_pos_event(payload: Any = Body(default=None),
         if not _is_lock_timeout(error):
             raise
         session.rollback()
-        logger.warning("POS event %r waited %s ms for a lock and was rolled back",
-                       _raw_transaction_id(payload), settings.pos_lock_timeout_ms)
+        _log_lock_timeout(f"for event {_raw_transaction_id(payload)!r}")
         raise _busy() from None
     session.commit()
     if result["outcome"] == "DUPLICATE":
