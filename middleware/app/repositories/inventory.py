@@ -38,6 +38,11 @@ def update_stock_with_guard(
     serialised by SQL Server and can never pass a stale read. Returns the new
     quantity, or ``None`` when no row was updated (the row is missing or the
     guard rejected the change).
+
+    The output row is read to the end with ``one_or_none`` for the same reason
+    as ``lock_sale``: losing a late deadlock (1205) here would leave the rest of
+    the basket running in autocommit, where a later SKU could change stock
+    without its movement.
     """
     row = session.execute(
         text(
@@ -49,7 +54,7 @@ def update_stock_with_guard(
             """
         ),
         {"store_id": store_id, "sku": sku, "delta": delta},
-    ).first()
+    ).one_or_none()
     return int(row.quantity) if row is not None else None
 
 
