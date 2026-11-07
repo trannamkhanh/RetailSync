@@ -61,9 +61,13 @@ BARCODE = "8930000000011"
 STORE_DN1 = "STORE-DN1"
 POS_DN1 = "POS-DN1-01"
 
-RUN = datetime.now(timezone.utc).strftime("%H%M%S") + str(random.randrange(10))
-STORE = f"SM{RUN}"
-POS = f"SM-POS-{RUN}"
+NOW = datetime.now(timezone.utc)
+# Transaction ids carry the date, so a log from another day is recognisable.
+RUN = NOW.strftime("%d%m%H%M%S") + str(random.randrange(10))
+# store_id is varchar(10) and pos_id varchar(20); keep their suffix shorter.
+SHORT = NOW.strftime("%H%M%S") + str(random.randrange(10))
+STORE = f"SM{SHORT}"
+POS = f"SM-POS-{SHORT}"
 TXN_SALE = f"TXN-SMK-{RUN}-A"
 TXN_RETURN = f"TXN-SMK-{RUN}-R"
 TXN_SALE_B = f"TXN-SMK-{RUN}-B"
