@@ -137,7 +137,7 @@ def _assert_persisted(engine: Engine, store: str, opening: dict[str, int], appli
             assert not qty or txn not in cancelled
 
 
-def test_pb10_4_mixed_concurrent_traffic(test_engine, monkeypatch, caplog) -> None:
+def test_concurrency_mixed_traffic(test_engine, monkeypatch, caplog) -> None:
     suffix = uid(5)
     store = f"TEST-{suffix}"
     terminals = [f"TEST-POS-{suffix}-{i}" for i in range(3)]
@@ -186,10 +186,16 @@ def test_pb10_4_mixed_concurrent_traffic(test_engine, monkeypatch, caplog) -> No
         results = initial_results + race_results + mixed_results
         retries = sum(result[2] for result in results)
         deadlocks = sum("(1205)" in str(record.exc_info[1]) for record in caplog.records if record.exc_info)
-        lock_timeouts = sum("(1222)" in str(record.exc_info[1]) for record in caplog.records if record.exc_info)
+        lock_timeouts = sum(
+            record.name == "app.api.pos" and record.levelname == "WARNING"
+            and "(SQL 1222)" in record.getMessage()
+            for record in caplog.records
+        )
+        lock_errors = deadlocks + lock_timeouts
         outcomes = Counter(body["code"] for _, body, _, _ in results)
         print(f"POS traffic seed={SEED}, final={len(results)}, 503={retries}, SQL 1205={deadlocks}, "
-              f"SQL 1222={lock_timeouts}, elapsed={elapsed:.2f}s, "
+              f"SQL 1222={lock_timeouts}, lock-related 503={lock_errors}, other 503={retries - lock_errors}, "
+              f"elapsed={elapsed:.2f}s, "
               f"longest response={max(result[3] for result in results):.2f}s, codes={dict(outcomes)}", flush=True)
         sql_errors = Counter()
         for record in caplog.records:
@@ -200,6 +206,7 @@ def test_pb10_4_mixed_concurrent_traffic(test_engine, monkeypatch, caplog) -> No
                 sql_errors[(record.name, ",".join(numbers) or type(error).__name__, statement)] += 1
         for (logger, error, statement), occurrences in sql_errors.items():
             print(f"SQL diagnostic count={occurrences}, logger={logger}, error={error}, statement={statement}", flush=True)
+        assert lock_errors <= retries
         assert len(results) == 200 and elapsed < TIME_LIMIT
         assert outcomes["DUPLICATE_IGNORED"] > 0 and outcomes["INSUFFICIENT_STOCK"] == 8
         for index in range(0, len(race_results), 2):
