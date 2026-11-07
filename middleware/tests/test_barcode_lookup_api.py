@@ -57,6 +57,14 @@ def test_stf31_2_unknown_barcode_reads_no_inventory(client, world, monkeypatch):
     assert response.json()["code"] == "NOT_FOUND"
 
 
+def test_pb31_barcode_matches_case_exactly(client, world):
+    barcode = world[3]
+    assert lookup(client, world, barcode).status_code == 200
+    response = lookup(client, world, barcode.lower())
+    assert response.status_code == 404
+    assert response.json()["code"] == "NOT_FOUND"
+
+
 def test_pb31_manager_forbidden_even_with_invalid_barcode(client, world):
     response = lookup(client, world, "invalid_barcode", role="Manager")
     assert response.status_code == 403
