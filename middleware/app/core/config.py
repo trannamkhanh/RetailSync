@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     # several held locks can wait longer in total. 0 or -1 would mean no wait
     # or no limit, so only a positive value is accepted.
     pos_lock_timeout_ms: int = Field(default=2000, gt=0)
+    scheduler_enabled: bool = False
+    business_utc_offset_hours: int = Field(default=7, ge=-12, le=14)
 
 
 settings = Settings()
