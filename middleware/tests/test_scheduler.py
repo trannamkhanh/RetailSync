@@ -299,6 +299,39 @@ def test_pb15_1_thread_runs_jobs_and_stops():
     assert lock.released
 
 
+def test_pb15_1_stop_keeps_the_lock_while_a_job_is_still_running(caplog):
+    started, finish = threading.Event(), threading.Event()
+
+    def slow() -> None:
+        started.set()
+        finish.wait(timeout=10)
+
+    lock = lock_for_tests()
+    other = lock_for_tests()
+    sched = Scheduler([Job("slow", slow, every_seconds=1)], lock=lock, tick_seconds=0.05)
+    try:
+        sched.start()
+        assert started.wait(timeout=5)
+
+        with caplog.at_level(logging.WARNING, logger=scheduler.__name__):
+            sched.stop(timeout=0.2)
+
+        assert sched.is_running()
+        assert any("still running" in record.getMessage() for record in caplog.records)
+        assert other.acquire() is False
+
+        finish.set()
+        deadline = wall.monotonic() + 5
+        while sched.is_running() and wall.monotonic() < deadline:
+            wall.sleep(0.05)
+        assert not sched.is_running()
+        assert other.acquire() is True
+    finally:
+        finish.set()
+        sched.stop()
+        other.release()
+
+
 class FakeScheduler:
     def __init__(self) -> None:
         self.stopped = False
@@ -374,7 +407,11 @@ def test_pb15_1_register_job_needs_a_callable():
         register_job("job", "not callable", every_seconds=60)
 
 
-def test_pb15_1_settings_defaults():
+def test_pb15_1_settings_defaults(monkeypatch):
+    # _env_file=None skips .env files only; compose sets these for the middleware service.
+    monkeypatch.delenv("SCHEDULER_ENABLED", raising=False)
+    monkeypatch.delenv("BUSINESS_UTC_OFFSET_HOURS", raising=False)
+
     defaults = Settings(_env_file=None)
 
     assert defaults.scheduler_enabled is False

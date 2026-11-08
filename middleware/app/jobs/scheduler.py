@@ -218,13 +218,20 @@ class Scheduler:
                     self._next_run[name] = job.next_after(after)
         return ran
 
+    def _release_lock(self) -> None:
+        self._has_lock = False
+        self._lock.release()
+
     def _loop(self) -> None:
-        while not self._stop.is_set():
-            try:
-                self.tick()
-            except Exception:
-                logger.exception("Scheduler tick failed")
-            self._stop.wait(self._tick_seconds)
+        try:
+            while not self._stop.is_set():
+                try:
+                    self.tick()
+                except Exception:
+                    logger.exception("Scheduler tick failed")
+                self._stop.wait(self._tick_seconds)
+        finally:
+            self._release_lock()
 
     def start(self) -> None:
         self._stop.clear()
@@ -235,11 +242,20 @@ class Scheduler:
         return self._thread is not None and self._thread.is_alive()
 
     def stop(self, timeout: float = 30.0) -> None:
+        """Stop the thread. The lock is released only once no job is running.
+
+        If a job is still running after ``timeout`` seconds, the thread keeps the
+        lock and releases it when the job ends; if the process exits first, its
+        connection closes and SQL Server frees the lock.
+        """
         self._stop.set()
-        if self._thread is not None:
+        if self._thread is not None and self._thread.is_alive():
             self._thread.join(timeout)
-        self._has_lock = False
-        self._lock.release()
+            if self._thread.is_alive():
+                logger.warning("A job is still running %s s after stop; the job lock is kept until it ends",
+                               timeout)
+                return
+        self._release_lock()
 
 
 def start_scheduler() -> Scheduler:
