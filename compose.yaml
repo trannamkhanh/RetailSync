@@ -29,6 +29,7 @@ services:
       SQLCMDPASSWORD: ${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env}
       SQLSERVER_HOST: sqlserver
       DB_NAME: ${DB_NAME:-RTS_DB}
+      HQ_DB_NAME: ${HQ_DB_NAME:-RTS_HQ}
     volumes:
       - ./database:/workspace/database:ro
     entrypoint: ["/bin/bash", "/workspace/database/migrate.sh"]
@@ -41,6 +42,12 @@ services:
       DB_HOST: sqlserver
       SQLSERVER_PORT: 1433
       MTLS_REQUIRED: "true"
+      # PB-18: the HQ demo service, reached by its compose service name.
+      HQ_URL: https://hq-demo:9000/api/v1
+      HQ_CA_FILE: /certs/ca.crt
+      HQ_JWT_SECRET: ${HQ_JWT_SECRET:-}
+      HQ_TIMEOUT_SECONDS: "3"
+      SCHEDULER_ENABLED: "true"
     volumes:
       - ./.certs:/certs:ro
     depends_on:
@@ -48,6 +55,23 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:8443:8443"
+
+  # The simulated HQ of PB-18: its own FastAPI app, its own database.
+  hq-demo:
+    build: ./hq-demo
+    env_file: .env
+    environment:
+      DB_HOST: sqlserver
+      SQLSERVER_PORT: 1433
+      HQ_DB_NAME: ${HQ_DB_NAME:-RTS_HQ}
+      HQ_JWT_SECRET: ${HQ_JWT_SECRET:-}
+    volumes:
+      - ./.certs:/certs:ro
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:9000:9000"
 
   # POS terminals reach the middleware only through this gateway (PB-48).
   # POS_BIND_ADDRESS is the private WAN interface, never a public address.
