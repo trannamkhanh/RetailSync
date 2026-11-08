@@ -101,3 +101,11 @@ def event_audit_test_database(monkeypatch) -> None:
 @pytest.fixture(autouse=True)
 def mtls_off_by_default(monkeypatch) -> None:
     monkeypatch.setattr(settings, "mtls_required", False)
+
+
+# Compose will set SCHEDULER_ENABLED=true for the middleware service, which the
+# container test command runs (PB-15-1). Tests never start the scheduler: every
+# TestClient(app) would otherwise run jobs. A test turns it on itself.
+@pytest.fixture(autouse=True)
+def scheduler_off_by_default(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "scheduler_enabled", False)
