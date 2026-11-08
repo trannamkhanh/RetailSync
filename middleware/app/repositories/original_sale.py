@@ -1,4 +1,11 @@
-"""Queries for the SALE that a RETURN or CANCELLATION refers to."""
+"""Queries for the SALE that a RETURN or CANCELLATION refers to.
+
+The driver binds Python ``str`` as ``nvarchar``; SQLAlchemy does not call
+``setinputsizes`` for ``text()``. Every string parameter is therefore cast to
+the column's ``varchar`` length, so the predicate can use the key instead of
+``CONVERT_IMPLICIT`` on the column, which scans the index and takes a lock on
+every row it reads (issue #25).
+"""
 
 from typing import Any
 
@@ -17,7 +24,9 @@ def find_sale(session: Session, store_id: str, txn_id: str) -> Any | None:
             """
             SELECT txn_id, status
             FROM dbo.pos_transaction
-            WHERE txn_id = :txn_id AND store_id = :store_id AND txn_type = 'SALE'
+            WHERE txn_id = CAST(:txn_id AS varchar(40))
+              AND store_id = CAST(:store_id AS varchar(10))
+              AND txn_type = 'SALE'
             """
         ),
         {"txn_id": txn_id, "store_id": store_id},
@@ -43,7 +52,9 @@ def lock_sale(session: Session, store_id: str, txn_id: str) -> Any | None:
             """
             SELECT txn_id, status
             FROM dbo.pos_transaction WITH (UPDLOCK, ROWLOCK)
-            WHERE txn_id = :txn_id AND store_id = :store_id AND txn_type = 'SALE'
+            WHERE txn_id = CAST(:txn_id AS varchar(40))
+              AND store_id = CAST(:store_id AS varchar(10))
+              AND txn_type = 'SALE'
             """
         ),
         {"txn_id": txn_id, "store_id": store_id},
@@ -57,7 +68,7 @@ def sold_quantities(session: Session, txn_id: str) -> dict[str, int]:
             """
             SELECT sku, SUM(qty) AS quantity
             FROM dbo.transaction_item
-            WHERE txn_id = :txn_id
+            WHERE txn_id = CAST(:txn_id AS varchar(40))
             GROUP BY sku
             """
         ),
@@ -72,11 +83,11 @@ def returned_quantities(session: Session, store_id: str, txn_id: str) -> dict[st
         text(
             """
             SELECT item.sku, SUM(item.qty) AS quantity
-            FROM dbo.transaction_item AS item
-            JOIN dbo.pos_transaction AS txn ON txn.txn_id = item.txn_id
-            WHERE txn.ref_txn_id = :txn_id
+            FROM dbo.pos_transaction AS txn WITH (INDEX(ix_pos_transaction_ref))
+            JOIN dbo.transaction_item AS item ON item.txn_id = txn.txn_id
+            WHERE txn.ref_txn_id = CAST(:txn_id AS varchar(40))
               AND txn.txn_type = 'RETURN'
-              AND txn.store_id = :store_id
+              AND txn.store_id = CAST(:store_id AS varchar(10))
             GROUP BY item.sku
             """
         ),
