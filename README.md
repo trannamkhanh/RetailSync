@@ -37,7 +37,7 @@ or higher. Native `uvicorn --reload` stays HTTP on port 8000 for local developme
 | File | Content |
 |---|---|
 | `ca.key`, `ca.crt` | Development CA |
-| `server.key`, `server.crt` | Server certificate of `middleware` and `pos-gateway`, issued by the CA, valid for `localhost`, `127.0.0.1`, `middleware.retailsync.local` and `middleware` |
+| `server.key`, `server.crt` | Server certificate of `middleware`, `pos-gateway` and `hq-demo`, issued by the CA, valid for `localhost`, `127.0.0.1`, `middleware.retailsync.local`, `middleware`, `hq-demo` and `pos-gateway` |
 | `pos/<pos_id>.key`, `pos/<pos_id>.crt` | Client certificate of each seeded terminal, common name `pos_id` (PB-48) |
 
 Running it again keeps every valid certificate. A server certificate the CA did
@@ -179,12 +179,66 @@ wait times out, the event is rolled back and the POS gets 503
 `SERVICE_UNAVAILABLE`, and it resends the same `transaction_id`. Each timeout is
 logged as one warning line containing `SQL 1222`, without a traceback.
 
+### HQ demo service (PB-18)
+
+`hq-demo/` is a separate FastAPI app that simulates HQ. It serves HTTPS on
+`127.0.0.1:9000` with the same `.certs/server.crt` and keeps its data in the
+`HQ_DB_NAME` database, `RTS_HQ` by default.
+
+Add the shared service secret to `.env` once:
+
+```powershell
+$bytes = New-Object byte[] 32
+[Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+Add-Content .env ("HQ_JWT_SECRET=" + (-join ($bytes | ForEach-Object { $_.ToString('x2') })))
+```
+
+The server certificate must carry `hq-demo` and `pos-gateway`, so run the
+certificate script again after pulling this change: it reissues the certificate
+when the SAN list changes. Restart `middleware`, `pos-gateway` and `hq-demo`
+afterwards.
+
+```powershell
+docker compose up -d --wait sqlserver
+docker compose run --rm migrate
+docker compose build hq-demo
+docker compose up -d --wait hq-demo
+curl.exe --ssl-no-revoke --cacert .certs/ca.crt https://localhost:9000/api/v1/health
+```
+
+`migrate` creates `HQ_DB_NAME` and applies `database/hq/*.sql` there once each,
+with the HQ database's own `schema_migration` table.
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/api/v1/health` | public |
+| `POST` | `/api/v1/sync` | middleware service token: HS256 signed with `HQ_JWT_SECRET`, `sub: rts-middleware`, `role: MIDDLEWARE`, `exp` |
+| `GET` | `/api/v1/demo/batches` | public; received batches and totals |
+| `PUT` | `/api/v1/demo/mode` | public; `ONLINE`, `OFFLINE`, `ERROR`, `SLOW`, `DROP_ACK` |
+
+`POST /api/v1/sync` answers 200 ACK (with `duplicate: true` for a repeated
+`batch_id` with the same content), 409 NACK `CONFLICT` for the same id with other
+content, 422 NACK `INVALID_BATCH` for a body outside DS-04, and 503/500 for the
+`OFFLINE`/`ERROR` demo modes. The idempotency hash is the SHA-256 of the compact,
+key-sorted batch message from DS-05 section 2: `net_revenue` as a string with two
+decimals and `created_at` excluded. The middleware `batch_hash(message)` must use
+the same form.
+
 ## Test
 
 ```bash
 cd middleware
 pip install -r requirements-dev.txt
 pytest
+```
+
+### HQ demo tests (PB-18)
+
+The HQ demo tests run against `RTS_HQ_TEST`, never `RTS_HQ`:
+
+```powershell
+docker compose run --rm -e HQ_DB_NAME=RTS_HQ_TEST migrate
+docker compose run --rm -e HQ_DB_NAME=RTS_HQ_TEST --volume "${PWD}/hq-demo:/app" --workdir /app hq-demo sh -c 'pip install -q -r requirements-dev.txt && python -m pytest -p no:cacheprovider -q'
 ```
 
 ## Working rules
