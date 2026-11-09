@@ -12,7 +12,7 @@ from app.repositories import pos_cancellation as repository
 from app.repositories.pos_events import add_transaction_items
 from app.services.event_validation import validate_event_source
 from app.services.idempotency import claim_transaction, content_hash, stock_of_transaction
-from app.services.inventory import apply_stock_change
+from app.services.inventory import restore_items
 from app.services.original_sale import lock_original_sale, require_original_sale
 
 if TYPE_CHECKING:
@@ -42,10 +42,13 @@ def process_cancellation(session: Session, event: PosEvent, principal: Principal
     if any(quantity > 0 for quantity in sale.returned.values()):
         raise ApiError(409, "SALE_HAS_RETURNS", f"Sale '{original_id}' already has returns.")
     add_transaction_items(session, event.transaction_id, repository.sale_items(session, sale.txn_id))
-    current_stock = {
-        sku: apply_stock_change(session, event.store_id, sku, sale.sold[sku],
-                                "CANCELLATION", txn_id=event.transaction_id)
-        for sku in sorted(sale.sold)
-    }
+    current_stock = restore_items(
+        session,
+        event.store_id,
+        [(sku, sale.sold[sku]) for sku in sorted(sale.sold)],
+        original_txn_id=original_id,
+        txn_id=event.transaction_id,
+        movement_type="CANCELLATION",
+    )
     repository.mark_cancelled(session, sale.txn_id)
     return {"outcome": "OK", "code": "OK", "message": "Event applied", "current_stock": current_stock}

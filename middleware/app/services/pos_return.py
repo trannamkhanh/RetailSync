@@ -12,7 +12,7 @@ from app.core.security import Principal
 from app.repositories.pos_events import add_transaction_items, find_existing_skus
 from app.services.event_validation import validate_event_source
 from app.services.idempotency import claim_transaction, content_hash, stock_of_transaction
-from app.services.inventory import apply_stock_change
+from app.services.inventory import restore_items
 from app.services.original_sale import lock_original_sale, require_original_sale
 
 if TYPE_CHECKING:
@@ -99,16 +99,14 @@ def process_return(session: Session, event: PosEvent, principal: Principal) -> d
         event.transaction_id,
         [(item.sku, item.quantity, item.unit_price) for item in event.items],
     )
-    current_stock: dict[str, int] = {}
-    for sku in sorted(merged):
-        current_stock[sku] = apply_stock_change(
-            session,
-            event.store_id,
-            sku,
-            merged[sku],
-            "RETURN",
-            txn_id=event.transaction_id,
-        )
+    current_stock = restore_items(
+        session,
+        event.store_id,
+        [(item.sku, item.quantity) for item in event.items],
+        original_txn_id=original_id,
+        txn_id=event.transaction_id,
+        movement_type="RETURN",
+    )
     return {
         "outcome": "OK",
         "code": "OK",
