@@ -19,3 +19,5 @@ obj/
 appsettings.Local.json
 TestResults/
 *.trx
+pytest-of-*/
+testhost_diag.*.log
