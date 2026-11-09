@@ -10,8 +10,10 @@ Jobs due at the same tick run in the order below, so register aggregation
 """
 
 from app.core.config import settings
+from app.jobs.aggregation import run_aggregation
 from app.jobs.scheduler import register_job
 from app.jobs.sync_send import run_send_cycle
 
 
+register_job("aggregation", run_aggregation, every_seconds=settings.sync_interval)
 register_job("sync-send", run_send_cycle, every_seconds=settings.sync_interval)
