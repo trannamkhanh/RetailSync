@@ -4,6 +4,7 @@ A Staff or Manager token may read only its own store. Every test creates its own
 ``TEST-`` rows through ``db_session`` and never commits.
 """
 
+from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import Mock
 
@@ -11,9 +12,11 @@ import pytest
 from pydantic import SecretStr
 from sqlalchemy.orm import Session
 
+from app.core import clock
 from app.core.config import settings
 from app.core.security import create_token
 from app.domain.models import Inventory, Product, StaffUser, Store
+from tests.pos_test_support import DEFAULT_BATCH_DAYS, add_batch
 
 
 SECRET = "test-only-secret-with-enough-length-for-hs256"
@@ -74,7 +77,22 @@ def add_product(session: Session, sku: str) -> Product:
 def add_stock(session: Session, store_id: str, sku: str, quantity: int) -> Inventory:
     row = Inventory(store_id=store_id, sku=sku, quantity=quantity)
     session.add(row)
+    session.flush()
+    add_batch(session, store_id, sku, quantity, batch_id=f"TEST-B-{sku}")
     return row
+
+
+def expected_line(sku: str, quantity: int) -> dict:
+    """The stock line of one SKU that ``add_stock`` gave one batch (PB-20)."""
+    if quantity == 0:
+        return {"sku": sku, "quantity": 0, "batches": []}
+    expiry = clock.today_local() + timedelta(days=DEFAULT_BATCH_DAYS)
+    return {
+        "sku": sku,
+        "quantity": quantity,
+        "batches": [{"batch_id": f"TEST-B-{sku}", "expiry_date": expiry.isoformat(),
+                     "quantity": quantity}],
+    }
 
 
 def account(session: Session, username: str, role: str, store_id: str | None) -> StaffUser:
@@ -139,9 +157,9 @@ def test_inv12_1_all_skus_of_the_store(client, world, staff_headers):
     assert response.json() == {
         "store_id": STORE_ID,
         "items": [
-            {"sku": SKU_A, "quantity": 7},
-            {"sku": SKU_B, "quantity": 3},
-            {"sku": SKU_C, "quantity": 0},
+            expected_line(SKU_A, 7),
+            expected_line(SKU_B, 3),
+            expected_line(SKU_C, 0),
         ],
     }
 
@@ -153,7 +171,7 @@ def test_inv12_2_one_sku(client, world, staff_headers):
     response = client.get(url(STORE_ID), params={"sku": SKU_B}, headers=staff_headers)
 
     assert response.status_code == 200
-    assert response.json() == {"store_id": STORE_ID, "items": [{"sku": SKU_B, "quantity": 3}]}
+    assert response.json() == {"store_id": STORE_ID, "items": [expected_line(SKU_B, 3)]}
 
 
 # INV12-3: another store gives 403.
@@ -195,7 +213,7 @@ def test_lower_case_sku_returns_the_catalogue_sku(client, world, staff_headers):
     response = client.get(url(STORE_ID), params={"sku": SKU_A.lower()}, headers=staff_headers)
 
     assert response.status_code == 200
-    assert response.json()["items"] == [{"sku": SKU_A, "quantity": 7}]
+    assert response.json()["items"] == [expected_line(SKU_A, 7)]
 
 
 # Stock edge cases.
@@ -212,14 +230,14 @@ def test_catalogue_product_without_a_stock_row_returns_zero(client, world, staff
     response = client.get(url(STORE_ID), params={"sku": SKU_NO_STOCK}, headers=staff_headers)
 
     assert response.status_code == 200
-    assert response.json()["items"] == [{"sku": SKU_NO_STOCK, "quantity": 0}]
+    assert response.json()["items"] == [expected_line(SKU_NO_STOCK, 0)]
 
 
 def test_stock_of_another_store_is_not_returned(client, world, staff_headers):
     response = client.get(url(STORE_ID), params={"sku": SKU_OTHER_ONLY}, headers=staff_headers)
 
     assert response.status_code == 200
-    assert response.json()["items"] == [{"sku": SKU_OTHER_ONLY, "quantity": 0}]
+    assert response.json()["items"] == [expected_line(SKU_OTHER_ONLY, 0)]
 
 
 def test_empty_store_returns_no_lines(client, world, empty_headers):

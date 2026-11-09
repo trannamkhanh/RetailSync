@@ -21,6 +21,7 @@ from app.domain.models import (
     PosTerminal,
     PosTransaction,
     Product,
+    ProductBatch,
     StaffUser,
     Store,
     TransactionItem,
@@ -29,6 +30,7 @@ from app.services.idempotency import content_hash
 from app.services.pos_events import process_event
 from tests.pos_test_support import (
     add_sale,
+    add_stock,
     assert_error,
     count,
     movements,
@@ -182,7 +184,7 @@ def test_pb06_sku_not_in_sale_returns_409(client, db_session) -> None:
         )
     )
     db_session.flush()
-    db_session.add(Inventory(store_id=world.store_id, sku=outside_sku, quantity=10))
+    add_stock(db_session, world.store_id, outside_sku, 10)
     db_session.commit()
 
     payload = return_payload(world, [(outside_sku, 1, 1000)])
@@ -287,11 +289,12 @@ def test_pb06_concurrent_returns_cannot_exceed_sale(test_engine) -> None:
     finally:
         with Session(test_engine) as cleanup:
             cleanup.execute(delete(AuditLog).where(AuditLog.entity_key.in_(txn_ids)))
-            cleanup.execute(delete(InventoryMovement).where(InventoryMovement.txn_id.in_(txn_ids)))
+            cleanup.execute(delete(InventoryMovement).where(InventoryMovement.txn_id.in_(txn_ids + [world.sale_txn])))
             cleanup.execute(delete(TransactionItem).where(TransactionItem.txn_id.in_(txn_ids + [world.sale_txn])))
             cleanup.execute(delete(PosTransaction).where(PosTransaction.txn_id.in_(txn_ids)))
             cleanup.execute(delete(PosTransaction).where(PosTransaction.txn_id == world.sale_txn))
             cleanup.execute(delete(Inventory).where(Inventory.store_id == world.store_id))
+            cleanup.execute(delete(ProductBatch).where(ProductBatch.store_id == world.store_id))
             cleanup.execute(delete(PosTerminal).where(PosTerminal.pos_id == world.pos_id))
             cleanup.execute(delete(Product).where(Product.sku == sku))
             cleanup.execute(delete(StaffUser).where(StaffUser.username == world.username))

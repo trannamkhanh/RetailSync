@@ -17,11 +17,13 @@ from pydantic import SecretStr
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core import clock
 from app.core.config import settings
 from app.core.security import create_token, require_role
 from app.domain.models import GuardrailRule
 from app.domain.models import Inventory, PosTerminal, Product, StaffUser, Store
 from app.main import app
+from tests.pos_test_support import DEFAULT_BATCH_DAYS, add_stock
 
 
 SECRET = "test-only-secret-with-enough-length-for-hs256"
@@ -83,7 +85,7 @@ def world(db_session: Session) -> None:
                            category="TEST", unit_price=Decimal("10.00")))
     db_session.flush()
     db_session.add(PosTerminal(pos_id=POS_ID, store_id=STORE_ID, status="ACTIVE"))
-    db_session.add(Inventory(store_id=STORE_ID, sku=SKU, quantity=10))
+    add_stock(db_session, STORE_ID, SKU, 10)
     for username, db_role, store_id in ACCOUNTS.values():
         db_session.add(StaffUser(username=username, full_name="Auth matrix account",
                                  role=db_role, store_id=store_id))
@@ -194,7 +196,13 @@ def test_ps02_5_allowed_role_reads_its_store_stock(client, world):
     response = client.get(INVENTORY[1].format(store_id=STORE_ID), headers=bearer(token_for("Staff")))
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"store_id": STORE_ID, "items": [{"sku": SKU, "quantity": 10}]}
+    body = response.json()
+    assert body["store_id"] == STORE_ID
+    assert [(item["sku"], item["quantity"]) for item in body["items"]] == [(SKU, 10)]
+    expiry = (clock.today_local() + timedelta(days=DEFAULT_BATCH_DAYS)).isoformat()
+    assert [(batch["quantity"], batch["expiry_date"]) for batch in body["items"][0]["batches"]] == [
+        (10, expiry)
+    ]
 
 
 def test_ps02_6_inactive_account_is_refused(client, db_session, world):

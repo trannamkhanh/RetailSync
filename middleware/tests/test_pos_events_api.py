@@ -26,10 +26,12 @@ from app.domain.models import (
     PosTerminal,
     PosTransaction,
     Product,
+    ProductBatch,
     StaffUser,
     Store,
     TransactionItem,
 )
+from tests.pos_test_support import add_stock
 from app.main import app
 from app.services.idempotency import content_hash
 
@@ -88,7 +90,7 @@ def _seed(session: Session, *, quantity: int = 10, products: int = 1) -> World:
     )
     session.flush()
     for sku in skus:
-        session.add(Inventory(store_id=store_id, sku=sku, quantity=quantity))
+        add_stock(session, store_id, sku, quantity)
     session.flush()
 
     token = create_token(username, "POS", store_id=store_id, pos_id=pos_id)
@@ -203,6 +205,11 @@ def test_valid_sale_applies_stock_and_records_rows(client, db_session) -> None:
     movements = _movements(db_session, txn_id)
     assert len(movements) == 1
     movement = movements[0]
+    [batch_id] = db_session.scalars(
+        select(ProductBatch.batch_id).where(
+            ProductBatch.store_id == world.store_id, ProductBatch.sku == sku,
+        )
+    )
     assert (
         movement.store_id,
         movement.sku,
@@ -211,7 +218,7 @@ def test_valid_sale_applies_stock_and_records_rows(client, db_session) -> None:
         movement.created_by,
         movement.reason,
         movement.batch_id,
-    ) == (world.store_id, sku, "SALE", -2, None, None, None)
+    ) == (world.store_id, sku, "SALE", -2, None, None, batch_id)
 
 
 def test_several_and_repeated_skus_keep_lines_and_merge_stock(client, db_session) -> None:

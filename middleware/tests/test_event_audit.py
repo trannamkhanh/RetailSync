@@ -27,6 +27,7 @@ from app.core.security import Principal, create_token
 from app.domain.models import AuditLog, Inventory, PosTerminal, PosTransaction, Product, StaffUser, Store
 from app.main import app
 from app.services import event_audit
+from tests.pos_test_support import add_stock
 
 
 SECRET = "test-only-secret-with-enough-length-for-hs256"
@@ -77,7 +78,7 @@ def world(db_session: Session, pos_account: StaffUser) -> World:
                            category="TEST", unit_price=Decimal("10.00")))
     db_session.flush()
     db_session.add(PosTerminal(pos_id=pos_id, store_id=store_id, status="ACTIVE"))
-    db_session.add(Inventory(store_id=store_id, sku=sku, quantity=10))
+    add_stock(db_session, store_id, sku, 10)
     # The router rolls the event back on a rejection; committing keeps these rows.
     # The fixture's outer transaction still removes them after the test.
     db_session.commit()

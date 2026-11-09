@@ -26,6 +26,7 @@ from app.core.config import settings
 from app.core.security import create_token
 from app.domain.models import AuditLog, Inventory, PosTerminal, PosTransaction, Product, StaffUser, Store
 from app.main import app
+from tests.pos_test_support import add_stock
 
 
 SECRET = "test-only-secret-with-enough-length-for-hs256"
@@ -115,7 +116,7 @@ def world(db_session: Session, pos_account: StaffUser, certificates) -> World:
         fingerprint = certificates[name].fingerprint if name != "C" else None
         db_session.add(PosTerminal(pos_id=pos_id, store_id=store_id, status="ACTIVE",
                                    cert_fingerprint=fingerprint))
-    db_session.add(Inventory(store_id=store_id, sku=sku, quantity=10))
+    add_stock(db_session, store_id, sku, 10)
     db_session.commit()
     return World(store_id, terminals, sku, pos_account.user_id, pos_account.username)
 

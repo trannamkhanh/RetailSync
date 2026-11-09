@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.domain.models import (
     AuditLog, Inventory, InventoryMovement, PosTerminal, PosTransaction,
-    Product, StaffUser, Store, TransactionItem,
+    Product, ProductBatch, StaffUser, Store, TransactionItem,
 )
 from app.main import app
 from app.repositories import original_sale as original_repository
@@ -172,11 +172,12 @@ def test_pb07_corrected_lock_order(client, db_session, monkeypatch):
 def cleanup(engine, world, txn_ids):
     with Session(engine) as session:
         session.execute(delete(AuditLog).where(AuditLog.entity_key.in_(txn_ids)))
-        session.execute(delete(InventoryMovement).where(InventoryMovement.txn_id.in_(txn_ids)))
+        session.execute(delete(InventoryMovement).where(InventoryMovement.txn_id.in_(txn_ids + [world.sale_txn])))
         session.execute(delete(TransactionItem).where(TransactionItem.txn_id.in_(txn_ids + [world.sale_txn])))
         session.execute(delete(PosTransaction).where(PosTransaction.txn_id.in_(txn_ids)))
         session.execute(delete(PosTransaction).where(PosTransaction.txn_id == world.sale_txn))
         session.execute(delete(Inventory).where(Inventory.store_id == world.store_id))
+        session.execute(delete(ProductBatch).where(ProductBatch.store_id == world.store_id))
         session.execute(delete(PosTerminal).where(PosTerminal.pos_id == world.pos_id))
         session.execute(delete(StaffUser).where(StaffUser.username == world.username))
         session.execute(delete(Product).where(Product.sku.in_(world.skus)))
