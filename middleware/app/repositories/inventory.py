@@ -3,6 +3,11 @@
 Every function takes a session and never commits. The caller owns the
 transaction, so a later failure rolls the stock change and its movement back
 together.
+
+The driver binds Python ``str`` as ``nvarchar``; SQLAlchemy does not call
+``setinputsizes`` for ``text()``. Every string parameter is therefore cast to
+the column's ``varchar`` length, so the key is seekable instead of scanned with
+``CONVERT_IMPLICIT`` and its rows locked (issue #25).
 """
 
 from sqlalchemy import text
@@ -21,7 +26,8 @@ def get_stock(session: Session, store_id: str, sku: str) -> int:
             """
             SELECT quantity
             FROM dbo.inventory
-            WHERE store_id = :store_id AND sku = :sku
+            WHERE store_id = CAST(:store_id AS varchar(10))
+              AND sku = CAST(:sku AS varchar(20))
             """
         ),
         {"store_id": store_id, "sku": sku},
@@ -50,7 +56,9 @@ def update_stock_with_guard(
             UPDATE dbo.inventory
             SET quantity = quantity + :delta, updated_at = SYSUTCDATETIME()
             OUTPUT inserted.quantity
-            WHERE store_id = :store_id AND sku = :sku AND quantity + :delta >= 0
+            WHERE store_id = CAST(:store_id AS varchar(10))
+              AND sku = CAST(:sku AS varchar(20))
+              AND quantity + :delta >= 0
             """
         ),
         {"store_id": store_id, "sku": sku, "delta": delta},
@@ -76,7 +84,9 @@ def insert_stock_row(session: Session, store_id: str, sku: str, quantity: int) -
                     text(
                         """
                         INSERT INTO dbo.inventory (store_id, sku, quantity, updated_at)
-                        VALUES (:store_id, :sku, :quantity, SYSUTCDATETIME())
+                        VALUES (CAST(:store_id AS varchar(10)),
+                                CAST(:sku AS varchar(20)),
+                                :quantity, SYSUTCDATETIME())
                         """
                     ),
                     {"store_id": store_id, "sku": sku, "quantity": quantity},
@@ -118,8 +128,14 @@ def add_movement(
                 (store_id, sku, movement_type, quantity, txn_id, batch_id,
                  reason, created_by, created_at)
             VALUES
-                (:store_id, :sku, :movement_type, :quantity, :txn_id, :batch_id,
-                 :reason, :created_by, SYSUTCDATETIME())
+                (CAST(:store_id AS varchar(10)),
+                 CAST(:sku AS varchar(20)),
+                 CAST(:movement_type AS varchar(20)),
+                 :quantity,
+                 CAST(:txn_id AS varchar(40)),
+                 CAST(:batch_id AS varchar(30)),
+                 CAST(:reason AS nvarchar(200)),
+                 :created_by, SYSUTCDATETIME())
             """
         ),
         {
