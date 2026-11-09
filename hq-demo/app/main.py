@@ -1,13 +1,14 @@
 """HQ demo service (PB-18): HTTPS on 9000, POST /sync, demo endpoints."""
 
+import asyncio
 import json
-import time
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app import modes
 from app.db import get_db
@@ -34,6 +35,13 @@ def _first_error(error: ValidationError) -> str:
     detail = error.errors()[0]
     location = ".".join(str(part) for part in detail["loc"])
     return f"{location}: {detail['msg']}"
+
+
+def _store_batch(session: Session, message: SyncBatchMessage, payload_hash: str) -> bool:
+    """Run the blocking database part off the event loop."""
+    duplicate = apply_batch(session, message, payload_hash)
+    session.commit()
+    return duplicate
 
 
 @app.get("/api/v1/health")
@@ -65,10 +73,9 @@ async def receive_batch(request: Request, _: None = Depends(require_middleware),
         return nack(422, "INVALID_BATCH", _first_error(error), batch_id)
 
     if mode is modes.Mode.SLOW:
-        time.sleep(4)
+        await asyncio.sleep(4)
 
-    duplicate = apply_batch(session, message, batch_hash(message))
-    session.commit()
+    duplicate = await run_in_threadpool(_store_batch, session, message, batch_hash(message))
 
     if mode is modes.Mode.DROP_ACK:
         return nack(500, "ACK_DROPPED", "Batch stored, ACK dropped.", message.batch_id)

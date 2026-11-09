@@ -10,14 +10,16 @@ from app.modes import Mode
 
 # Ids are varchar in SQL Server: ASCII only, like the middleware ids.
 ID_PATTERN = r"^[A-Za-z0-9_-]+$"
+# The matching SQL Server columns are int (32-bit); a larger value must be 422.
+INT_MAX = 2_147_483_647
 
 
 class SalesLine(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sku: str = Field(min_length=1, max_length=20, pattern=ID_PATTERN)
-    sold_qty: int = Field(ge=0)
-    returned_qty: int = Field(ge=0)
+    sold_qty: int = Field(ge=0, le=INT_MAX)
+    returned_qty: int = Field(ge=0, le=INT_MAX)
     net_revenue: Decimal = Field(max_digits=14, decimal_places=2)
 
     @field_validator("net_revenue", mode="before")
@@ -34,7 +36,7 @@ class SyncBatchMessage(BaseModel):
     batch_id: str = Field(min_length=1, max_length=40, pattern=ID_PATTERN)
     store_id: str = Field(min_length=1, max_length=10, pattern=ID_PATTERN)
     created_at: datetime
-    txn_count: int = Field(ge=1)
+    txn_count: int = Field(ge=1, le=INT_MAX)
     lines: list[SalesLine] = Field(min_length=1)
 
     @field_validator("lines")

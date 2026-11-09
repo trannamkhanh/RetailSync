@@ -4,18 +4,21 @@ These run against RTS_HQ_TEST, never RTS_HQ. Every test creates its own store
 and batch id with a TEST- prefix.
 """
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from threading import Thread
 import time
 from uuid import uuid4
 
+import httpx
 import jwt
 import pytest
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.hashing import batch_hash
+from app.main import app
 from app.models import HqSalesTotal, HqSyncBatch
 from app.schemas import SyncBatchMessage
 from app.service import apply_batch
@@ -81,7 +84,38 @@ def test_sync18_2_new_batch_is_acked_and_totals_are_added(client, auth, db_sessi
     assert totals["TEST-B"].sold_qty == 1
 
 
-def test_sync18_3_same_batch_is_a_duplicate(client, auth, db_session):
+@pytest.mark.parametrize("overrides", [
+    {"lines": []},
+    {"txn_count": 0},
+    {"txn_count": 2_147_483_648},
+    {"lines": [{"sku": "TEST-A", "sold_qty": -1, "returned_qty": 0,
+                "net_revenue": 10.0}]},
+    {"lines": [{"sku": "TEST-A", "sold_qty": 2_147_483_648, "returned_qty": 0,
+                "net_revenue": 10.0}]},
+    {"lines": [{"sku": "TEST-A", "sold_qty": 1, "returned_qty": 2_147_483_648,
+                "net_revenue": 10.0}]},
+    {"lines": [{"sku": "TEST-A", "sold_qty": 1, "returned_qty": 0,
+                "net_revenue": 10.0},
+               {"sku": "TEST-A", "sold_qty": 2, "returned_qty": 0,
+                "net_revenue": 20.0}]},
+    {"batch_id": "X" * 41},
+    {"batch_id": "bad id"},
+], ids=["no-lines", "txn-count-zero", "txn-count-over-int", "negative-quantity",
+        "sold-qty-over-int", "returned-qty-over-int", "repeated-sku",
+        "batch-id-too-long", "batch-id-pattern"])
+def test_sync18_3_invalid_batch_is_nacked(client, auth, db_session, overrides):
+    store = _store()
+    message = _batch(store, **overrides)
+
+    response = _post(client, auth, message)
+
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert (body["status"], body["code"]) == ("NACK", "INVALID_BATCH")
+    assert db_session.get(HqSyncBatch, message["batch_id"]) is None
+
+
+def test_sync18_4_same_batch_is_a_duplicate(client, auth, db_session):
     store = _store()
     message = _batch(store)
     assert _post(client, auth, message).status_code == 200
@@ -99,7 +133,7 @@ def test_sync18_3_same_batch_is_a_duplicate(client, auth, db_session):
     assert after["TEST-A"].net_revenue == before["TEST-A"].net_revenue
 
 
-def test_sync18_4_same_id_with_other_content_is_a_conflict(client, auth, db_session):
+def test_sync18_5_same_id_with_other_content_is_a_conflict(client, auth, db_session):
     store = _store()
     message = _batch(store)
     assert _post(client, auth, message).status_code == 200
@@ -117,31 +151,6 @@ def test_sync18_4_same_id_with_other_content_is_a_conflict(client, auth, db_sess
     assert after["TEST-A"].sold_qty == before["TEST-A"].sold_qty
     assert after["TEST-A"].net_revenue == before["TEST-A"].net_revenue
     assert db_session.get(HqSyncBatch, message["batch_id"]).duplicate_count == 0
-
-
-@pytest.mark.parametrize("overrides", [
-    {"lines": []},
-    {"txn_count": 0},
-    {"lines": [{"sku": "TEST-A", "sold_qty": -1, "returned_qty": 0,
-                "net_revenue": 10.0}]},
-    {"lines": [{"sku": "TEST-A", "sold_qty": 1, "returned_qty": 0,
-                "net_revenue": 10.0},
-               {"sku": "TEST-A", "sold_qty": 2, "returned_qty": 0,
-                "net_revenue": 20.0}]},
-    {"batch_id": "X" * 41},
-    {"batch_id": "bad id"},
-], ids=["no-lines", "txn-count-zero", "negative-quantity", "repeated-sku",
-        "batch-id-too-long", "batch-id-pattern"])
-def test_sync18_5_invalid_batch_is_nacked(client, auth, db_session, overrides):
-    store = _store()
-    message = _batch(store, **overrides)
-
-    response = _post(client, auth, message)
-
-    assert response.status_code == 422, response.text
-    body = response.json()
-    assert (body["status"], body["code"]) == ("NACK", "INVALID_BATCH")
-    assert db_session.get(HqSyncBatch, message["batch_id"]) is None
 
 
 def test_sync18_6_demo_batches_lists_the_received_batch(client, auth):
@@ -202,6 +211,29 @@ def test_sync18_7_demo_modes(client, auth, db_session):
     db_session.expire_all()
     assert db_session.get(HqSyncBatch, drop["batch_id"]) is not None
     assert _totals(db_session, store_drop)["TEST-A"].sold_qty == 3
+
+
+def test_pb18_slow_mode_does_not_block_health(client, auth):
+    message = _batch(_store())
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as api:
+            assert (await api.put("/api/v1/demo/mode",
+                                  json={"mode": "SLOW"})).status_code == 200
+            slow = asyncio.create_task(api.post("/api/v1/sync", json=message, headers=auth))
+            await asyncio.sleep(0.5)
+            started = time.monotonic()
+            health = await api.get("/api/v1/health")
+            elapsed = time.monotonic() - started
+            response = await slow
+            return health, elapsed, response
+
+    health, elapsed, response = asyncio.run(scenario())
+
+    assert health.status_code == 200
+    assert elapsed < 2, f"/health took {elapsed:.1f}s during a SLOW batch"
+    assert response.status_code == 200, response.text
 
 
 def test_pb18_sync_without_a_token_is_401(client):
