@@ -44,9 +44,11 @@ MOVEMENT_TYPES = frozenset(
 # A sale recorded before PB-20 has no batch_id on its movements, so a reversal
 # has no batch to go back to. Sprint 3 decision 5 sends that stock to the newest
 # batch of the store and SKU; when the store and SKU never had a batch, one is
-# created with this prefix and a far future expiry, so the stock stays sellable.
+# created with this prefix. PO decision of 09/11 (superseding the earlier "+365
+# days" rule): its expiry is yesterday, so the returned stock goes back on hand
+# but cannot be sold, and PB-21 raises an EXPIRED alert for staff to check.
 LEGACY_BATCH_PREFIX = "LEGACY-"
-LEGACY_BATCH_DAYS = 365
+LEGACY_EXPIRY_DAYS = -1
 
 
 def get_stock(session: Session, store_id: str, sku: str) -> int:
@@ -181,7 +183,9 @@ def restore_items(
     expired since still gets its stock back; it is simply not sellable.
 
     A movement without ``batch_id`` (a sale from before PB-20) has no batch to
-    go back to, so its stock joins the newest batch of the store and SKU.
+    go back to, so its stock joins the newest batch of the store and SKU. When
+    that store and SKU never had a batch, the batch created for it expires
+    yesterday, so the stock is on hand but not sellable (PO decision 09/11).
 
     Args:
         session: SQLAlchemy session; the caller commits or rolls back.
@@ -278,11 +282,12 @@ def _restore_sku(session: Session, store_id: str, sku: str, quantity: int,
     plan: dict[str, int] = {}
     if not newest_first:
         # The store and SKU never had a batch: create the batch the stock of a
-        # legacy sale goes back to.
+        # legacy sale goes back to. It expires yesterday, so the stock is on hand
+        # but not sellable, and PB-21 alerts staff to check it (PO 09/11).
         batch_id = f"{LEGACY_BATCH_PREFIX}{uuid4().hex[:16].upper()}"
         inventory_repository.insert_batch(
             session, store_id, sku, batch_id, 0,
-            clock.today_local() + timedelta(days=LEGACY_BATCH_DAYS),
+            clock.today_local() + timedelta(days=LEGACY_EXPIRY_DAYS),
         )
         plan[batch_id] = quantity
     else:

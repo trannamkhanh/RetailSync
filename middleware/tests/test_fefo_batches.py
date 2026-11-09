@@ -26,8 +26,9 @@ from app.domain.models import (
     ProductBatch,
     StaffUser,
     Store,
+    TransactionItem,
 )
-from app.services.inventory import sellable_stock
+from app.services.inventory import apply_stock_change, sellable_stock
 from tests.pos_test_support import (
     add_batch,
     assert_error,
@@ -125,6 +126,18 @@ def return_event(shop: Shop, original_id: str, items: list[tuple[str, int]]) -> 
     }
 
 
+def cancellation_event(shop: Shop, original_id: str) -> dict:
+    return {
+        "event_type": "CANCELLATION",
+        "transaction_id": f"TEST-CAN-{uid(10)}",
+        "original_transaction_id": original_id,
+        "store_id": shop.store_id,
+        "pos_id": shop.pos_id,
+        "timestamp": "2026-11-14T03:15:00Z",
+        "items": [],
+    }
+
+
 def batches_of(session: Session, shop: Shop, sku: str) -> list[tuple[str, date, int]]:
     """The batches of a SKU, earliest expiry first, as ``(id, date, quantity)``."""
     session.expire_all()
@@ -212,12 +225,11 @@ def test_exp20_3_expired_batch_is_never_sold(client, db_session) -> None:
     assert all(row.batch_id is not None for row in movements(db_session, event["transaction_id"]))
 
 
-def test_exp20_4_sale_above_sellable_stock_changes_nothing(client, db_session) -> None:
+def test_exp20_4_only_an_expired_batch_is_left(client, db_session) -> None:
     """EXP20-4: 409 INSUFFICIENT_STOCK, no batch, movement or transaction row."""
     sku = f"TEST-SKU-{uid(8)}"
     shop = make_shop(db_session, {sku: [
-        (2, TODAY + timedelta(days=2)),
-        (3, TODAY - timedelta(days=5)),
+        (4, TODAY - timedelta(days=5)),
     ]})
     before = batches_of(db_session, shop, sku)
     event = sale_event(shop, [(sku, 4)])
@@ -226,37 +238,65 @@ def test_exp20_4_sale_above_sellable_stock_changes_nothing(client, db_session) -
 
     assert_error(response, 409, "INSUFFICIENT_STOCK")
     assert batches_of(db_session, shop, sku) == before
-    assert stock(db_session, shop, sku) == 5
+    assert stock(db_session, shop, sku) == 4
+    assert sellable_stock(db_session, shop.store_id, sku) == 0
     assert count(db_session, PosTransaction, txn_id=event["transaction_id"]) == 0
     assert movements(db_session, event["transaction_id"]) == []
     assert stock_changes(db_session, event["transaction_id"]) == []
 
 
-def test_exp20_5_sellable_stock_counts_only_unexpired_batches(db_session) -> None:
-    """EXP20-5: the service other backlog items call."""
+def test_exp20_5_return_puts_stock_back_into_the_batch_it_came_from(client, db_session) -> None:
+    """EXP20-5: a RETURN restores the batch the sale took, newest expiry first."""
     sku = f"TEST-SKU-{uid(8)}"
     shop = make_shop(db_session, {sku: [
-        (3, TODAY),
+        (3, TODAY + timedelta(days=2)),
+        (5, TODAY + timedelta(days=10)),
+    ]})
+    earliest, later = [batch_id for batch_id, _, _ in batches_of(db_session, shop, sku)]
+    sale = sale_event(shop, [(sku, 4)])
+    apply(client, db_session, shop, sale)
+    assert quantities_of(db_session, shop, sku) == [0, 4]
+
+    first_return = return_event(shop, sale["transaction_id"], [(sku, 1)])
+    apply(client, db_session, shop, first_return)
+
+    # Sole unit of the sale taken from the later batch goes back into it.
+    assert quantities_of(db_session, shop, sku) == [0, 5]
+    rows = movements(db_session, first_return["transaction_id"])
+    assert [(row.batch_id, row.quantity) for row in rows] == [(later, 1)]
+
+    second_return = return_event(shop, sale["transaction_id"], [(sku, 3)])
+    apply(client, db_session, shop, second_return)
+
+    # The later batch is already whole again, so the rest returns to the earliest.
+    assert quantities_of(db_session, shop, sku) == [3, 5]
+    rows = movements(db_session, second_return["transaction_id"])
+    assert [(row.batch_id, row.quantity) for row in rows] == [(earliest, 3)]
+    assert stock(db_session, shop, sku) == 8
+
+
+def test_exp20_6_cancellation_restores_both_batches(client, db_session) -> None:
+    """EXP20-6: CANCELLATION puts both batches back to their exact quantities."""
+    sku = f"TEST-SKU-{uid(8)}"
+    shop = make_shop(db_session, {sku: [
         (2, TODAY + timedelta(days=1)),
-        (7, TODAY - timedelta(days=1)),
+        (3, TODAY + timedelta(days=15)),
     ]})
-
-    assert sellable_stock(db_session, shop.store_id, sku) == 5
-    assert stock(db_session, shop, sku) == 12
-
-
-def test_exp20_6_a_sale_that_empties_one_batch_leaves_no_stock(client, db_session) -> None:
-    """EXP20-6: the boundary of a batch that is taken exactly."""
-    sku = f"TEST-SKU-{uid(8)}"
-    shop = make_shop(db_session, {sku: [
-        (4, TODAY + timedelta(days=4)),
-        (1, TODAY + timedelta(days=40)),
-    ]})
-
-    apply(client, db_session, shop, sale_event(shop, [(sku, 4)]))
-
+    earliest, later = [batch_id for batch_id, _, _ in batches_of(db_session, shop, sku)]
+    sale = sale_event(shop, [(sku, 4)])
+    apply(client, db_session, shop, sale)
     assert quantities_of(db_session, shop, sku) == [0, 1]
-    assert stock(db_session, shop, sku) == 1
+
+    cancellation = cancellation_event(shop, sale["transaction_id"])
+    apply(client, db_session, shop, cancellation)
+
+    assert quantities_of(db_session, shop, sku) == [2, 3]
+    assert stock(db_session, shop, sku) == 5
+    rows = movements(db_session, cancellation["transaction_id"])
+    assert [(row.batch_id, row.quantity, row.movement_type) for row in rows] == [
+        (later, 2, "CANCELLATION"), (earliest, 2, "CANCELLATION"),
+    ]
+    assert db_session.get(PosTransaction, sale["transaction_id"]).status == "CANCELLED"
 
 
 def test_exp20_7_inventory_equals_the_sum_of_batches_after_sales(client, db_session) -> None:
@@ -281,6 +321,33 @@ def test_exp20_7_inventory_equals_the_sum_of_batches_after_sales(client, db_sess
 
 
 # ---- PB-20-4 extras ---------------------------------------------------------
+
+
+def test_pb20_4_sellable_stock_counts_only_unexpired_batches(db_session) -> None:
+    """The service other backlog items call: expired batches never count."""
+    sku = f"TEST-SKU-{uid(8)}"
+    shop = make_shop(db_session, {sku: [
+        (3, TODAY),
+        (2, TODAY + timedelta(days=1)),
+        (7, TODAY - timedelta(days=1)),
+    ]})
+
+    assert sellable_stock(db_session, shop.store_id, sku) == 5
+    assert stock(db_session, shop, sku) == 12
+
+
+def test_pb20_4_a_sale_that_empties_one_batch_leaves_no_stock(client, db_session) -> None:
+    """The boundary of a batch that is taken exactly."""
+    sku = f"TEST-SKU-{uid(8)}"
+    shop = make_shop(db_session, {sku: [
+        (4, TODAY + timedelta(days=4)),
+        (1, TODAY + timedelta(days=40)),
+    ]})
+
+    apply(client, db_session, shop, sale_event(shop, [(sku, 4)]))
+
+    assert quantities_of(db_session, shop, sku) == [0, 1]
+    assert stock(db_session, shop, sku) == 1
 
 
 def test_pb20_4_a_batch_expiring_today_is_still_sold(client, db_session) -> None:
@@ -355,6 +422,40 @@ def test_pb20_4_return_after_the_restored_batch_expired(client, db_session, monk
 
     assert quantities_of(db_session, shop, sku) == [4]
     assert stock(db_session, shop, sku) == 4
+    assert sellable_stock(db_session, shop.store_id, sku) == 0
+
+
+def test_pb20_4_legacy_return_creates_an_expired_batch(client, db_session) -> None:
+    """A sale from before PB-20 with no batch at all: LEGACY- expires yesterday.
+
+    PO decision of 09/11: the stock still comes back into inventory, but it
+    cannot be sold and PB-21 alerts staff to check the expired batch.
+    """
+    sku = f"TEST-SKU-{uid(8)}"
+    shop = make_shop(db_session, {sku: []})
+    # Stock on hand before PB-20 had no batch rows; the sale below takes it.
+    db_session.get(Inventory, (shop.store_id, sku)).quantity = 2
+    sale = sale_event(shop, [(sku, 2)])
+    db_session.add(PosTransaction(txn_id=sale["transaction_id"], store_id=shop.store_id,
+                                  pos_id=shop.pos_id, txn_type="SALE", status="OK",
+                                  payload_hash="0" * 64))
+    db_session.add(TransactionItem(txn_id=sale["transaction_id"], sku=sku, qty=2,
+                                   unit_price=Decimal("10.00")))
+    db_session.flush()
+    # A pre-PB-20 sale left its movement without a batch_id.
+    apply_stock_change(db_session, shop.store_id, sku, -2, "SALE",
+                       txn_id=sale["transaction_id"])
+    db_session.commit()
+    assert batches_of(db_session, shop, sku) == []
+    assert stock(db_session, shop, sku) == 0
+
+    apply(client, db_session, shop, return_event(shop, sale["transaction_id"], [(sku, 2)]))
+
+    [(batch_id, expiry_date, quantity)] = batches_of(db_session, shop, sku)
+    assert batch_id.startswith("LEGACY-")
+    assert expiry_date == TODAY - timedelta(days=1)
+    assert quantity == 2
+    assert stock(db_session, shop, sku) == 2
     assert sellable_stock(db_session, shop.store_id, sku) == 0
 
 

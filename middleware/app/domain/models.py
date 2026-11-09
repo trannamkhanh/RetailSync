@@ -1,9 +1,11 @@
-"""The Sprint 2 tables of 001_core.sql plus ``product_batch``; no schema creation."""
+"""The eleven Sprint 2 tables in 001_core.sql; no automatic schema creation."""
 
-from datetime import date, datetime
+from datetime import datetime
+from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Boolean, CHAR, Date, ForeignKey, ForeignKeyConstraint, Integer, Numeric, Unicode, String, text
+from sqlalchemy import BigInteger, Boolean, CHAR, ForeignKey, ForeignKeyConstraint, Integer, Numeric, Unicode, String, text
+from sqlalchemy import Date
 from sqlalchemy.dialects.mssql import DATETIME2
 from sqlalchemy.orm import Mapped, mapped_column
 

@@ -48,7 +48,7 @@ Ngày 08/11/2026, Kiệt chốt:
 2. **Id batch đồng bộ:** PB-14 tạo `sync_batch_id` theo định dạng DS-05 (`SB-<store_id>-<yyyyMMddHHmmss UTC>`); PB-15 chỉ gửi và giữ nguyên id khi gửi lại.
 3. **PB-10-5** thuộc Sprint 3, Quang làm cùng PB-20 vì đụng cùng file.
 4. **Lịch sử bán mô phỏng (PB-22-1):** nạp thẳng vào `RTS_DB_DEMO` hoặc `RTS_DB_TEST`, không bao giờ vào `RTS_DB`. Giao dịch có `txn_id` bắt đầu bằng `HIST-`, gắn vào một `sync_batch` ACKED riêng cho mỗi cửa hàng (`SB-HIST-<store_id>`) để PB-14 không gom lại và không gửi lên HQ. Không ghi `inventory_movement`, không đổi tồn. PB-40 bỏ các batch `SB-HIST-` khi tính tỉ lệ đồng bộ.
-5. **Hoàn kho cho đơn bán trước PB-20:** movement cũ không có `batch_id`, nên RETURN và CANCELLATION của những đơn này hoàn vào lô có `expiry_date` muộn nhất của cửa hàng và SKU đó. Chỉ gặp với dữ liệu cũ trong `RTS_DB`; database demo được reset.
+5. **Hoàn kho cho đơn bán trước PB-20:** movement cũ không có `batch_id`, nên RETURN và CANCELLATION của những đơn này hoàn vào lô có `expiry_date` muộn nhất của cửa hàng và SKU đó. Chỉ gặp với dữ liệu cũ trong `RTS_DB`; database demo được reset. Quyết định PO ngày 09/11: khi cửa hàng và SKU chưa có lô nào, vẫn tạo lô `LEGACY-...` nhưng đặt `expiry_date = today_local() - 1 ngày` (thay cho +365 ngày trước đây), nên hàng được cộng lại vào tồn kho nhưng không bán được, và PB-21 cảnh báo EXPIRED để nhân viên kiểm.
 6. **Ngày nghiệp vụ:** "hôm nay" khi so hạn dùng giờ Việt Nam (UTC+7), lấy từ một hàm chung `today_local()` để test thay được.
 
 ## Phụ thuộc
