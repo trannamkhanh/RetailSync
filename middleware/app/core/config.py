@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     pos_lock_timeout_ms: int = Field(default=2000, gt=0)
     scheduler_enabled: bool = False
     business_utc_offset_hours: int = Field(default=7, ge=-12, le=14)
+    hq_ca_file: str | None = None
+    hq_jwt_secret: SecretStr | None = None
+    hq_timeout_seconds: float = Field(default=3, gt=0)
 
 
 settings = Settings()
