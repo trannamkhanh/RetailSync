@@ -9,7 +9,7 @@
 # fingerprint: register it again with scripts/register_pos_certificates.py.
 set -euo pipefail
 
-SERVER_NAMES="DNS:localhost,IP:127.0.0.1,DNS:middleware.retailsync.local,DNS:middleware"
+SERVER_NAMES="DNS:localhost,IP:127.0.0.1,DNS:middleware.retailsync.local,DNS:middleware,DNS:hq-demo,DNS:pos-gateway"
 # The terminals of database/seed/001_demo_stores_pos.sql.
 TERMINALS="POS-DN1-01 POS-DN1-02 POS-DN2-01 POS-DN2-02 POS-DN3-01 POS-DN3-02"
 CA_DAYS=3650
