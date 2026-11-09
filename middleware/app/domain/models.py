@@ -1,9 +1,9 @@
-"""The eleven Sprint 2 tables in 001_core.sql; no automatic schema creation."""
+"""The Sprint 2 tables of 001_core.sql plus ``product_batch``; no schema creation."""
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Boolean, CHAR, ForeignKey, ForeignKeyConstraint, Integer, Numeric, Unicode, String, text
+from sqlalchemy import BigInteger, Boolean, CHAR, Date, ForeignKey, ForeignKeyConstraint, Integer, Numeric, Unicode, String, text
 from sqlalchemy.dialects.mssql import DATETIME2
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -65,6 +65,23 @@ class Inventory(Base):
     sku: Mapped[str] = mapped_column(String(20), ForeignKey("product.sku"), primary_key=True)
     quantity: Mapped[int] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(DATETIME2, server_default=text("SYSUTCDATETIME()"))
+
+
+class ProductBatch(Base):
+    """One expiry batch of a SKU in a store (PB-20).
+
+    ``inventory.quantity`` equals the sum of the batches of the same store and
+    SKU, expired ones included; both change in the same transaction. A batch is
+    sellable while ``expiry_date >= today_local()``.
+    """
+
+    __tablename__ = "product_batch"
+    batch_id: Mapped[str] = mapped_column(String(30), primary_key=True)
+    sku: Mapped[str] = mapped_column(String(20), ForeignKey("product.sku"))
+    store_id: Mapped[str] = mapped_column(String(10), ForeignKey("store.store_id"))
+    expiry_date: Mapped[date] = mapped_column(Date)
+    quantity: Mapped[int] = mapped_column(Integer)
+    received_at: Mapped[datetime] = mapped_column(DATETIME2, server_default=text("SYSUTCDATETIME()"))
 
 
 class SyncBatch(Base):
