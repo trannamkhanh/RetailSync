@@ -149,3 +149,13 @@ class GuardrailRule(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("1"))
     updated_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("staff_user.user_id"))
     updated_at: Mapped[datetime] = mapped_column(DATETIME2, server_default=text("SYSUTCDATETIME()"))
+
+class SalesSummaryLine(Base):
+    __tablename__ = "sales_summary_line"
+
+    line_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    sync_batch_id: Mapped[str] = mapped_column(String(40), ForeignKey("sync_batch.sync_batch_id"))
+    sku: Mapped[str] = mapped_column(String(20), ForeignKey("product.sku"))
+    sold_qty: Mapped[int] = mapped_column(Integer)
+    returned_qty: Mapped[int] = mapped_column(Integer)
+    net_revenue: Mapped[Decimal] = mapped_column(Numeric(14, 2))
