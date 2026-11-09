@@ -22,7 +22,7 @@ from app.core.config import Settings, settings
 from app.core.db import database_url, get_db
 from app.domain.models import (
     AuditLog, Inventory, InventoryMovement, PosTerminal, PosTransaction,
-    Product, StaffUser, Store, TransactionItem,
+    Product, ProductBatch, StaffUser, Store, TransactionItem,
 )
 from app.main import app
 from app.core.security import create_token
@@ -55,6 +55,7 @@ def world(test_engine: Engine) -> Generator[World, None, None]:
             session.execute(delete(TransactionItem).where(TransactionItem.txn_id.in_(txn_ids)))
             session.execute(delete(PosTransaction).where(PosTransaction.store_id == world.store_id))
             session.execute(delete(Inventory).where(Inventory.store_id == world.store_id))
+            session.execute(delete(ProductBatch).where(ProductBatch.store_id == world.store_id))
             session.execute(delete(PosTerminal).where(PosTerminal.pos_id == world.pos_id))
             session.execute(delete(StaffUser).where(StaffUser.user_id == world.user_id))
             session.execute(delete(Product).where(Product.sku.in_(world.skus)))

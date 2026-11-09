@@ -24,10 +24,11 @@ from app.core.db import get_db
 from app.core.security import create_token
 from app.domain.models import (
     AuditLog, Inventory, InventoryMovement, PosTerminal, PosTransaction, Product,
-    StaffUser, Store, TransactionItem,
+    ProductBatch, StaffUser, Store, TransactionItem,
 )
 from app.main import app
 from app.repositories import idempotency as repository
+from tests.pos_test_support import add_stock
 
 
 URL = "/api/v1/pos/events"
@@ -53,7 +54,7 @@ def seed(session: Session) -> World:
     session.flush()
     session.add(PosTerminal(pos_id=pos, store_id=store, status="ACTIVE"))
     session.add(StaffUser(username=username, full_name="Test POS", role="POS_SYSTEM", store_id=None))
-    session.add(Inventory(store_id=store, sku=sku, quantity=10))
+    add_stock(session, store, sku, 10)
     session.flush()
     session.commit()
     return World(store, pos, sku, username, create_token(username, "POS", store_id=store, pos_id=pos))
@@ -159,6 +160,7 @@ def cleanup(engine: Engine, world: World) -> None:
         session.execute(delete(AuditLog).where(AuditLog.entity_key.in_(txns)))
         session.execute(delete(PosTransaction).where(PosTransaction.store_id == world.store))
         session.execute(delete(Inventory).where(Inventory.store_id == world.store))
+        session.execute(delete(ProductBatch).where(ProductBatch.store_id == world.store))
         session.execute(delete(PosTerminal).where(PosTerminal.store_id == world.store))
         session.execute(delete(StaffUser).where(StaffUser.username == world.username))
         session.execute(delete(Product).where(Product.sku == world.sku))

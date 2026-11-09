@@ -23,11 +23,13 @@ from app.domain.models import (
     PosTerminal,
     PosTransaction,
     Product,
+    ProductBatch,
     StaffUser,
     Store,
 )
 from app.repositories.inventory import get_stock as repository_get_stock
 from app.services.inventory import apply_stock_change, deduct_items, get_stock
+from tests.pos_test_support import add_stock
 
 
 def _uid(length: int = 8) -> str:
@@ -91,7 +93,7 @@ def _seed(
     session.flush()
 
     for sku, quantity in quantities.items():
-        session.add(Inventory(store_id=store_id, sku=sku, quantity=quantity))
+        add_stock(session, store_id, sku, quantity)
 
     txn_ids: list[str] = []
     for _ in range(transactions):
@@ -177,8 +179,7 @@ def test_apply_stock_change_increases_stock(db_session: Session) -> None:
 def test_stock_can_reach_exactly_zero(db_session: Session) -> None:
     world = _seed(db_session, quantities={})
     sku = world.skus[0]
-    db_session.add(Inventory(store_id=world.store_id, sku=sku, quantity=5))
-    db_session.flush()
+    add_stock(db_session, world.store_id, sku, 5)
 
     new_quantity = apply_stock_change(
         db_session,
@@ -358,12 +359,8 @@ def test_deduct_items_merges_repeated_skus(db_session: Session) -> None:
 def test_deduct_items_failure_rolls_back_every_sku(db_session: Session) -> None:
     world = _seed(db_session, quantities={})
     first, second = sorted(world.skus)  # the service processes SKUs in this order
-    db_session.add_all(
-        [
-            Inventory(store_id=world.store_id, sku=first, quantity=10),
-            Inventory(store_id=world.store_id, sku=second, quantity=1),
-        ]
-    )
+    add_stock(db_session, world.store_id, first, 10)
+    add_stock(db_session, world.store_id, second, 1)
     db_session.commit()
 
     with pytest.raises(ApiError) as error:
@@ -410,6 +407,7 @@ def _cleanup(engine, store_id: str, sku: str, txn_ids: list[str]) -> None:
     with Session(engine) as session:
         session.execute(delete(InventoryMovement).where(InventoryMovement.store_id == store_id))
         session.execute(delete(PosTransaction).where(PosTransaction.txn_id.in_(txn_ids)))
+        session.execute(delete(ProductBatch).where(ProductBatch.store_id == store_id))
         session.execute(delete(Inventory).where(Inventory.store_id == store_id))
         session.execute(delete(PosTerminal).where(PosTerminal.store_id == store_id))
         session.execute(delete(Product).where(Product.sku == sku))
@@ -457,9 +455,8 @@ def test_two_sessions_cannot_sell_the_last_unit(test_engine) -> None:
                     payload_hash="0" * 64,
                 )
             )
-        setup.add(Inventory(store_id=store_id, sku=sku, quantity=1))
+        add_stock(setup, store_id, sku, 1)
         setup.commit()
-
     def sell(txn_id: str) -> bool:
         with Session(test_engine) as session:
             try:

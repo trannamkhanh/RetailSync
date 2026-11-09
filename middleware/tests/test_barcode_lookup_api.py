@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from app.core.security import create_token
 from app.domain.models import AuditLog, Inventory, Product, StaffUser, Store
 from app.repositories import product_lookup as repository
+from tests.pos_test_support import add_stock
 
 
 @pytest.fixture
@@ -26,7 +27,8 @@ def world(db_session):
         username = f"TEST-{role}-{suffix}"
         db_session.add(StaffUser(username=username, full_name=role, role=db_role, store_id=store))
         tokens[role] = create_token(username, role, store_id=store)
-    db_session.add_all([Inventory(store_id=store, sku=sku, quantity=4), Inventory(store_id=other, sku=sku, quantity=99)])
+    add_stock(db_session, store, sku, 4)
+    add_stock(db_session, other, sku, 99)
     db_session.commit()
     return store, other, sku, barcode, tokens
 

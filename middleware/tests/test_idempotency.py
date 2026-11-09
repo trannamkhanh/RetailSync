@@ -14,12 +14,13 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import ApiError
 from app.domain.models import (
-    Inventory, InventoryMovement, PosTerminal, PosTransaction, Product, Store,
-    TransactionItem,
+    Inventory, InventoryMovement, PosTerminal, PosTransaction, Product, ProductBatch,
+    Store, TransactionItem,
 )
 from app.repositories import idempotency as repository
 from app.services.idempotency import claim_transaction, content_hash, stock_of_transaction
 from app.services.inventory import deduct_items
+from tests.pos_test_support import add_stock
 
 
 @dataclass
@@ -37,7 +38,7 @@ def seed(session: Session) -> World:
     session.add(Product(sku=world.sku, barcode=world.sku, name="Test product", category="TEST", unit_price=Decimal("10.00")))
     session.flush()
     session.add(PosTerminal(pos_id=world.pos, store_id=world.store, status="ACTIVE"))
-    session.add(Inventory(store_id=world.store, sku=world.sku, quantity=10))
+    add_stock(session, world.store, world.sku, 10)
     session.flush()
     return world
 
@@ -159,6 +160,7 @@ def cleanup(engine, world: World) -> None:
         session.execute(delete(TransactionItem).where(TransactionItem.txn_id == world.txn))
         session.execute(delete(PosTransaction).where(PosTransaction.txn_id == world.txn))
         session.execute(delete(Inventory).where(Inventory.store_id == world.store))
+        session.execute(delete(ProductBatch).where(ProductBatch.store_id == world.store))
         session.execute(delete(PosTerminal).where(PosTerminal.pos_id == world.pos))
         session.execute(delete(Product).where(Product.sku == world.sku))
         session.execute(delete(Store).where(Store.store_id == world.store))

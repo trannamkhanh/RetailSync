@@ -18,6 +18,7 @@ from app.domain.models import (
     PosTerminal,
     PosTransaction,
     Product,
+    ProductBatch,
     StaffUser,
     Store,
     TransactionItem,
@@ -25,6 +26,7 @@ from app.domain.models import (
 from app.main import app
 from tests.pos_test_support import (
     World,
+    add_stock,
     assert_error,
     assert_ledger_balanced,
     count,
@@ -72,7 +74,7 @@ def _seed_world(session: Session, quantities: dict[str, int]) -> World:
     session.add(user)
     session.flush()
     for sku, quantity in quantities.items():
-        session.add(Inventory(store_id=store_id, sku=sku, quantity=quantity))
+        add_stock(session, store_id, sku, quantity)
     session.commit()
     token = create_token(username, "POS", store_id=store_id, pos_id=pos_id)
     return World(store_id, pos_id, skus, username, token, "", user.user_id)
@@ -250,6 +252,7 @@ def test_inv10_4_parallel_sales_of_last_unit_have_one_winner(test_engine) -> Non
             session.execute(delete(TransactionItem).where(TransactionItem.txn_id.in_(event_ids)))
             session.execute(delete(PosTransaction).where(PosTransaction.txn_id.in_(event_ids)))
             session.execute(delete(Inventory).where(Inventory.store_id == world.store_id))
+            session.execute(delete(ProductBatch).where(ProductBatch.store_id == world.store_id))
             session.execute(delete(PosTerminal).where(PosTerminal.pos_id == world.pos_id))
             session.execute(delete(StaffUser).where(StaffUser.username == world.username))
             session.execute(delete(Product).where(Product.sku.in_(world.skus)))

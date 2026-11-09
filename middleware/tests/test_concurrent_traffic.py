@@ -16,10 +16,10 @@ from app.core.db import get_db
 from app.core.security import create_token
 from app.domain.models import (
     AuditLog, Inventory, InventoryMovement, PosTerminal, PosTransaction,
-    Product, StaffUser, Store, TransactionItem,
+    Product, ProductBatch, StaffUser, Store, TransactionItem,
 )
 from app.main import app
-from tests.pos_test_support import assert_ledger_balanced, post, uid
+from tests.pos_test_support import add_stock, assert_ledger_balanced, post, uid
 
 
 SEED = 73107
@@ -36,8 +36,8 @@ def _seed(engine: Engine, store: str, terminals: list[str], username: str,
                         for sku in opening)
         session.flush()
         session.add_all(PosTerminal(pos_id=pos, store_id=store, status="ACTIVE") for pos in terminals)
-        session.add_all(Inventory(store_id=store, sku=sku, quantity=quantity)
-                        for sku, quantity in opening.items())
+        for sku, quantity in opening.items():
+            add_stock(session, store, sku, quantity)
         user = StaffUser(username=username, full_name="Traffic POS", role="POS_SYSTEM")
         session.add(user)
         session.flush()
@@ -57,6 +57,7 @@ def _cleanup(engine: Engine, store: str, user_id: int, opening: dict[str, int]) 
         ))
         session.execute(delete(PosTransaction).where(PosTransaction.store_id == store))
         session.execute(delete(Inventory).where(Inventory.store_id == store))
+        session.execute(delete(ProductBatch).where(ProductBatch.store_id == store))
         session.execute(delete(PosTerminal).where(PosTerminal.store_id == store))
         session.execute(delete(Product).where(Product.sku.in_(opening)))
         session.execute(delete(StaffUser).where(StaffUser.user_id == user_id))

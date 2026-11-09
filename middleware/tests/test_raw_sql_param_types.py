@@ -29,6 +29,7 @@ from app.domain.models import (
     PosTerminal,
     PosTransaction,
     Product,
+    ProductBatch,
     StaffUser,
     Store,
     TransactionItem,
@@ -45,7 +46,7 @@ from app.repositories.original_sale import (
     returned_quantities,
     sold_quantities,
 )
-from tests.pos_test_support import uid
+from tests.pos_test_support import add_stock, uid
 
 
 NS = "{http://schemas.microsoft.com/sqlserver/2004/07/showplan}"
@@ -108,7 +109,7 @@ def world(test_engine) -> Generator[dict, None, None]:
         session.add(PosTransaction(txn_id=sale, store_id=store, pos_id=pos, txn_type="SALE",
                                    status="OK", payload_hash="0" * 64))
         for sku in skus[:2]:
-            session.add(Inventory(store_id=store, sku=sku, quantity=10))
+            add_stock(session, store, sku, 10)
             session.add(TransactionItem(txn_id=sale, sku=sku, qty=1, unit_price=10))
         session.commit()
 
@@ -120,6 +121,7 @@ def world(test_engine) -> Generator[dict, None, None]:
             session.execute(delete(InventoryMovement).where(InventoryMovement.store_id == store))
             session.execute(delete(TransactionItem).where(TransactionItem.txn_id == sale))
             session.execute(delete(Inventory).where(Inventory.store_id == store))
+            session.execute(delete(ProductBatch).where(ProductBatch.store_id == store))
             session.execute(delete(PosTransaction).where(PosTransaction.txn_id == sale))
             session.execute(delete(PosTerminal).where(PosTerminal.pos_id == pos))
             session.execute(delete(Product).where(Product.sku.in_(skus)))

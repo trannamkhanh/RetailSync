@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core import clock
 from app.core.security import create_token
 from app.domain.models import (
     AuditLog,
@@ -17,13 +19,18 @@ from app.domain.models import (
     PosTerminal,
     PosTransaction,
     Product,
+    ProductBatch,
     StaffUser,
     Store,
     TransactionItem,
 )
+from app.services.inventory import deduct_items
 
 
 URL = "/api/v1/pos/events"
+
+# A batch created by the helpers is sellable unless a test asks for another date.
+DEFAULT_BATCH_DAYS = 30
 
 
 @dataclass(frozen=True)
@@ -39,6 +46,50 @@ class World:
 
 def uid(length: int = 8) -> str:
     return uuid4().hex[:length].upper()
+
+
+def add_batch(session: Session, store_id: str, sku: str, quantity: int,
+              expiry_date: date | None = None, batch_id: str | None = None) -> str:
+    """Add one batch of a SKU and return its id.
+
+    The default expiry is ``today_local() + 30 days``, so the batch is sellable
+    unless a test asks for another date. Tests that need an expired batch pass
+    one in the past.
+    """
+    if quantity < 0:
+        raise ValueError("quantity must be >= 0")
+    batch_id = batch_id or f"TEST-B-{uid(8)}"
+    if expiry_date is None:
+        expiry_date = clock.today_local() + timedelta(days=DEFAULT_BATCH_DAYS)
+    session.add(
+        ProductBatch(
+            batch_id=batch_id,
+            sku=sku,
+            store_id=store_id,
+            expiry_date=expiry_date,
+            quantity=quantity,
+        )
+    )
+    session.flush()
+    return batch_id
+
+
+def add_stock(session: Session, store_id: str, sku: str, quantity: int,
+              expiry_date: date | None = None) -> str:
+    """Create an inventory row and one batch of the same quantity.
+
+    ``inventory.quantity`` must equal the sum of the batches of the store and SKU,
+    so new tests create stock only through this helper (PB-20). A row that is
+    already there takes the extra quantity; the batch is created either way.
+    """
+    row = session.get(Inventory, (store_id, sku))
+    if row is None:
+        session.add(Inventory(store_id=store_id, sku=sku, quantity=quantity))
+    else:
+        row.quantity += quantity
+    session.flush()
+    return add_batch(session, store_id, sku, quantity, expiry_date=expiry_date)
+
 
 
 def seed_sale(session: Session, *, sold: dict[str, int] | None = None, stock: int = 10,
@@ -82,7 +133,10 @@ def seed_sale(session: Session, *, sold: dict[str, int] | None = None, stock: in
     session.add(user)
     session.flush()
     for sku in skus:
-        session.add(Inventory(store_id=store_id, sku=sku, quantity=stock))
+        # The sale below already happened, so the opening stock is the stock the
+        # test expects plus what the sale took. The batch and the sale's own
+        # movements are recorded here, exactly as a real SALE records them.
+        add_stock(session, store_id, sku, stock + sold.get(sku, 0))
     sale_txn = f"TEST-SALE-{uid(8)}"
     session.add(
         PosTransaction(
@@ -104,6 +158,7 @@ def seed_sale(session: Session, *, sold: dict[str, int] | None = None, stock: in
             )
         )
     session.flush()
+    deduct_items(session, store_id, list(sold.items()), sale_txn)
     token = create_token(username, "POS", store_id=store_id, pos_id=pos_id)
     user_id = user.user_id
     session.commit()
@@ -226,8 +281,10 @@ def assert_ledger_balanced(session: Session, store_id: str, skus: list[str],
                            opening: dict[str, int]) -> None:
     """Check on-hand stock against its movement ledger for an isolated store.
 
-    A transaction may move several SKUs, so the once-only check is per
-    transaction and SKU: each ``(txn_id, sku)`` has at most one movement.
+    A transaction may move several SKUs and, since PB-20, several batches of one
+    SKU, so the once-only check is per transaction, SKU and batch: a movement row
+    exists at most once for each of them. ``inventory.quantity`` must also equal
+    the sum of the store's batches for the SKU, expired ones included.
     """
     assert set(skus) == set(opening)
     session.expire_all()
@@ -242,15 +299,25 @@ def assert_ledger_balanced(session: Session, store_id: str, skus: list[str],
             )
         )
         assert inventory.quantity == opening[sku] + int(movement_total)
+        batch_total = session.scalar(
+            select(func.coalesce(func.sum(ProductBatch.quantity), 0)).where(
+                ProductBatch.store_id == store_id,
+                ProductBatch.sku == sku,
+            )
+        )
+        assert inventory.quantity == int(batch_total), (
+            f"stock and batches disagree for {store_id}/{sku}: "
+            f"{inventory.quantity} on hand, {int(batch_total)} in batches"
+        )
 
     repeated_movements = session.execute(
-        select(InventoryMovement.txn_id, InventoryMovement.sku)
+        select(InventoryMovement.txn_id, InventoryMovement.sku, InventoryMovement.batch_id)
         .where(
             InventoryMovement.store_id == store_id,
             InventoryMovement.txn_id.is_not(None),
             InventoryMovement.sku.in_(skus),
         )
-        .group_by(InventoryMovement.txn_id, InventoryMovement.sku)
+        .group_by(InventoryMovement.txn_id, InventoryMovement.sku, InventoryMovement.batch_id)
         .having(func.count() > 1)
     ).all()
-    assert not repeated_movements, f"multiple stock movements for one transaction/SKU: {repeated_movements}"
+    assert not repeated_movements, f"multiple stock movements for one transaction/SKU/batch: {repeated_movements}"
