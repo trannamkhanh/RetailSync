@@ -1,9 +1,11 @@
-"""Store stock query endpoint (PB-12). Read-only: it never commits."""
+"""Store stock query endpoint (PB-12, PB-20). Read-only: it never commits."""
+
+from datetime import date
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.schemas.inventory import StockLine, StoreInventory
+from app.api.schemas.inventory import BatchInfo, StockLine, StoreInventory
 from app.api.schemas.registry import ID_PATTERN
 from app.core.db import get_db
 from app.core.errors import ApiError
@@ -26,6 +28,13 @@ def require_own_store(store_id: str,
     return principal
 
 
+def _batch_info(batches: list[tuple[str, date, int]]) -> list[BatchInfo]:
+    return [
+        BatchInfo(batch_id=batch_id, expiry_date=expiry_date, quantity=quantity)
+        for batch_id, expiry_date, quantity in batches
+    ]
+
+
 @router.get("/stores/{store_id}/inventory", response_model=StoreInventory)
 def get_store_inventory(store_id: str,
                         sku: str | None = Query(default=None, min_length=1, max_length=20,
@@ -33,6 +42,10 @@ def get_store_inventory(store_id: str,
                         session: Session = Depends(get_db),
                         principal: Principal = Depends(require_own_store)) -> StoreInventory:
     lines = stock_query.stock_lines(session, store_id, sku)
-    return StoreInventory(store_id=store_id,
-                          items=[StockLine(sku=line_sku, quantity=quantity)
-                                 for line_sku, quantity in lines])
+    return StoreInventory(
+        store_id=store_id,
+        items=[
+            StockLine(sku=line_sku, quantity=quantity, batches=_batch_info(batches))
+            for line_sku, quantity, batches in lines
+        ],
+    )
