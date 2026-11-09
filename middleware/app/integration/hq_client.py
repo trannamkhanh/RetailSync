@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
+from pathlib import Path
 from typing import Literal
 
 import httpx
@@ -57,7 +58,10 @@ def _secret() -> str:
 
 
 def check_configured() -> None:
+    """Fail before any batch is touched when HQ cannot be called as configured."""
     _secret()
+    if settings.hq_ca_file and not Path(settings.hq_ca_file).is_file():
+        raise HqConfigError(f"HQ_CA_FILE {settings.hq_ca_file} does not exist.")
 
 
 def service_token() -> str:

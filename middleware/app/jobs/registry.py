@@ -5,9 +5,13 @@
 
 ``every_seconds`` is an interval; ``daily_at`` is business local time. Each
 job opens its own sessions with ``SessionLocal()`` and commits them itself.
+Jobs due at the same tick run in the order below, so register aggregation
+(PB-14) before ``sync-send``: a new batch is then sent in the same tick.
 """
 
+from app.core.config import settings
 from app.jobs.scheduler import register_job
+from app.jobs.sync_send import run_send_cycle
 
 
-__all__ = ["register_job"]
+register_job("sync-send", run_send_cycle, every_seconds=settings.sync_interval)
