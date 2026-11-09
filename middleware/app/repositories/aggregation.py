@@ -9,11 +9,6 @@ from sqlalchemy.orm import Session
 from app.domain.models import PosTransaction
 
 
-def set_lock_timeout(session: Session, milliseconds: int) -> None:
-    """Bound every lock wait of this transaction, so a POS request is not held."""
-    session.execute(text(f"SET LOCK_TIMEOUT {int(milliseconds)}"))
-
-
 def count_unassigned(session: Session, store_id: str) -> int:
     return int(session.scalar(
         select(func.count()).select_from(PosTransaction).where(
@@ -28,14 +23,17 @@ def link_transactions(session: Session, store_id: str,
     """Claim the store's unbatched transactions in one UPDATE ... OUTPUT.
 
     A transaction committed after this statement keeps a null ``sync_batch_id``
-    and goes to the next batch, which is what DS-05 section 4 asks for.
+    and goes to the next batch, which is what DS-05 section 4 asks for. The
+    parameters are cast to varchar like the columns, so SQL Server does not
+    compare a varchar column with an nvarchar parameter (PB-10-5).
     """
     rows = session.execute(
         text("""
             UPDATE dbo.pos_transaction
-            SET sync_batch_id = :sync_batch_id
+            SET sync_batch_id = CAST(:sync_batch_id AS varchar(40))
             OUTPUT inserted.txn_id, inserted.created_at
-            WHERE store_id = :store_id AND sync_batch_id IS NULL
+            WHERE store_id = CAST(:store_id AS varchar(10))
+              AND sync_batch_id IS NULL
         """),
         {"sync_batch_id": sync_batch_id, "store_id": store_id},
     ).all()
@@ -54,7 +52,7 @@ def line_totals(session: Session, sync_batch_id: str) -> list[tuple[str, int, in
                             ELSE -ti.qty * ti.unit_price END)
             FROM dbo.transaction_item ti
             JOIN dbo.pos_transaction t ON t.txn_id = ti.txn_id
-            WHERE t.sync_batch_id = :sync_batch_id
+            WHERE t.sync_batch_id = CAST(:sync_batch_id AS varchar(40))
             GROUP BY ti.sku
             ORDER BY ti.sku
         """),
