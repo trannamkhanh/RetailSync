@@ -14,4 +14,8 @@ def lookup_product(session: Session, barcode: str, store_id: str) -> dict:
         "sku": product.sku, "barcode": product.barcode, "name": product.name,
         "category": product.category, "unit_price": product.unit_price,
         "quantity": repository.quantity(session, store_id, product.sku),
+        "batches": [
+            {"batch_id": batch.batch_id, "expiry_date": batch.expiry_date, "quantity": batch.quantity}
+            for batch in repository.batches(session, store_id, product.sku)
+        ],
     }
