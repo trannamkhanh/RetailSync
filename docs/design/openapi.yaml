@@ -763,6 +763,7 @@ paths:
       description: |
         PB-13, NFR05. A full HQ stock snapshot is never applied or converted.
         The attempt is written to audit_log and local stock is unchanged.
+        A body over 1 MB is refused with 413 and is not audited.
       operationId: postHqSnapshot
       x-roles: [HQ]
       requestBody:
@@ -777,6 +778,14 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          description: |
+            The body is over 1 MB. Nothing is applied and nothing is written to audit_log.
+            Code: PAYLOAD_TOO_LARGE.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '422':
           description: 'Always returned to an authorized caller. Code: SNAPSHOT_REJECTED.'
           content:
