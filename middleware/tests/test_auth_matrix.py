@@ -7,6 +7,7 @@ A route walk makes sure a new route cannot be left without a role check.
 
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
+from datetime import time
 from decimal import Decimal
 
 import jwt
@@ -22,6 +23,7 @@ from app.core.config import settings
 from app.core.security import create_token, require_role
 from app.domain.models import GuardrailRule
 from app.domain.models import Inventory, PosTerminal, Product, StaffUser, Store
+from app.jobs import scheduler
 from app.main import app
 from tests.pos_test_support import DEFAULT_BATCH_DAYS, add_stock
 
@@ -52,6 +54,9 @@ GUARDRAIL_RULE = ("PUT", "/api/v1/admin/guardrail-rules/{rule_id}")
 # The fixture creates one rule and records its id; identities are not sequential.
 GUARDRAIL_RULE_IDS: dict[str, int] = {}
 BARCODE = ("GET", "/api/v1/products/barcode/{barcode}")
+RUN_JOB = ("POST", "/api/v1/admin/jobs/{name}/run")
+# A test-only daily job, so the allowed call runs something harmless (PB-15-6).
+RUN_JOB_NAME = "TEST-am-job"
 
 # Expected status for every protected route on main, by caller.
 #                  POS  Staff  Manager  HQ   Admin  Auditor  no token
@@ -64,6 +69,7 @@ MATRIX = {
     GUARDRAIL_RULES: (403, 403, 403,   403, 200,   403,     401),
     GUARDRAIL_RULE:  (403, 403, 403,   403, 200,   403,     401),
     BARCODE:      (403, 200,   403,     403, 403,   403,     401),
+    RUN_JOB:      (403, 403,   403,     403, 200,   403,     401),
 }
 CALLERS = [*ROLES, None]
 
@@ -75,6 +81,12 @@ DOCUMENTATION = {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
 @pytest.fixture(autouse=True)
 def jwt_secret(monkeypatch):
     monkeypatch.setattr(settings, "jwt_secret", SecretStr(SECRET))
+
+
+@pytest.fixture(autouse=True)
+def test_daily_job(monkeypatch):
+    monkeypatch.setattr(scheduler, "_jobs", dict(scheduler._jobs))
+    scheduler.register_job(RUN_JOB_NAME, lambda: None, daily_at=time(0, 30))
 
 
 @pytest.fixture
@@ -134,6 +146,7 @@ REQUESTS: dict[tuple[str, str], Callable[[TestClient, dict], object]] = {
         GUARDRAIL_RULE[1].format(rule_id=GUARDRAIL_RULE_IDS["rule"]), headers=headers,
         json={"threshold": 20, "is_active": True}),
     BARCODE: lambda client, headers: client.get(BARCODE[1].format(barcode=f"BC-{SKU}"), headers=headers),
+    RUN_JOB: lambda client, headers: client.post(RUN_JOB[1].format(name=RUN_JOB_NAME), headers=headers),
 }
 
 
@@ -249,6 +262,7 @@ def test_matrix_allows_exactly_the_ds04_roles():
         INVENTORY: {"Staff", "Manager"}, POS_EVENTS: {"POS"},
         GUARDRAIL_RULES: {"Admin"}, GUARDRAIL_RULE: {"Admin"},
         BARCODE: {"Staff"},
+        RUN_JOB: {"Admin"},
     }
 
 

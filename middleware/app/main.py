@@ -10,6 +10,7 @@ from app.api.audit import router as audit_router
 from app.api.guardrails import router as guardrails_router
 from app.api.health import router as health_router
 from app.api.inventory import router as inventory_router
+from app.api.jobs import router as jobs_router
 from app.api.pos import router as pos_router
 from app.api.products import router as products_router
 from app.core.config import API_PREFIX, settings
@@ -35,5 +36,6 @@ app.include_router(audit_router, prefix=API_PREFIX)
 app.include_router(guardrails_router, prefix=API_PREFIX)
 app.include_router(health_router, prefix=API_PREFIX)
 app.include_router(inventory_router, prefix=API_PREFIX)
+app.include_router(jobs_router, prefix=API_PREFIX)
 app.include_router(pos_router, prefix=API_PREFIX)
 app.include_router(products_router, prefix=API_PREFIX)
