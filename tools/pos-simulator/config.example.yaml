@@ -1,0 +1,30 @@
+seed: 42
+run_id: demo-01
+start_at: '2026-11-19T02:00:00Z'
+event_count: 24
+# Alternatively remove event_count and use duration_minutes.
+base_url: https://localhost:9443/api/v1
+stores:
+  - store_id: STORE-DN1
+    pos: [POS-DN1-01, POS-DN1-02]
+rate_per_pos_per_second: 2
+mix: {SALE: 0.92, RETURN: 0.05, CANCELLATION: 0.03}
+items_per_sale: {min: 1, max: 5}
+fault_injection:
+  duplicate_rate: 0.02
+  conflict_rate: 0.001
+  timeout_retry_rate: 0.01
+catalogue:
+  SKU-0001: '32000.00'
+  SKU-0002: '7000.00'
+  SKU-0003: '65000.00'
+  SKU-0004: '25000.00'
+  SKU-0005: '45000.00'
+  SKU-0006: '38000.00'
+  SKU-0007: '120000.00'
+  SKU-0008: '4500.00'
+  SKU-0009: '58000.00'
+ca_file: ../../.certs/ca.crt
+terminal_cert_dir: ../../.certs/pos
+tokens_file: ../../.tokens/demo_tokens.json
+summary_file: summary.json
