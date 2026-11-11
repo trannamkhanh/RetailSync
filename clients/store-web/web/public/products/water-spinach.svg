@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 120" width="150" height="120"
+     role="img" aria-label="water spinach">
+  <rect width="150" height="120" fill="#dcfce7"/>
+  <g><path d="M75 96 L75 56" stroke="#15803d" stroke-width="5" stroke-linecap="round"/>
+        <path d="M75 70 Q50 64 48 42 Q70 44 75 70 Z" fill="#4ade80" stroke="#15803d" stroke-width="3"/>
+        <path d="M75 62 Q100 56 102 34 Q80 36 75 62 Z" fill="#22c55e" stroke="#15803d" stroke-width="3"/>
+        <path d="M75 82 Q54 78 52 60 Q72 62 75 82 Z" fill="#22c55e" stroke="#15803d" stroke-width="3"/></g>
+</svg>

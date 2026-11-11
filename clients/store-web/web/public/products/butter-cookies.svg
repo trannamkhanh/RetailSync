@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 120" width="150" height="120"
+     role="img" aria-label="butter cookies">
+  <rect width="150" height="120" fill="#fed7aa"/>
+  <g><circle cx="60" cy="66" r="17" fill="#fdba74" stroke="#9a3412" stroke-width="4"/>
+        <circle cx="90" cy="80" r="15" fill="#fdba74" stroke="#9a3412" stroke-width="4"/>
+        <circle cx="55" cy="60" r="3" fill="#9a3412"/>
+        <circle cx="66" cy="72" r="3" fill="#9a3412"/>
+        <circle cx="86" cy="75" r="3" fill="#9a3412"/>
+        <circle cx="95" cy="86" r="3" fill="#9a3412"/></g>
+</svg>

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 120" width="150" height="120"
+     role="img" aria-label="fresh milk">
+  <rect width="150" height="120" fill="#e0f2fe"/>
+  <g><rect x="52" y="30" width="46" height="70" rx="8" fill="#fff" stroke="#0369a1" stroke-width="4"/>
+        <path d="M62 30 L70 14 L80 14 L88 30 Z" fill="#0369a1"/>
+        <rect x="62" y="52" width="26" height="26" rx="4" fill="#bae6fd"/>
+        <rect x="52" y="88" width="46" height="12" fill="#bae6fd"/></g>
+</svg>

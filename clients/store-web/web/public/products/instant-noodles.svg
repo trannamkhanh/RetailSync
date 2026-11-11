@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 120" width="150" height="120"
+     role="img" aria-label="instant noodles">
+  <rect width="150" height="120" fill="#fecaca"/>
+  <g><rect x="54" y="46" width="42" height="52" rx="6" fill="#fff" stroke="#991b1b" stroke-width="4"/>
+        <ellipse cx="75" cy="46" rx="21" ry="8" fill="#fca5a5" stroke="#991b1b" stroke-width="4"/>
+        <path d="M60 66 Q75 58 90 66" stroke="#f59e0b" stroke-width="5" fill="none" stroke-linecap="round"/>
+        <path d="M60 78 Q75 70 90 78" stroke="#f59e0b" stroke-width="5" fill="none" stroke-linecap="round"/></g>
+</svg>

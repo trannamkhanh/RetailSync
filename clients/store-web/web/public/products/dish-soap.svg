@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 120" width="150" height="120"
+     role="img" aria-label="dish soap">
+  <rect width="150" height="120" fill="#cffafe"/>
+  <g><path d="M58 48 L92 48 L88 96 L62 96 Z" fill="#fff" stroke="#155e75" stroke-width="4"/>
+        <rect x="68" y="30" width="14" height="18" rx="3" fill="#155e75"/>
+        <path d="M72 30 Q72 20 84 20" stroke="#155e75" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <rect x="62" y="66" width="26" height="18" rx="4" fill="#a5f3fc"/></g>
+</svg>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 120" width="150" height="120"
+     role="img" aria-label="tissues">
+  <rect width="150" height="120" fill="#f5f3ff"/>
+  <g><rect x="46" y="52" width="58" height="44" rx="6" fill="#fff" stroke="#6d28d9" stroke-width="4"/>
+        <ellipse cx="75" cy="52" rx="20" ry="7" fill="#ddd6fe" stroke="#6d28d9" stroke-width="3"/>
+        <rect x="62" y="42" width="26" height="14" rx="3" fill="#fff" stroke="#6d28d9" stroke-width="3"/></g>
+</svg>

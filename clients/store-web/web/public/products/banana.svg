@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 120" width="150" height="120"
+     role="img" aria-label="banana">
+  <rect width="150" height="120" fill="#fef9c3"/>
+  <g><path d="M46 40 Q44 86 96 88" stroke="#a16207" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <path d="M46 40 Q50 84 96 88 Q88 62 66 48 Q54 42 46 40 Z" fill="#fde047" stroke="#a16207" stroke-width="3"/>
+        <path d="M50 42 Q56 40 60 42" stroke="#a16207" stroke-width="3" fill="none"/></g>
+</svg>

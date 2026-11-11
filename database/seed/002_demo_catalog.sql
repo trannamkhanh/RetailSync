@@ -13,11 +13,17 @@ IF NOT EXISTS (SELECT 1 FROM dbo.product WHERE sku = 'SKU-0005')
 IF NOT EXISTS (SELECT 1 FROM dbo.product WHERE sku = 'SKU-0006')
     INSERT dbo.product (sku, barcode, name, category, unit_price) VALUES ('SKU-0006', '8930000000066', N'Butter cookies 200g', 'Bakery', 38000);
 IF NOT EXISTS (SELECT 1 FROM dbo.product WHERE sku = 'SKU-0007')
-    INSERT dbo.product (sku, barcode, name, category, unit_price) VALUES ('SKU-0007', '8930000000073', N'Rice 5kg', 'Dry goods', 120000);
+    INSERT dbo.product (sku, barcode, name, category, unit_price) VALUES ('SKU-0007', '8930000000073', N'Rice 50kg', 'Dry goods', 1250000);
 IF NOT EXISTS (SELECT 1 FROM dbo.product WHERE sku = 'SKU-0008')
     INSERT dbo.product (sku, barcode, name, category, unit_price) VALUES ('SKU-0008', '8930000000080', N'Instant noodles 75g', 'Dry goods', 4500);
 IF NOT EXISTS (SELECT 1 FROM dbo.product WHERE sku = 'SKU-0009')
     INSERT dbo.product (sku, barcode, name, category, unit_price) VALUES ('SKU-0009', '8930000000097', N'Cooking oil 1L', 'Dry goods', 58000);
+
+-- The demo photo for SKU-0007 is a 50 kg bag, so the row was renamed from the
+-- old "Rice 5kg". Upgrading a database seeded before that change is conditional
+-- on the old value, so an operator's own edit is never overwritten.
+UPDATE dbo.product SET name = N'Rice 50kg', unit_price = 1250000
+WHERE sku = 'SKU-0007' AND name = N'Rice 5kg';
 
 -- 27 rows: 3 stores x 9 SKUs. A row that already exists keeps its quantity.
 INSERT dbo.inventory (store_id, sku, quantity)

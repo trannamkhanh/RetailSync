@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 120" width="150" height="120"
+     role="img" aria-label="bread">
+  <rect width="150" height="120" fill="#fef3c7"/>
+  <g><path d="M46 74 Q46 42 75 42 Q104 42 104 74 L104 90 Q104 96 98 96 L52 96 Q46 96 46 90 Z"
+              fill="#fcd34d" stroke="#92400e" stroke-width="4"/>
+        <path d="M60 52 Q66 60 62 70" stroke="#92400e" stroke-width="3" fill="none" stroke-linecap="round"/>
+        <path d="M75 50 Q81 58 77 68" stroke="#92400e" stroke-width="3" fill="none" stroke-linecap="round"/>
+        <path d="M90 52 Q96 60 92 70" stroke="#92400e" stroke-width="3" fill="none" stroke-linecap="round"/></g>
+</svg>

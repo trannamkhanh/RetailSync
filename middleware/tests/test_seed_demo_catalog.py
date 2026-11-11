@@ -18,7 +18,7 @@ PRODUCTS = {
     "SKU-0004": ("8930000000042", "Bread 400g", "Bakery", Decimal("25000")),
     "SKU-0005": ("8930000000059", "Sponge cake 300g", "Bakery", Decimal("45000")),
     "SKU-0006": ("8930000000066", "Butter cookies 200g", "Bakery", Decimal("38000")),
-    "SKU-0007": ("8930000000073", "Rice 5kg", "Dry goods", Decimal("120000")),
+    "SKU-0007": ("8930000000073", "Rice 50kg", "Dry goods", Decimal("1250000")),
     "SKU-0008": ("8930000000080", "Instant noodles 75g", "Dry goods", Decimal("4500")),
     "SKU-0009": ("8930000000097", "Cooking oil 1L", "Dry goods", Decimal("58000")),
 }

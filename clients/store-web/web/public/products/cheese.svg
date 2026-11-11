@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 120" width="150" height="120"
+     role="img" aria-label="cheese">
+  <rect width="150" height="120" fill="#fef3c7"/>
+  <g><path d="M48 92 L48 52 L102 40 L102 92 Z" fill="#fde68a" stroke="#b45309" stroke-width="4"/>
+        <circle cx="66" cy="72" r="5" fill="#b45309"/>
+        <circle cx="86" cy="64" r="4" fill="#b45309"/>
+        <circle cx="76" cy="84" r="3" fill="#b45309"/></g>
+</svg>

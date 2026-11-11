@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 120" width="150" height="120"
+     role="img" aria-label="yogurt">
+  <rect width="150" height="120" fill="#fce7f3"/>
+  <g><path d="M56 40 L94 40 L88 96 L62 96 Z" fill="#fff" stroke="#9d174d" stroke-width="4"/>
+        <rect x="52" y="32" width="46" height="10" rx="4" fill="#9d174d"/>
+        <circle cx="75" cy="68" r="12" fill="#fbcfe8"/></g>
+</svg>

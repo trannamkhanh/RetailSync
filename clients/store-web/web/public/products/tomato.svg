@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 120" width="150" height="120"
+     role="img" aria-label="tomato">
+  <rect width="150" height="120" fill="#fee2e2"/>
+  <g><circle cx="75" cy="66" r="26" fill="#ef4444" stroke="#b91c1c" stroke-width="4"/>
+        <path d="M75 40 L63 30 M75 40 L87 30 M75 40 L75 26" stroke="#15803d" stroke-width="4" stroke-linecap="round"/>
+        <path d="M60 60 Q75 52 90 60" stroke="#b91c1c" stroke-width="3" fill="none"/></g>
+</svg>

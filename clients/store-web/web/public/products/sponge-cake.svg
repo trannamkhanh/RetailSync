@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 120" width="150" height="120"
+     role="img" aria-label="sponge cake">
+  <rect width="150" height="120" fill="#fef9c3"/>
+  <g><rect x="50" y="52" width="50" height="44" rx="6" fill="#fef08a" stroke="#a16207" stroke-width="4"/>
+        <rect x="50" y="52" width="50" height="16" rx="6" fill="#fff"/>
+        <circle cx="75" cy="42" r="7" fill="#ef4444"/>
+        <path d="M62 76 L88 76" stroke="#a16207" stroke-width="3"/></g>
+</svg>

@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+.venv/
+__pycache__/
+*.py[cod]
+*.tsbuildinfo
+.pytest_cache/
+.env
+
+# Local run logs
+*.log

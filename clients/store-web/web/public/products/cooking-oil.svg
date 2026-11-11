@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 120" width="150" height="120"
+     role="img" aria-label="cooking oil">
+  <rect width="150" height="120" fill="#ecfccb"/>
+  <g><rect x="58" y="38" width="34" height="60" rx="6" fill="#fde68a" stroke="#4d7c0f" stroke-width="4"/>
+        <rect x="68" y="22" width="14" height="18" rx="3" fill="#4d7c0f"/>
+        <rect x="62" y="58" width="26" height="18" rx="4" fill="#fff"/></g>
+</svg>
