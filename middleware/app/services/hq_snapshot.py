@@ -38,7 +38,9 @@ def store_id(raw: bytes) -> str | None:
     """
     try:
         payload = json.loads(raw)
-    except (ValueError, UnicodeDecodeError):
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        # Deeply nested JSON raises RecursionError; the attempt is still
+        # audited and answered 422, just without a store.
         return None
     value = payload.get("store_id") if isinstance(payload, dict) else None
     return value if isinstance(value, str) and _STORE_ID.fullmatch(value) else None

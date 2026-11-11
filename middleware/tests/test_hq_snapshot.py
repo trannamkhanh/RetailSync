@@ -197,6 +197,18 @@ def test_inv13_3_a_body_of_exactly_one_megabyte_is_still_audited(client, db_sess
     assert len(audits(db_session)) == 1
 
 
+def test_inv13_3_deeply_nested_json_is_refused_and_audited(client, db_session, world):
+    before = stock_of(db_session, world["store_id"])
+    body = b"[" * 20_000 + b"]" * 20_000
+
+    response = client.post(URL, headers={**bearer(world["hq_token"]),
+                                         "Content-Type": "application/json"}, content=body)
+
+    assert_rejected(response, 422, "SNAPSHOT_REJECTED")
+    assert len(audits(db_session)) == 1
+    assert stock_of(db_session, world["store_id"]) == before
+
+
 def test_inv13_3_the_limit_is_the_one_ds04_names():
     assert MAX_SNAPSHOT_BYTES == 1_048_576
 
