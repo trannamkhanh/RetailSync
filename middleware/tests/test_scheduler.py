@@ -137,6 +137,101 @@ def test_pb15_1_daily_time_follows_the_configured_offset(clock, monkeypatch):
     assert sched.next_run("nightly") == datetime(2026, 11, 15, 2, 0, tzinfo=timezone.utc)
 
 
+# Catch-up of daily jobs at start (PB-15-6). START is 01:30 local in UTC+7.
+
+
+def test_pb15_6_start_before_the_daily_time_catches_up_nothing(clock, monkeypatch):
+    monkeypatch.setattr(settings, "business_utc_offset_hours", 7)
+    count = Counter()
+    sched = make([Job("nightly", count, daily_at=time(2, 0))], clock)
+
+    assert sched.catch_up_pending() == []
+    assert sched.tick() == []
+    clock.advance(60)
+    assert sched.tick() == []
+    assert count.calls == 0
+
+
+def test_pb15_6_start_after_the_daily_time_runs_the_job_once(clock, monkeypatch):
+    monkeypatch.setattr(settings, "business_utc_offset_hours", 7)
+    count = Counter()
+    sched = make([Job("nightly", count, daily_at=time(1, 0))], clock)
+
+    assert sched.catch_up_pending() == ["nightly"]
+    assert sched.tick() == ["nightly"]
+    clock.advance(60)
+    assert sched.tick() == []
+    assert count.calls == 1
+    assert sched.catch_up_pending() == []
+    # The next run stays at 01:00 local tomorrow (18:00 UTC on 15 Nov).
+    assert sched.next_run("nightly") == datetime(2026, 11, 15, 18, 0, tzinfo=timezone.utc)
+
+
+def test_pb15_6_two_daily_jobs_catch_up_in_registry_order(clock, monkeypatch):
+    monkeypatch.setattr(settings, "business_utc_offset_hours", 7)
+    order: list[str] = []
+    register_job("near-expiry", lambda: order.append("near-expiry"), daily_at=time(0, 30))
+    register_job("hourly", lambda: order.append("hourly"), every_seconds=3600)
+    register_job("forecast", lambda: order.append("forecast"), daily_at=time(1, 0))
+    register_job("late", lambda: order.append("late"), daily_at=time(2, 0))
+    sched = make(scheduler.registered_jobs(), clock)
+
+    assert sched.tick() == ["near-expiry", "forecast"]
+    assert order == ["near-expiry", "forecast"]
+
+
+def test_pb15_6_catch_up_runs_before_jobs_due_at_the_same_tick(clock, monkeypatch):
+    monkeypatch.setattr(settings, "business_utc_offset_hours", 7)
+    order: list[str] = []
+    sched = make([Job("every-minute", lambda: order.append("every-minute"), every_seconds=60),
+                  Job("nightly", lambda: order.append("nightly"), daily_at=time(1, 0))], clock)
+
+    clock.advance(60)
+    assert sched.tick() == ["nightly", "every-minute"]
+    assert order == ["nightly", "every-minute"]
+
+
+def test_pb15_6_catch_up_waits_for_the_application_lock(clock, monkeypatch):
+    monkeypatch.setattr(settings, "business_utc_offset_hours", 7)
+
+    class LockHeldElsewhere(HeldLock):
+        free = False
+
+        def acquire(self) -> bool:
+            return self.free
+
+        def holds(self) -> bool:
+            return self.free
+
+    lock = LockHeldElsewhere()
+    count = Counter()
+    sched = make([Job("nightly", count, daily_at=time(1, 0))], clock, lock=lock, lock_retry_seconds=0)
+
+    assert sched.tick() == []
+    lock.free = True
+    assert sched.tick() == ["nightly"]
+    assert sched.tick() == []
+    assert count.calls == 1
+
+
+def test_pb15_6_a_failing_catch_up_job_is_logged_and_not_retried(clock, monkeypatch, caplog):
+    monkeypatch.setattr(settings, "business_utc_offset_hours", 7)
+    attempts = Counter()
+
+    def broken() -> None:
+        attempts()
+        raise RuntimeError("job failed")
+
+    sched = make([Job("nightly", broken, daily_at=time(1, 0))], clock)
+
+    with caplog.at_level(logging.ERROR, logger=scheduler.__name__):
+        assert sched.tick() == ["nightly"]
+    clock.advance(60)
+    assert sched.tick() == []
+    assert attempts.calls == 1
+    assert any("nightly" in record.getMessage() for record in caplog.records)
+
+
 # Failures and overlap
 
 

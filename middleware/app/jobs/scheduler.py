@@ -8,7 +8,13 @@ once a day at a business local time (UTC + ``BUSINESS_UTC_OFFSET_HOURS``).
   own and keeps it until it stops. A process that cannot get the lock runs
   nothing and tries again later, so it takes over if the holder goes away.
 - A job that raises is logged and runs again at its next time.
-- Two runs of the same job never overlap.
+- Two runs of the same job never overlap. ``POST /admin/jobs/{name}/run``
+  takes the same per-job lock (``Job.running``).
+- Catch-up (PB-15-6, decided 11 Nov 2026): every ``daily_at`` job whose time
+  has already passed today when the scheduler starts runs once, in registry
+  order, at the first tick that holds the application lock and before any
+  other job. No run history is stored, so daily jobs must be safe to run
+  twice on one business date.
 
 A job takes no arguments, opens its own sessions with ``SessionLocal()`` and
 commits them itself. Jobs are registered in ``app/jobs/registry.py``.
@@ -51,6 +57,13 @@ class Job:
         if local_run <= local_now:
             local_run += timedelta(days=1)
         return (local_run - offset).replace(tzinfo=timezone.utc)
+
+    def passed_today(self, now: datetime) -> bool:
+        """True for a daily job whose business local time today is not after ``now`` (UTC)."""
+        if self.daily_at is None:
+            return False
+        local_now = (now + timedelta(hours=settings.business_utc_offset_hours)).replace(tzinfo=None)
+        return datetime.combine(local_now.date(), self.daily_at) <= local_now
 
 
 _jobs: dict[str, Job] = {}
@@ -156,6 +169,7 @@ class Scheduler:
         self._next_lock_try: datetime | None = None
         now = clock()
         self._next_run = {job.name: job.next_after(now) for job in self._jobs.values()}
+        self._catch_up = [job.name for job in self._jobs.values() if job.passed_today(now)]
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -197,15 +211,29 @@ class Scheduler:
             job.running.release()
         return True
 
+    def catch_up_pending(self) -> list[str]:
+        """Daily jobs still to catch up, in registry order."""
+        return list(self._catch_up)
+
+    def _run_catch_up(self) -> list[str]:
+        """Run each missed daily job once; its next run stays at its next daily time."""
+        names, self._catch_up = self._catch_up, []
+        ran = []
+        for name in names:
+            if self.run_job(name):
+                ran.append(name)
+                self._next_run[name] = self._jobs[name].next_after(self._clock())
+        return ran
+
     def tick(self) -> list[str]:
         """Run every job that is due. Returns the names of the jobs that ran."""
         now = self._clock()
         if not self._has_lock:
             self._try_lock(now)
         due = [name for name, at in self._next_run.items() if at <= now]
-        if not due or not self._still_holds_lock(now):
+        if not (due or self._catch_up) or not self._still_holds_lock(now):
             return []
-        ran = []
+        ran = self._run_catch_up()
         for name in due:
             if self.run_job(name):
                 ran.append(name)
