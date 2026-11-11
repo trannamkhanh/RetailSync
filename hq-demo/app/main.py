@@ -1,17 +1,20 @@
 """HQ demo service (PB-18): HTTPS on 9000, POST /sync, demo endpoints."""
 
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 import json
+import logging
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from app import modes
-from app.db import get_db
+from app.db import get_db, get_engine
 from app.errors import HqError, hq_error_handler
 from app.hashing import batch_hash
 from app.models import HqSalesTotal, HqSyncBatch
@@ -20,7 +23,31 @@ from app.security import require_middleware
 from app.service import apply_batch
 
 
-app = FastAPI(title="RetailSync HQ demo", version="0.1.0")
+logger = logging.getLogger(__name__)
+
+
+def _warm_up() -> None:
+    """Open the engine and run one query, so the first /sync does not pay for it.
+
+    The first connection costs about 6 seconds on a cold container, which is
+    longer than the Middleware's 3 second send timeout (PB-18). A database that
+    is not reachable is logged and does not stop the service from starting.
+    """
+    try:
+        with get_engine().connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception:
+        logger.warning("HQ demo warm start could not reach the database; "
+                       "the first request may be slow", exc_info=True)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    await run_in_threadpool(_warm_up)
+    yield
+
+
+app = FastAPI(title="RetailSync HQ demo", version="0.1.0", lifespan=lifespan)
 app.add_exception_handler(HqError, hq_error_handler)
 
 

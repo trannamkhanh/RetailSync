@@ -9,6 +9,7 @@ from app.api.admin import router as admin_router
 from app.api.audit import router as audit_router
 from app.api.guardrails import router as guardrails_router
 from app.api.health import router as health_router
+from app.api.hq_snapshot import router as hq_snapshot_router
 from app.api.inventory import router as inventory_router
 from app.api.jobs import router as jobs_router
 from app.api.pos import router as pos_router
@@ -35,6 +36,7 @@ app.include_router(admin_router, prefix=API_PREFIX)
 app.include_router(audit_router, prefix=API_PREFIX)
 app.include_router(guardrails_router, prefix=API_PREFIX)
 app.include_router(health_router, prefix=API_PREFIX)
+app.include_router(hq_snapshot_router, prefix=API_PREFIX)
 app.include_router(inventory_router, prefix=API_PREFIX)
 app.include_router(jobs_router, prefix=API_PREFIX)
 app.include_router(pos_router, prefix=API_PREFIX)

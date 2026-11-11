@@ -57,6 +57,7 @@ BARCODE = ("GET", "/api/v1/products/barcode/{barcode}")
 RUN_JOB = ("POST", "/api/v1/admin/jobs/{name}/run")
 # A test-only daily job, so the allowed call runs something harmless (PB-15-6).
 RUN_JOB_NAME = "TEST-am-job"
+HQ_SNAPSHOT = ("POST", "/api/v1/hq/snapshot")
 
 # Expected status for every protected route on main, by caller.
 #                  POS  Staff  Manager  HQ   Admin  Auditor  no token
@@ -70,8 +71,13 @@ MATRIX = {
     GUARDRAIL_RULE:  (403, 403, 403,   403, 200,   403,     401),
     BARCODE:      (403, 200,   403,     403, 403,   403,     401),
     RUN_JOB:      (403, 403,   403,     403, 200,   403,     401),
+    HQ_SNAPSHOT:  (403, 403,   403,     422, 403,   403,     401),
 }
 CALLERS = [*ROLES, None]
+
+# A route whose authorized answer is not a 2xx. /hq/snapshot refuses every
+# snapshot by design (PB-13), so HQ is allowed although it gets 422.
+ALLOWED_STATUS = {HQ_SNAPSHOT: {422}}
 
 PUBLIC = {("GET", "/api/v1/health")}
 # FastAPI's own documentation routes: public by design, not API operations.
@@ -147,6 +153,8 @@ REQUESTS: dict[tuple[str, str], Callable[[TestClient, dict], object]] = {
         json={"threshold": 20, "is_active": True}),
     BARCODE: lambda client, headers: client.get(BARCODE[1].format(barcode=f"BC-{SKU}"), headers=headers),
     RUN_JOB: lambda client, headers: client.post(RUN_JOB[1].format(name=RUN_JOB_NAME), headers=headers),
+    HQ_SNAPSHOT: lambda client, headers: client.post(HQ_SNAPSHOT[1], headers=headers,
+                                                     json={"store_id": STORE_ID}),
 }
 
 
@@ -253,8 +261,9 @@ def test_ps02_7_role_matrix(client, world, operation, caller):
 
 
 def test_matrix_allows_exactly_the_ds04_roles():
-    """x-roles in DS-04: Admin, Admin, Auditor, Staff and Manager, POS."""
-    allowed = {operation: {role for role, status in zip(ROLES, statuses) if status < 400}
+    """x-roles in DS-04: Admin, Admin, Auditor, Staff and Manager, POS, HQ."""
+    allowed = {operation: {role for role, status in zip(ROLES, statuses)
+                           if status < 400 or status in ALLOWED_STATUS.get(operation, ())}
                for operation, statuses in MATRIX.items()}
 
     assert allowed == {
@@ -263,6 +272,7 @@ def test_matrix_allows_exactly_the_ds04_roles():
         GUARDRAIL_RULES: {"Admin"}, GUARDRAIL_RULE: {"Admin"},
         BARCODE: {"Staff"},
         RUN_JOB: {"Admin"},
+        HQ_SNAPSHOT: {"HQ"},
     }
 
 
