@@ -209,6 +209,35 @@ def test_inv13_3_deeply_nested_json_is_refused_and_audited(client, db_session, w
     assert stock_of(db_session, world["store_id"]) == before
 
 
+@pytest.mark.parametrize("store_first", [True, False])
+def test_inv13_3_deep_object_preserves_store_in_audit(client, db_session, world, store_first):
+    before = stock_of(db_session, world["store_id"])
+    nested = b'"items":' + b"[" * 20_000 + b"]" * 20_000
+    store = b'"store_id":"' + world["store_id"].encode() + b'"'
+    body = b"{" + (store + b"," + nested if store_first else nested + b"," + store) + b"}"
+
+    response = client.post(URL, headers=bearer(world["hq_token"]), content=body)
+
+    assert_rejected(response, 422, "SNAPSHOT_REJECTED")
+    rows = audits(db_session)
+    assert len(rows) == 1
+    assert world["store_id"] in rows[0].details
+    assert f"{len(body)} bytes" in rows[0].details
+    assert stock_of(db_session, world["store_id"]) == before
+
+
+def test_inv13_3_invalid_deep_object_does_not_name_a_store(client, db_session, world):
+    body = (b'{"store_id":"' + world["store_id"].encode() + b'","items":'
+            + b"[" * 20_000 + b"]" * 20_000 + b",}")
+
+    response = client.post(URL, headers=bearer(world["hq_token"]), content=body)
+
+    assert_rejected(response, 422, "SNAPSHOT_REJECTED")
+    rows = audits(db_session)
+    assert len(rows) == 1
+    assert world["store_id"] not in rows[0].details
+
+
 def test_inv13_3_the_limit_is_the_one_ds04_names():
     assert MAX_SNAPSHOT_BYTES == 1_048_576
 

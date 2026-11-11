@@ -23,6 +23,80 @@ MAX_SNAPSHOT_BYTES = 1_048_576
 
 # store_id is varchar(10) in dbo.store, so anything else cannot name a store.
 _STORE_ID = re.compile(r"[A-Za-z0-9_-]{1,10}")
+_JSON_TOKEN = re.compile(r'[ \t\r\n]*("(?:[^"\\\x00-\x1f]|\\["\\/bfnrt]|\\u[0-9a-fA-F]{4})*"|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null|[{}\[\],:])', re.ASCII)
+
+
+def _deep_store_id(raw: bytes) -> str | None:
+    """Validate deeply nested JSON iteratively, retaining only the root store ID."""
+    try:
+        text = raw.decode(json.detect_encoding(raw), "surrogatepass")
+    except UnicodeDecodeError:
+        return None
+    # Frames contain container type and the next expected grammar element.
+    stack: list[list[str]] = []
+    position = 0
+    root_done = False
+    root_object = False
+    key = None
+    store = None
+    while position < len(text):
+        match = _JSON_TOKEN.match(text, position)
+        if match is None:
+            if text[position:].strip(" \t\r\n") == "":
+                break
+            return None
+        token = match.group(1)
+        position = match.end()
+        if root_done:
+            return None
+        if stack:
+            kind, state = stack[-1]
+            if state in ("key_or_end", "key"):
+                if state == "key_or_end" and token == "}":
+                    stack.pop()
+                    root_done = not stack
+                    continue
+                if not token.startswith('"'):
+                    return None
+                if len(stack) == 1:
+                    key = json.loads(token)
+                stack[-1][1] = "colon"
+                continue
+            if state == "colon":
+                if token != ":":
+                    return None
+                stack[-1][1] = "value"
+                continue
+            if state == "comma_or_end":
+                closing = "}" if kind == "object" else "]"
+                if token == closing:
+                    stack.pop()
+                    root_done = not stack
+                elif token == ",":
+                    stack[-1][1] = "key" if kind == "object" else "value"
+                else:
+                    return None
+                continue
+            if state == "value_or_end" and token == "]":
+                stack.pop()
+                root_done = not stack
+                continue
+            if state not in ("value", "value_or_end"):
+                return None
+            if len(stack) == 1 and kind == "object" and key == "store_id":
+                store = json.loads(token) if token.startswith('"') else None
+            stack[-1][1] = "comma_or_end"
+        else:
+            root_object = token == "{"
+        if token == "{":
+            stack.append(["object", "key_or_end"])
+        elif token == "[":
+            stack.append(["array", "value_or_end"])
+        elif token in ("}", "]", ",", ":"):
+            return None
+        elif not stack:
+            root_done = True
+    return store if root_done and root_object and isinstance(store, str) and _STORE_ID.fullmatch(store) else None
 
 
 def too_large(size: int) -> ApiError:
@@ -38,9 +112,9 @@ def store_id(raw: bytes) -> str | None:
     """
     try:
         payload = json.loads(raw)
-    except (ValueError, UnicodeDecodeError, RecursionError):
-        # Deeply nested JSON raises RecursionError; the attempt is still
-        # audited and answered 422, just without a store.
+    except RecursionError:
+        return _deep_store_id(raw)
+    except (ValueError, UnicodeDecodeError):
         return None
     value = payload.get("store_id") if isinstance(payload, dict) else None
     return value if isinstance(value, str) and _STORE_ID.fullmatch(value) else None
