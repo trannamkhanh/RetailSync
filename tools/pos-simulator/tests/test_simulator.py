@@ -19,7 +19,7 @@ def config():
     return config
 
 
-def test_ps03_2_sales_use_the_seeded_catalogue_and_validate(config):
+def test_pb03_sales_use_the_seeded_catalogue_and_validate(config):
     for event in generate(config):
         payload = PosEvent.model_validate(event.payload)
         if event.resend is not None:
@@ -29,7 +29,7 @@ def test_ps03_2_sales_use_the_seeded_catalogue_and_validate(config):
             assert all(str(item.unit_price) == config.catalogue[item.sku] for item in payload.items)
 
 
-def test_ps03_3_reversals_reference_valid_sales_within_limits(config):
+def test_ps03_4_reversals_reference_valid_sales_within_limits(config):
     sales = {}
     returned = set()
     kinds = Counter()
@@ -52,9 +52,20 @@ def test_ps03_3_reversals_reference_valid_sales_within_limits(config):
     assert all(kinds[kind] > 0 for kind in config.mix)
 
 
-def test_ps03_4_same_seed_and_configuration_generate_same_plan(config):
+def test_ps03_2_same_seed_and_configuration_generate_same_plan(config):
     assert generate(config) == generate(config)
     assert generate(config) != generate(config.model_copy(update={"seed": config.seed + 1}))
+
+
+def test_ps03_3_default_event_mix_is_within_two_percentage_points():
+    config = read_config(Path(__file__).resolve().parents[1] / "config.example.yaml")
+    config.event_count = 5_000
+    events = generate(config)
+    counts = Counter(event.payload["event_type"] for event in events)
+
+    assert len(events) == 5_000
+    for kind, expected in {"SALE": 0.92, "RETURN": 0.05, "CANCELLATION": 0.03}.items():
+        assert counts[kind] / len(events) == pytest.approx(expected, abs=0.02)
 
 
 @pytest.mark.parametrize(("field", "fault"), [
