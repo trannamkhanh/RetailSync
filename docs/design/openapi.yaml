@@ -607,6 +607,67 @@ paths:
         '422':
           $ref: '#/components/responses/ValidationError'
 
+  /admin/jobs/{name}/run:
+    post:
+      tags: [Admin]
+      summary: Run a daily job now
+      description: |
+        PB-15-6. Runs one job registered with `daily_at` (for example `near-expiry`,
+        `forecast`) in the request and answers when it ends. It uses the scheduler's
+        per-job lock, so a scheduled run and a requested run never overlap, and it works
+        whether or not the scheduler is enabled. Audit `JOB_RUN_REQUESTED` (entity `job`,
+        key the job name) is written in its own transaction before the run. Daily jobs are
+        safe to run again on the same business date. Sync has its own `POST /sync/run`.
+      operationId: runJob
+      x-roles: [Admin]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 50
+            pattern: '^[A-Za-z0-9_-]+$'
+      responses:
+        '200':
+          description: The job ran to the end
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job, status]
+                properties:
+                  job:
+                    type: string
+                  status:
+                    type: string
+                    enum: [COMPLETED]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: 'No daily job has this name. Code: NOT_FOUND.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 'A run of this job is in progress. Code: JOB_RUNNING.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          description: 'The job raised an error. Outcome ERROR, code SERVICE_UNAVAILABLE.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /audit-logs:
     get:
       tags: [Audit]
