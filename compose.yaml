@@ -54,7 +54,7 @@ services:
       sqlserver:
         condition: service_healthy
     ports:
-      - "127.0.0.1:8443:8443"
+      - "${MIDDLEWARE_BIND_ADDRESS:-127.0.0.1}:8443:8443"
 
   # The simulated HQ of PB-18: its own FastAPI app, its own database.
   hq-demo:

@@ -114,6 +114,21 @@ không khởi động (trừ chế độ MOCK).
 Muốn đổi cấu hình mà không sửa file đã commit, tạo `DemoPos/appsettings.Local.json` (đã git-ignore);
 file này được merge đè lên `appsettings.json`.
 
+### Chạy trên mạng nội bộ (máy A và B trỏ về máy S)
+
+Máy S đặt `POS_BIND_ADDRESS` và `MIDDLEWARE_BIND_ADDRESS` trong `.env` bằng IP tĩnh của S (mặc định
+`127.0.0.1`), sinh lại server certificate kèm SAN bằng
+`EXTRA_SANS=IP:<ip-cua-S> bash scripts/generate_dev_certs.sh`, rồi chạy `scripts/demo/open_firewall.ps1`
+bằng quyền admin. Chi tiết từng bước ở `docs/demo/Sprint_3_Demo.md` (mục Network).
+
+Trên A và B, copy đúng bộ tệp của máy đó: `.certs/ca.crt`, `.certs/pos/<pos_id>.crt|key`, file token
+chỉ chứa token terminal của máy và token Staff của store (`staff_dn1`, `staff_dn2`, ...).
+
+Đặt `appsettings.Local.json` cạnh file exe đã publish, trỏ `PosBaseUrl`/`MonitorBaseUrl` về IP của S
+và khai báo `Terminals` chỉ gồm terminal của máy đó; đường dẫn CA, certificate và token dùng đường dẫn
+tuyệt đối hoặc đường dẫn tương đối so với thư mục exe. Ứng dụng chạy được ngoài repo: nếu không tìm
+thấy `compose.yaml`, nó dùng thư mục exe làm gốc.
+
 ## 4. Bố trí màn hình demo
 
 | Cửa sổ | Lệnh | Khán giả thấy |

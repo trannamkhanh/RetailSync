@@ -16,7 +16,17 @@ public static class ConfigLoader
 
     public static LoadedConfig Load(string? startDirectory = null, string? settingsFile = null)
     {
-        var root = RepoRootLocator.Find(startDirectory ?? AppContext.BaseDirectory);
+        string root;
+        try
+        {
+            root = RepoRootLocator.Find(startDirectory ?? AppContext.BaseDirectory);
+        }
+        catch (ConfigurationException)
+        {
+            // The published demo POS runs from a folder outside the repository; its settings and
+            // assets are found next to the executable or through absolute paths.
+            root = Path.GetFullPath(startDirectory ?? AppContext.BaseDirectory);
+        }
         var file = settingsFile ?? FindSettingsFile(root);
         if (!File.Exists(file))
         {
