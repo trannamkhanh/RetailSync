@@ -65,7 +65,7 @@ public sealed class DurableEventQueueTests
     }
 
     [Fact]
-    public async Task ConnectionErrorIsRetriedToo_PB45_4()
+    public async Task KeepsTheEventWhenTheConnectionIsLost_POS45_6()
     {
         using var directory = new TemporaryDirectory();
         var queue = new DurableEventQueue(directory.Path, "POS-1");
@@ -76,6 +76,30 @@ public sealed class DurableEventQueueTests
 
         Assert.Equal(1, queue.Count);
         Assert.Empty(queue.Rejected);
+
+        await queue.DrainAsync(_ => Task.FromResult(Result(PosOutcome.OK)));
+        Assert.Equal(0, queue.Count);
+    }
+
+    [Theory]
+    [InlineData(502)]
+    [InlineData(504)]
+    public async Task KeepsTheEventWhenTheGatewayReportsServerError_POS45_6(int status)
+    {
+        // The gateway answers 502/504 while the middleware restarts; these must stay queued instead
+        // of being settled as rejected.
+        using var directory = new TemporaryDirectory();
+        var queue = new DurableEventQueue(directory.Path, "POS-1");
+        queue.Enqueue("sale");
+
+        var cycle = await queue.DrainAsync(_ => Task.FromResult(Result(PosOutcome.ERROR, status, $"HTTP_{status}")));
+
+        Assert.NotNull(cycle);
+        Assert.Equal(1, queue.Count);
+        Assert.Empty(queue.Rejected);
+
+        await queue.DrainAsync(_ => Task.FromResult(Result(PosOutcome.OK)));
+        Assert.Equal(0, queue.Count);
     }
 
     [Fact]
@@ -173,7 +197,7 @@ public sealed class DurableEventQueueTests
     }
 
     [Fact]
-    public async Task ResumesAfterRestartWithTheSameTransactionIds_PB45_7()
+    public async Task ResumesAfterRestartWithTheSameTransactionIds_POS45_7()
     {
         using var directory = new TemporaryDirectory();
         var queue = new DurableEventQueue(directory.Path, "POS-1");

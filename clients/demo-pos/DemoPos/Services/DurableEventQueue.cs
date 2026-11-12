@@ -29,13 +29,15 @@ public sealed class DurableEventQueue
         State? Snapshot = null);
 
     /// <summary>
-    /// DS-05 section 8 retries only a timeout, a connection error and 503. Every other answer that
-    /// cannot succeed (the gateway's 400 without a certificate, a non-JSON body, another 4xx) is
-    /// settled as rejected, so it can never block the events behind it.
+    /// Retries while the link is unavailable or the stack is restarting: no answer at all (0) and
+    /// every 5xx answer (the gateway answers 502/504 while the middleware restarts, and 503 when it
+    /// is unavailable), plus the transport error codes. Every other answer that cannot succeed (the
+    /// gateway's 400 without a certificate, a non-JSON body, another 4xx) is settled as rejected, so
+    /// it can never block the events behind it.
     /// </summary>
     public static bool ShouldRetry(PosResult result) =>
         !result.IsSuccess
-        && (result.HttpStatus is 0 or 503
+        && (result.HttpStatus is 0 or >= 500
             || result.Code is "NO_ANSWER" or "TIMEOUT" or "NETWORK_ERROR" or "SERVICE_UNAVAILABLE");
 
     private const int CompactThresholdBytes = 64 * 1024;
