@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.core.db import get_db
 from app.core.errors import ApiError
@@ -10,6 +11,12 @@ from app.services import hq_snapshot
 
 
 router = APIRouter(tags=["Sync"])
+
+
+def _reject_and_commit(session: Session, principal: Principal, raw: bytes) -> ApiError:
+    error = hq_snapshot.reject(session, principal, raw)
+    session.commit()
+    return error
 
 
 async def _read_limited(request: Request) -> tuple[bytes | None, int]:
@@ -47,6 +54,5 @@ async def receive_hq_snapshot(request: Request,
     raw, size = await _read_limited(request)
     if raw is None:
         raise hq_snapshot.too_large(size)
-    error: ApiError = hq_snapshot.reject(session, principal, raw)
-    session.commit()
+    error = await run_in_threadpool(_reject_and_commit, session, principal, raw)
     raise error

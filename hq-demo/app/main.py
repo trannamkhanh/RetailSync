@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 import json
 import logging
+from threading import Thread
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -27,11 +28,11 @@ logger = logging.getLogger(__name__)
 
 
 def _warm_up() -> None:
-    """Open the engine and run one query, so the first /sync does not pay for it.
+    """Open the engine and run one query in the background after startup.
 
     The first connection costs about 6 seconds on a cold container, which is
-    longer than the Middleware's 3 second send timeout (PB-18). A database that
-    is not reachable is logged and does not stop the service from starting.
+    longer than the Middleware's 3 second send timeout (PB-18). Once warmup
+    succeeds, /sync can reuse the connection. Failure is logged.
     """
     try:
         with get_engine().connect() as connection:
@@ -43,7 +44,7 @@ def _warm_up() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    await run_in_threadpool(_warm_up)
+    Thread(target=_warm_up, name="hq-db-warm-up", daemon=True).start()
     yield
 
 

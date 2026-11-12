@@ -8,7 +8,7 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 import re
-from threading import Barrier
+from threading import Barrier, Event
 
 import pytest
 from fastapi.testclient import TestClient
@@ -96,7 +96,14 @@ def stock_of(session: Session, store_id: str) -> int:
 # INV13-1
 
 
-def test_inv13_1_authorized_snapshot_is_refused_and_changes_no_stock(client, db_session, world):
+def test_inv13_1_authorized_snapshot_is_refused(client, world):
+    response = client.post(URL, headers=bearer(world["hq_token"]),
+                           json={"store_id": world["store_id"], "items": []})
+
+    assert_rejected(response, 422, "SNAPSHOT_REJECTED")
+
+
+def test_inv13_2_snapshot_does_not_change_stock(client, db_session, world):
     before = stock_of(db_session, world["store_id"])
 
     response = client.post(URL, headers=bearer(world["hq_token"]),
@@ -108,7 +115,7 @@ def test_inv13_1_authorized_snapshot_is_refused_and_changes_no_stock(client, db_
         PosTransaction.store_id == world["store_id"])) == 0
 
 
-def test_inv13_1_snapshot_does_not_touch_batches(client, db_session, world):
+def test_inv13_2_snapshot_does_not_touch_batches(client, db_session, world):
     before = db_session.scalar(select(func.sum(ProductBatch.quantity)))
 
     client.post(URL, headers=bearer(world["hq_token"]), json={"store_id": world["store_id"]})
@@ -116,10 +123,10 @@ def test_inv13_1_snapshot_does_not_touch_batches(client, db_session, world):
     assert db_session.scalar(select(func.sum(ProductBatch.quantity))) == before
 
 
-# INV13-2
+# INV13-3
 
 
-def test_inv13_2_the_attempt_is_audited(client, db_session, world):
+def test_inv13_3_the_attempt_is_audited(client, db_session, world):
     body = {"store_id": world["store_id"], "items": []}
 
     client.post(URL, headers=bearer(world["hq_token"]), json=body)
@@ -132,7 +139,7 @@ def test_inv13_2_the_attempt_is_audited(client, db_session, world):
     assert row.created_at is not None
 
 
-def test_inv13_2_details_name_the_size_and_the_store(client, db_session, world):
+def test_inv13_3_details_name_the_size_and_the_store(client, db_session, world):
     body = {"store_id": world["store_id"]}
 
     client.post(URL, headers=bearer(world["hq_token"]), json=body)
@@ -142,21 +149,21 @@ def test_inv13_2_details_name_the_size_and_the_store(client, db_session, world):
     assert world["store_id"] in details
 
 
-def test_inv13_2_details_omit_a_store_the_body_does_not_name(client, db_session, world):
+def test_inv13_3_details_omit_a_store_the_body_does_not_name(client, db_session, world):
     client.post(URL, headers=bearer(world["hq_token"]), json={"items": []})
 
     details = audits(db_session)[0].details
     assert "store" not in details.lower()
 
 
-def test_inv13_2_every_attempt_writes_its_own_row(client, db_session, world):
+def test_inv13_3_every_attempt_writes_its_own_row(client, db_session, world):
     for _ in range(3):
         client.post(URL, headers=bearer(world["hq_token"]), json={"store_id": world["store_id"]})
 
     assert len(audits(db_session)) == 3
 
 
-def test_inv13_2_a_hostile_store_value_never_becomes_the_audit_key(client, db_session, world):
+def test_inv13_3_a_hostile_store_value_never_becomes_the_audit_key(client, db_session, world):
     client.post(URL, headers=bearer(world["hq_token"]),
                 json={"store_id": "STORE.1; DROP TABLE dbo.store"})
 
@@ -165,11 +172,11 @@ def test_inv13_2_a_hostile_store_value_never_becomes_the_audit_key(client, db_se
     assert "STORE.1; DROP TABLE dbo.store" not in (row.details or "")
 
 
-# INV13-3
+# Other PB-13 cases
 
 
 @pytest.mark.parametrize("content", [b"{", b"not json", b"[]", b'"text"', b"null"])
-def test_inv13_3_bad_json_from_an_authorized_caller_is_still_snapshot_rejected(
+def test_pb13_bad_json_from_an_authorized_caller_is_still_snapshot_rejected(
         client, db_session, world, content):
     response = client.post(URL, headers={**bearer(world["hq_token"]),
                                          "Content-Type": "application/json"}, content=content)
@@ -178,7 +185,7 @@ def test_inv13_3_bad_json_from_an_authorized_caller_is_still_snapshot_rejected(
     assert len(audits(db_session)) == 1
 
 
-def test_inv13_3_a_body_over_one_megabyte_is_refused_with_413(client, db_session, world):
+def test_pb13_a_body_over_one_megabyte_is_refused_with_413(client, db_session, world):
     response = client.post(URL, headers={**bearer(world["hq_token"]),
                                          "Content-Type": "application/json"},
                            content=b"x" * (MAX_SNAPSHOT_BYTES + 1))
@@ -187,7 +194,7 @@ def test_inv13_3_a_body_over_one_megabyte_is_refused_with_413(client, db_session
     assert audits(db_session) == []
 
 
-def test_inv13_3_a_body_of_exactly_one_megabyte_is_still_audited(client, db_session, world):
+def test_pb13_a_body_of_exactly_one_megabyte_is_still_audited(client, db_session, world):
     body = b"{" + b" " * (MAX_SNAPSHOT_BYTES - 2) + b"}"
 
     response = client.post(URL, headers={**bearer(world["hq_token"]),
@@ -197,7 +204,7 @@ def test_inv13_3_a_body_of_exactly_one_megabyte_is_still_audited(client, db_sess
     assert len(audits(db_session)) == 1
 
 
-def test_inv13_3_deeply_nested_json_is_refused_and_audited(client, db_session, world):
+def test_pb13_deeply_nested_json_is_refused_and_audited(client, db_session, world):
     before = stock_of(db_session, world["store_id"])
     body = b"[" * 20_000 + b"]" * 20_000
 
@@ -210,7 +217,7 @@ def test_inv13_3_deeply_nested_json_is_refused_and_audited(client, db_session, w
 
 
 @pytest.mark.parametrize("store_first", [True, False])
-def test_inv13_3_deep_object_preserves_store_in_audit(client, db_session, world, store_first):
+def test_pb13_deep_object_omits_store_in_audit(client, db_session, world, store_first):
     before = stock_of(db_session, world["store_id"])
     nested = b'"items":' + b"[" * 20_000 + b"]" * 20_000
     store = b'"store_id":"' + world["store_id"].encode() + b'"'
@@ -221,12 +228,12 @@ def test_inv13_3_deep_object_preserves_store_in_audit(client, db_session, world,
     assert_rejected(response, 422, "SNAPSHOT_REJECTED")
     rows = audits(db_session)
     assert len(rows) == 1
-    assert world["store_id"] in rows[0].details
+    assert world["store_id"] not in rows[0].details
     assert f"{len(body)} bytes" in rows[0].details
     assert stock_of(db_session, world["store_id"]) == before
 
 
-def test_inv13_3_invalid_deep_object_does_not_name_a_store(client, db_session, world):
+def test_pb13_invalid_deep_object_does_not_name_a_store(client, db_session, world):
     body = (b'{"store_id":"' + world["store_id"].encode() + b'","items":'
             + b"[" * 20_000 + b"]" * 20_000 + b",}")
 
@@ -238,7 +245,31 @@ def test_inv13_3_invalid_deep_object_does_not_name_a_store(client, db_session, w
     assert world["store_id"] not in rows[0].details
 
 
-def test_inv13_3_the_limit_is_the_one_ds04_names():
+def test_pb13_health_remains_responsive_while_snapshot_is_processed(client, world, monkeypatch):
+    from app.api import hq_snapshot as snapshot_api
+
+    started, release = Event(), Event()
+    original = snapshot_api._reject_and_commit
+
+    def blocked_rejection(*args):
+        started.set()
+        if not release.wait(timeout=5):
+            raise TimeoutError("Snapshot test did not release the worker")
+        return original(*args)
+
+    monkeypatch.setattr(snapshot_api, "_reject_and_commit", blocked_rejection)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        snapshot = pool.submit(client.post, URL, headers=bearer(world["hq_token"]), json={})
+        try:
+            assert started.wait(timeout=5)
+            health = pool.submit(client.get, "/api/v1/health").result(timeout=2)
+            assert health.status_code == 200
+        finally:
+            release.set()
+        assert_rejected(snapshot.result(timeout=5), 422, "SNAPSHOT_REJECTED")
+
+
+def test_pb13_the_limit_is_the_one_ds04_names():
     assert MAX_SNAPSHOT_BYTES == 1_048_576
 
 
