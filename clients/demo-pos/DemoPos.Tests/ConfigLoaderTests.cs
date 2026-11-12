@@ -95,7 +95,7 @@ public sealed class ConfigLoaderTests
     }
 
     [Fact]
-    public void StartsWithTheOwnTerminalTokenAndTheStoreStaffTokenOnly()
+    public void StartsWithTheOwnTerminalTokenAndStoreStaffTokenOnly_PB45_6()
     {
         using var temporary = new TemporaryDirectory();
         var settings = PrepareTrimmedMachine(temporary.Path,
@@ -111,7 +111,7 @@ public sealed class ConfigLoaderTests
     }
 
     [Fact]
-    public void MissingStoreStaffTokenStillBlocksStartup()
+    public void MissingStoreStaffTokenStillBlocksStartup_PB45_6()
     {
         using var temporary = new TemporaryDirectory();
         var settings = PrepareTrimmedMachine(temporary.Path, ("POS-DN1-01", "terminal-token"));
@@ -122,7 +122,7 @@ public sealed class ConfigLoaderTests
     }
 
     [Fact]
-    public void MissingTerminalTokenStillBlocksStartup()
+    public void MissingTerminalTokenStillBlocksStartup_PB45_6()
     {
         using var temporary = new TemporaryDirectory();
         var settings = PrepareTrimmedMachine(temporary.Path, ("staff_dn1", "staff-token"));
