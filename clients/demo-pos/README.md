@@ -204,3 +204,16 @@ request log không chứa bearer token, và luật nghiệp vụ của mock back
 - Mỗi terminal có `HttpClient`/handler riêng, nên mỗi request mang đúng certificate của máy đó.
 - Timeout request là 5 giây.
 - Phần 2 của PB-45 (queue bền, tự động gửi lại, CLI) và Staff App không nằm trong phần này.
+
+### Durable queue recovery
+
+LIVE manual sales, automatic sales and F12 scenarios all append to the terminal's `.jsonl` journal
+before any network request. Each record is flushed to disk. The journal records both enqueue and
+settlement, including rejection details; startup discards only an unfinished final record and fails
+visibly on a corrupt complete record. Existing `.json` queue state is imported once without changing
+transaction bodies. Do not run an older Demo POS version against the same queue directory.
+
+A per-terminal `.sender.lock` file is held exclusively for the entire send cycle. The OS releases the
+lock when a process exits; the file can remain on disk. Separate instances reload the journal under
+an exclusive file handle before each append, avoiding stale-state overwrites. F12 certificate/gateway
+scenarios persist their delivery mode and certificate ID (no token or private key) for retry after restart.

@@ -828,19 +828,20 @@ public sealed class MainForm : Form
 
     private async Task<PosResult> SendCoreAsync(TerminalConfig terminal, PosEvent posEvent,
                                                 string rawBody, bool addHistory,
-                                                TerminalClient? clientOverride = null,
+                                                QueueDelivery delivery = QueueDelivery.Gateway,
+                                                string? certificatePosId = null,
                                                 bool clearCartOnSuccess = false)
     {
-        if (!_mockMode && clientOverride is null && addHistory)
+        if (!_mockMode)
         {
-            _queues[terminal.PosId].Enqueue(rawBody);
+            _queues[terminal.PosId].Enqueue(rawBody, delivery, certificatePosId);
             var waiting = new PosResult { Outcome = PosOutcome.ERROR, Code = "WAITING", Message = "Đã lưu, đang chờ gửi." };
             if (clearCartOnSuccess)
             {
                 _cart.Clear();
                 UpdateCartTotal();
             }
-            AddHistory(new TxnRecord
+            if (addHistory) AddHistory(new TxnRecord
             {
                 Time = DateTime.Now, EventType = posEvent.EventType, TransactionId = posEvent.TransactionId,
                 StoreId = posEvent.StoreId, PosId = posEvent.PosId,
@@ -853,16 +854,7 @@ public sealed class MainForm : Form
             _ = DrainQueuesAsync();
             return waiting;
         }
-        PosResult result;
-        if (_mockMode)
-        {
-            result = await _mockBackend.SendAsync(rawBody);
-        }
-        else
-        {
-            var client = clientOverride ?? GetLiveClient(terminal);
-            result = await client.SendAsync(rawBody);
-        }
+        var result = await _mockBackend.SendAsync(rawBody);
 
         _resultPanel.ShowResult(result);
         UpdateTerminalResult(terminal, result);
@@ -926,6 +918,26 @@ public sealed class MainForm : Form
         return client;
     }
 
+    private async Task<PosResult> SendQueuedAsync(TerminalConfig terminal, DurableEventQueue.Entry entry)
+    {
+        if (entry.Delivery == QueueDelivery.Gateway)
+            return await GetLiveClient(terminal).SendAsync(entry.Body);
+        if (!Enum.IsDefined(entry.Delivery)) throw new InvalidDataException("Unknown queued delivery mode");
+        var token = _loaded.TokenForTerminal(terminal)
+            ?? throw new ConfigurationException($"Missing token for {terminal.PosId}");
+        X509Certificate2? certificate = null;
+        if (entry.Delivery == QueueDelivery.WrongCertificate)
+        {
+            if (entry.CertificatePosId is null || !_certificates.TryGetValue(entry.CertificatePosId, out var info) || !info.IsUsable)
+                throw new ConfigurationException("The queued scenario certificate is unavailable; event remains pending.");
+            certificate = info.Certificate;
+        }
+        using var client = new TerminalClient(
+            entry.Delivery == QueueDelivery.SkipGateway ? _config.MonitorBaseUrl : _config.PosBaseUrl,
+            _authority!, certificate, entry.CertificatePosId, token, _requestLog);
+        return await client.SendAsync(entry.Body);
+    }
+
     private async Task DrainQueuesAsync()
     {
         if (_closing || _mockMode || _queueBusy) return;
@@ -938,10 +950,9 @@ public sealed class MainForm : Form
                 if (queue.Count == 0 || (_retryAfter.TryGetValue(terminal.PosId, out var retryAt) && DateTime.UtcNow < retryAt)) return;
                 try
                 {
-                    var client = GetLiveClient(terminal);
-                    await queue.DrainAsync(async body =>
+                    await queue.DrainAsync(async entry =>
                     {
-                        var result = await client.SendAsync(body);
+                        var result = await SendQueuedAsync(terminal, entry);
                         if (result.CanRetry || (!result.IsSuccess && result.Outcome != PosOutcome.REJECTED))
                             _retryAfter[terminal.PosId] = DateTime.UtcNow.AddSeconds(5);
                         return result;
@@ -949,7 +960,7 @@ public sealed class MainForm : Form
                     {
                         if (_closing) return;
                         var transaction = PosEventJson.Deserialize(body);
-                        var record = _historyByPos[terminal.PosId].FirstOrDefault(item => item.TransactionId == transaction.TransactionId);
+                        var record = _historyByPos[terminal.PosId].FirstOrDefault(item => item.TransactionId == transaction.TransactionId && item.RawBody == body);
                         if (record is not null)
                         {
                             record.Outcome = result.Outcome.ToString();
@@ -1348,17 +1359,12 @@ public sealed class MainForm : Form
                     return;
                 }
 
-                var wrongCert = _certificates[other.PosId];
                 var wrongEvent = PosEvents.Sale(terminal.StoreId, terminal.PosId, new[]
                 {
                     new PosEventItem { Sku = product.Sku, Quantity = 1, UnitPrice = product.UnitPrice },
                 });
-                using (var wrongClient = new TerminalClient(_config.PosBaseUrl, _authority,
-                           wrongCert.Certificate, other.PosId, token, _requestLog))
-                {
-                    await SendCoreAsync(terminal, wrongEvent, PosEventJson.Serialize(wrongEvent),
-                        addHistory: false, wrongClient);
-                }
+                await SendCoreAsync(terminal, wrongEvent, PosEventJson.Serialize(wrongEvent),
+                    addHistory: false, delivery: QueueDelivery.WrongCertificate, certificatePosId: other.PosId);
 
                 return;
 
@@ -1367,12 +1373,8 @@ public sealed class MainForm : Form
                 {
                     new PosEventItem { Sku = product.Sku, Quantity = 1, UnitPrice = product.UnitPrice },
                 });
-                using (var noCertClient = new TerminalClient(_config.PosBaseUrl, _authority,
-                           null, null, token, _requestLog))
-                {
-                    await SendCoreAsync(terminal, noCertEvent, PosEventJson.Serialize(noCertEvent),
-                        addHistory: false, noCertClient);
-                }
+                await SendCoreAsync(terminal, noCertEvent, PosEventJson.Serialize(noCertEvent),
+                    addHistory: false, delivery: QueueDelivery.NoCertificate);
 
                 return;
 
@@ -1381,12 +1383,8 @@ public sealed class MainForm : Form
                 {
                     new PosEventItem { Sku = product.Sku, Quantity = 1, UnitPrice = product.UnitPrice },
                 });
-                using (var skipClient = new TerminalClient(_config.MonitorBaseUrl, _authority,
-                           null, null, token, _requestLog))
-                {
-                    await SendCoreAsync(terminal, skipEvent, PosEventJson.Serialize(skipEvent),
-                        addHistory: false, skipClient);
-                }
+                await SendCoreAsync(terminal, skipEvent, PosEventJson.Serialize(skipEvent),
+                    addHistory: false, delivery: QueueDelivery.SkipGateway);
 
                 return;
         }
