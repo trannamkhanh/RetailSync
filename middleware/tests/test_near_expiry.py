@@ -11,6 +11,7 @@ alerts for the seeded demo stores either.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date, time, timedelta
 from decimal import Decimal
@@ -24,7 +25,9 @@ from sqlalchemy.orm import Session
 from app.core import clock
 from app.core.config import settings
 from app.core.security import create_token
+from app.api.schemas.near_expiry import CATEGORY_PATTERN
 from app.domain.models import (
+    AuditLog,
     Inventory,
     NearExpiryAlert,
     NearExpiryConfig,
@@ -164,6 +167,20 @@ def _alerts(store_id: str) -> list[NearExpiryAlert]:
         ))
 
 
+def _threshold_audits(session: Session, category: str) -> list[AuditLog]:
+    """The audit rows of one category, oldest first.
+
+    Read through ``db_session`` so an outer savepoint rollback still sees them.
+    """
+    session.expire_all()
+    return list(session.scalars(
+        select(AuditLog)
+        .where(AuditLog.action == "NEAR_EXPIRY_THRESHOLD_UPDATED",
+               AuditLog.entity_key == category)
+        .order_by(AuditLog.audit_id)
+    ))
+
+
 def _stock_snapshot(store_ids: list[str]) -> list[tuple]:
     with job.session_factory() as session:
         inventory = session.execute(
@@ -213,7 +230,7 @@ def _restock(shop: Shop, extra: int) -> None:
 # Threshold Admin API: EXP21-1 to EXP21-3
 
 
-def test_exp21_1_admin_sets_a_threshold(client, db_session, admin_headers):
+def test_exp21_1_admin_sets_a_threshold(client, db_session, admin_headers, admin):
     category = f"TEST-{_uid(5)}"
 
     response = client.put(THRESHOLD_URL.format(category=category), headers=admin_headers,
@@ -225,10 +242,16 @@ def test_exp21_1_admin_sets_a_threshold(client, db_session, admin_headers):
     stored = db_session.scalar(
         select(NearExpiryConfig).where(NearExpiryConfig.category == category))
     assert stored is not None and stored.threshold_days == 3
-    assert stored.updated_by is not None and stored.updated_at is not None
+    assert stored.updated_by == admin.user_id and stored.updated_at is not None
+    audits = _threshold_audits(db_session, category)
+    assert len(audits) == 1
+    assert audits[0].entity_name == "near_expiry_config"
+    assert audits[0].user_id == admin.user_id
+    assert audits[0].details == "threshold_days None -> 3"
 
 
-def test_exp21_1_an_existing_threshold_is_listed_and_updated(client, db_session, admin_headers):
+def test_exp21_1_an_existing_threshold_is_listed_and_updated(client, db_session, admin_headers,
+                                                            admin):
     category = f"TEST-{_uid(5)}"
     db_session.add(NearExpiryConfig(category=category, threshold_days=5))
     db_session.commit()
@@ -242,6 +265,10 @@ def test_exp21_1_an_existing_threshold_is_listed_and_updated(client, db_session,
     assert items[category] == 5
     assert updated.status_code == 200, updated.text
     assert updated.json()["threshold_days"] == 7
+    audits = _threshold_audits(db_session, category)
+    assert len(audits) == 1
+    assert audits[0].user_id == admin.user_id
+    assert audits[0].details == "threshold_days 5 -> 7"
 
 
 @pytest.mark.parametrize("value", [-1, 3651, 3.5, "3", True, None, [3], {"days": 3}])
@@ -291,6 +318,88 @@ def test_exp21_2_a_bad_category_is_rejected(client, admin_headers):
                           json={"threshold_days": 3})
 
     assert_rejected(response, 422, "VALIDATION_ERROR")
+
+
+@pytest.mark.parametrize("category", [" Dry goods", "Dry goods ", "   ", "Dry  goods",
+                                      "Dry\tgoods", ""],
+                         ids=["leading-space", "trailing-space", "only-spaces",
+                              "double-space", "tab", "empty"])
+def test_exp21_2_the_category_pattern_rejects_stray_spaces(category):
+    """A space is allowed only between two words, never at either end or alone."""
+    assert re.fullmatch(CATEGORY_PATTERN, category) is None
+
+
+@pytest.mark.parametrize("category", [" Dry goods", "Dry  goods", "Dry goods!"],
+                         ids=["leading-space", "double-space", "punctuation"])
+def test_exp21_2_a_stray_space_category_is_rejected_and_stores_nothing(
+        client, db_session, admin_headers, category):
+    response = client.put(THRESHOLD_URL.format(category=category), headers=admin_headers,
+                          json={"threshold_days": 3})
+
+    assert_rejected(response, 422, "VALIDATION_ERROR")
+    assert "category" in response.json()["message"]
+    db_session.expire_all()
+    assert db_session.scalar(select(NearExpiryConfig).where(
+        NearExpiryConfig.category == category)) is None
+
+
+def test_exp21_2_a_trailing_space_never_creates_a_spaced_category(client, db_session,
+                                                                 admin_headers):
+    """A trailing space is either trimmed by the HTTP layer or rejected; either way
+    it must not store a new row or change the existing one.
+
+    The check compares the whole table, because SQL Server ignores trailing
+    spaces when it compares varchar, so ``category = 'Dry goods '`` also matches
+    the seeded ``Dry goods``.
+    """
+    before = _threshold_rows(db_session)
+
+    response = client.put(THRESHOLD_URL.format(category="Dry goods "), headers=admin_headers,
+                          json={"threshold_days": 3})
+
+    db_session.expire_all()
+    assert _threshold_rows(db_session) == before, (
+        f"status={response.status_code} body={response.text}")
+
+
+def _threshold_rows(session: Session) -> list[tuple[str, int]]:
+    session.expire_all()
+    return [(row.category, row.threshold_days) for row in session.scalars(
+        select(NearExpiryConfig).order_by(NearExpiryConfig.category))]
+
+
+@pytest.mark.parametrize("template", ["TEST-Dry goods-{suffix}", "TEST_Dry_goods-2-{suffix}",
+                                      "TEST-A{suffix}"],
+                         ids=["one-space", "underscore-hyphen", "one-word"])
+def test_exp21_2_a_category_with_inner_spaces_is_accepted(client, admin_headers, template):
+    category = template.format(suffix=_uid(4))
+
+    response = client.put(THRESHOLD_URL.format(category=category), headers=admin_headers,
+                          json={"threshold_days": 3})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["category"] == category
+
+
+def test_exp21_1_the_audit_key_uses_the_stored_category_spelling(client, db_session, admin_headers):
+    """A category that differs only in case updates the stored row and audits it."""
+    stored_category = f"TEST-Dry goods-{_uid(4)}"
+    requested = stored_category.swapcase()
+    db_session.add(NearExpiryConfig(category=stored_category, threshold_days=5))
+    db_session.commit()
+
+    response = client.put(THRESHOLD_URL.format(category=requested), headers=admin_headers,
+                          json={"threshold_days": 9})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["category"] == stored_category
+    db_session.expire_all()
+    stored = db_session.scalar(select(NearExpiryConfig).where(
+        NearExpiryConfig.category == stored_category))
+    assert stored is not None and stored.threshold_days == 9
+    audits = _threshold_audits(db_session, stored_category)
+    assert len(audits) == 1
+    assert audits[0].details == "threshold_days 5 -> 9"
 
 
 def test_exp21_3_only_admin_may_set_a_threshold(client, db_session):
@@ -501,6 +610,66 @@ def test_pb21_the_registry_runs_the_check_at_00_30():
     definition = next(entry for entry in registered_jobs() if entry.name == "near-expiry")
     assert definition.daily_at == time(0, 30)
     assert definition.run is job.run_near_expiry_check
+
+
+def test_pb21_the_update_reads_the_config_with_a_row_lock():
+    """The PUT takes ``UPDLOCK, HOLDLOCK``, so concurrent updates serialise.
+
+    Without the hints two requests can both read the same previous value and write
+    two audit rows that claim the same "old" number.
+    """
+    from sqlalchemy.dialects import mssql
+
+    locked = str(repository.config_statement("Dairy", lock=True).compile(dialect=mssql.dialect()))
+    plain = str(repository.config_statement("Dairy").compile(dialect=mssql.dialect()))
+
+    assert "WITH (UPDLOCK, HOLDLOCK)" in locked
+    assert "UPDLOCK" not in plain
+
+
+def test_pb21_each_update_audits_the_value_it_replaced(test_engine):
+    """Three updates in a row produce a continuous audit chain, not three "None" rows.
+
+    The user is committed on the test engine first: an uncommitted ``staff_user``
+    from the ``db_session`` savepoint would hold its row lock, and the audit
+    insert of another connection would wait on the foreign key forever.
+    """
+    from sqlalchemy.orm import sessionmaker
+
+    from app.core.security import Principal
+
+    category = f"TEST-{_uid(5)}"
+    username = f"TEST-ne-admin-{_uid(4)}"
+    factory = sessionmaker(bind=test_engine)
+    with factory() as session:
+        session.add(StaffUser(username=username, full_name="Near-expiry admin", role="ADMIN"))
+        session.commit()
+    try:
+        for value in (5, 7, 9):
+            with factory() as session:
+                service.set_threshold(session, category, value,
+                                      Principal(username, "Admin", None, None))
+                session.commit()
+
+        with factory() as session:
+            stored = session.scalar(select(NearExpiryConfig.threshold_days).where(
+                NearExpiryConfig.category == category))
+            details = [row.details for row in session.scalars(
+                select(AuditLog).where(AuditLog.entity_key == category)
+                .order_by(AuditLog.audit_id))]
+
+        assert details == ["threshold_days None -> 5",
+                           "threshold_days 5 -> 7",
+                           "threshold_days 7 -> 9"]
+        assert stored == 9
+    finally:
+        with factory() as session:
+            session.execute(delete(AuditLog).where(AuditLog.entity_key == category))
+            session.execute(delete(NearExpiryConfig).where(
+                NearExpiryConfig.category == category))
+            session.execute(delete(StaffUser).where(StaffUser.username == username))
+            session.commit()
+            session.commit()
 
 
 def test_pb21_a_rejected_threshold_writes_no_row(client, admin_headers):

@@ -2,8 +2,10 @@
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# product.category is varchar(50); DS-04 allows letters, digits, space, _ and -.
-CATEGORY_PATTERN = r"^[A-Za-z0-9 _-]+$"
+# product.category is varchar(50). DS-04 allows letters, digits, space, _ and -,
+# so a category may contain single spaces between words, but no leading, trailing
+# or repeated space: "Dry goods" is valid, " Dry goods", "Dry goods " and "   " are not.
+CATEGORY_PATTERN = r"^[A-Za-z0-9_-]+(?: [A-Za-z0-9_-]+)*$"
 CATEGORY_MAX_LENGTH = 50
 MAX_THRESHOLD_DAYS = 3650
 

@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from datetime import date
 
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from app.domain.models import NearExpiryAlert, NearExpiryConfig, Product, ProductBatch, Store
@@ -16,11 +16,23 @@ def list_thresholds(session: Session) -> list[NearExpiryConfig]:
     ))
 
 
-def find_config(session: Session, category: str) -> NearExpiryConfig | None:
-    """The row of one category, compared as SQL Server compares varchar."""
-    return session.scalar(
-        select(NearExpiryConfig).where(NearExpiryConfig.category == category)
-    )
+def config_statement(category: str, *, lock: bool = False) -> Select:
+    """The lookup of one category, compared as SQL Server compares varchar.
+
+    ``lock`` adds ``UPDLOCK, HOLDLOCK``: the row stays locked until the caller's
+    transaction ends, so two updates of one category cannot both read the same
+    previous value, and a category that does not exist yet cannot be inserted
+    twice. ``category`` is the primary key, so the range lock covers the missing
+    row as well.
+    """
+    statement = select(NearExpiryConfig).where(NearExpiryConfig.category == category)
+    if lock:
+        statement = statement.with_hint(NearExpiryConfig.__table__, "WITH (UPDLOCK, HOLDLOCK)")
+    return statement
+
+
+def find_config(session: Session, category: str, *, lock: bool = False) -> NearExpiryConfig | None:
+    return session.scalar(config_statement(category, lock=lock))
 
 
 def threshold_map(session: Session) -> dict[str, int]:

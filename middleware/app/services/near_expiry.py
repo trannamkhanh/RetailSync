@@ -36,6 +36,10 @@ def set_threshold(session: Session, category: str, threshold_days: int,
                   principal: Principal) -> NearExpiryConfig:
     """Store one category threshold and write its audit row.
 
+    The lookup takes ``UPDLOCK, HOLDLOCK``, so two requests that change one
+    category run one after the other: the second reads the value the first
+    stored, and its audit row records that value as the old one.
+
     Raises:
         ApiError(422, "VALIDATION_ERROR"): the value is outside 0 to 3650. The
             schema already rejects a decimal, string, boolean or missing value.
@@ -43,8 +47,9 @@ def set_threshold(session: Session, category: str, threshold_days: int,
     if not MIN_THRESHOLD_DAYS <= threshold_days <= MAX_THRESHOLD_DAYS:
         raise _invalid_days(f"must be between {MIN_THRESHOLD_DAYS} and {MAX_THRESHOLD_DAYS}.")
 
-    config = repository.find_config(session, category)
+    config = repository.find_config(session, category, lock=True)
     if config is None:
+        # The stored spelling is the request's; there is no earlier row to follow.
         config = NearExpiryConfig(category=category, threshold_days=threshold_days)
         session.add(config)
         old_days: int | None = None
@@ -53,8 +58,10 @@ def set_threshold(session: Session, category: str, threshold_days: int,
         config.threshold_days = threshold_days
     config.updated_by = find_user_id(session, principal.sub)
     config.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-    record_audit(session, "NEAR_EXPIRY_THRESHOLD_UPDATED", "near_expiry_config", category,
-                 user_id=config.updated_by,
+    # config.category is the stored value, which SQL Server matched without regard
+    # to case; the audit key is that row, not the spelling of this request.
+    record_audit(session, "NEAR_EXPIRY_THRESHOLD_UPDATED", "near_expiry_config",
+                 config.category, user_id=config.updated_by,
                  details=f"threshold_days {old_days} -> {threshold_days}")
     session.flush()
     return config
