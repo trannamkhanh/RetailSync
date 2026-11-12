@@ -16,7 +16,15 @@ public static class ConfigLoader
 
     public static LoadedConfig Load(string? startDirectory = null, string? settingsFile = null)
     {
-        var root = RepoRootLocator.Find(startDirectory ?? AppContext.BaseDirectory);
+        string root;
+        try
+        {
+            root = RepoRootLocator.Find(startDirectory ?? AppContext.BaseDirectory);
+        }
+        catch (ConfigurationException)
+        {
+            root = Path.GetFullPath(startDirectory ?? AppContext.BaseDirectory);
+        }
         var file = settingsFile ?? FindSettingsFile(root);
         if (!File.Exists(file))
         {

@@ -31,6 +31,16 @@ public sealed class MainForm : Form
     private readonly MockPosBackend _mockBackend;
     private readonly System.Windows.Forms.Timer _monitorTimer = new() { Interval = 2000 };
     private readonly System.Windows.Forms.Timer _statusTimer = new() { Interval = 5000 };
+    private readonly System.Windows.Forms.Timer _queueTimer = new() { Interval = 5000 };
+    private readonly System.Windows.Forms.Timer _autoTimer = new() { Interval = 5000 };
+    private readonly Dictionary<string, DurableEventQueue> _queues = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTime> _retryAfter = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ToolStripStatusLabel _queueStatus = new();
+    private readonly Button _autoButton = new();
+    private readonly NumericUpDown _autoInterval = new() { Minimum = 1, Maximum = 3600, Value = 5, Width = 55 };
+    private readonly Label _autoSeed = new() { AutoSize = true };
+    private AutomaticSaleGenerator? _autoGenerator;
+    private bool _queueBusy;
 
     private X509Certificate2? _authority;
     private MonitorApiClient? _monitorClient;
@@ -97,6 +107,9 @@ public sealed class MainForm : Form
         BuildUi();
         LoadCertificates();
         PopulateTerminals();
+        var queueDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RetailSync", "DemoPos");
+        foreach (var terminal in _config.Terminals)
+            _queues.Add(terminal.PosId, new DurableEventQueue(queueDirectory, terminal.PosId));
         WireEvents();
 
         if (!_mockMode)
@@ -112,11 +125,13 @@ public sealed class MainForm : Form
         RefreshLogView();
         _monitorTimer.Start();
         _statusTimer.Start();
+        _queueTimer.Start();
 
         Shown += async (_, _) =>
         {
             await RefreshStatusAsync();
             await RefreshMonitorAsync();
+            await DrainQueuesAsync();
         };
         FormClosing += OnFormClosing;
     }
@@ -241,6 +256,11 @@ public sealed class MainForm : Form
         _modeLabel.Margin = new Padding(3, 7, 3, 3);
         _modeLabel.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
         toolbar.Controls.Add(_modeLabel);
+        _autoButton.Text = "Bật tự động";
+        _autoButton.AutoSize = true;
+        toolbar.Controls.Add(_autoButton);
+        toolbar.Controls.Add(_autoInterval);
+        toolbar.Controls.Add(_autoSeed);
 
         _tabs.Dock = DockStyle.Fill;
         _tabs.Font = new Font("Segoe UI", 9.5F);
@@ -264,6 +284,8 @@ public sealed class MainForm : Form
             _middlewareStatus,
             new ToolStripSeparator(),
             _gatewayStatus,
+            new ToolStripSeparator(),
+            _queueStatus,
             new ToolStripSeparator(),
             _filesStatus,
             new ToolStripSeparator(),
@@ -578,6 +600,11 @@ public sealed class MainForm : Form
         _requestLog.Changed += (_, _) => OnRequestLogChanged();
         _monitorTimer.Tick += async (_, _) => await RefreshMonitorAsync();
         _statusTimer.Tick += async (_, _) => await RefreshStatusAsync();
+        _queueTimer.Tick += async (_, _) => await DrainQueuesAsync();
+        _autoButton.Click += (_, _) => ToggleAutomatic();
+        _autoTimer.Tick += async (_, _) => await AutomaticSaleAsync();
+        _queueStatus.IsLink = true;
+        _queueStatus.Click += (_, _) => ShowRejected();
     }
 
     private void LoadCertificates()
@@ -804,6 +831,28 @@ public sealed class MainForm : Form
                                                 TerminalClient? clientOverride = null,
                                                 bool clearCartOnSuccess = false)
     {
+        if (!_mockMode && clientOverride is null && addHistory)
+        {
+            _queues[terminal.PosId].Enqueue(rawBody);
+            var waiting = new PosResult { Outcome = PosOutcome.ERROR, Code = "WAITING", Message = "Đã lưu, đang chờ gửi." };
+            if (clearCartOnSuccess)
+            {
+                _cart.Clear();
+                UpdateCartTotal();
+            }
+            AddHistory(new TxnRecord
+            {
+                Time = DateTime.Now, EventType = posEvent.EventType, TransactionId = posEvent.TransactionId,
+                StoreId = posEvent.StoreId, PosId = posEvent.PosId,
+                OriginalTransactionId = posEvent.OriginalTransactionId, ItemsText = ItemsText(posEvent),
+                Outcome = "WAITING", Code = "WAITING", RawBody = rawBody,
+                Items = posEvent.Items?.ToList() ?? new List<PosEventItem>(),
+            });
+            _resultPanel.ShowInfo(waiting.Message);
+            UpdateQueueStatus();
+            _ = DrainQueuesAsync();
+            return waiting;
+        }
         PosResult result;
         if (_mockMode)
         {
@@ -875,6 +924,94 @@ public sealed class MainForm : Form
             terminal.PosId, token, _requestLog);
         _liveClients[terminal.PosId] = client;
         return client;
+    }
+
+    private async Task DrainQueuesAsync()
+    {
+        if (_closing || _mockMode || _queueBusy) return;
+        _queueBusy = true;
+        try
+        {
+            await Task.WhenAll(_config.Terminals.Select(async terminal =>
+            {
+                var queue = _queues[terminal.PosId];
+                if (queue.Count == 0 || (_retryAfter.TryGetValue(terminal.PosId, out var retryAt) && DateTime.UtcNow < retryAt)) return;
+                try
+                {
+                    var client = GetLiveClient(terminal);
+                    await queue.DrainAsync(async body =>
+                    {
+                        var result = await client.SendAsync(body);
+                        if (result.CanRetry || (!result.IsSuccess && result.Outcome != PosOutcome.REJECTED))
+                            _retryAfter[terminal.PosId] = DateTime.UtcNow.AddSeconds(5);
+                        return result;
+                    }, (body, result) =>
+                    {
+                        if (_closing) return;
+                        var transaction = PosEventJson.Deserialize(body);
+                        var record = _historyByPos[terminal.PosId].FirstOrDefault(item => item.TransactionId == transaction.TransactionId);
+                        if (record is not null)
+                        {
+                            record.Outcome = result.Outcome.ToString();
+                            record.Code = result.Code;
+                            _historyView.ResetBindings();
+                            UpdateHistoryButtons();
+                        }
+                        UpdateTerminalResult(terminal, result);
+                        if (CurrentTerminal?.PosId == terminal.PosId) _resultPanel.ShowResult(result);
+                        UpdateQueueStatus();
+                    });
+                }
+                catch (Exception error)
+                {
+                    if (!_closing) _resultPanel.ShowInfo($"Hàng đợi {terminal.PosId}: {error.Message}");
+                }
+            }));
+        }
+        finally { _queueBusy = false; if (!_closing) UpdateQueueStatus(); }
+    }
+
+    private void UpdateQueueStatus()
+    {
+        var pending = _queues.Values.Sum(queue => queue.Count);
+        var rejected = _queues.Values.Sum(queue => queue.Rejected.Count);
+        _queueStatus.Text = $"Chờ gửi: {pending} · Bị từ chối: {rejected}";
+    }
+
+    private void ShowRejected()
+    {
+        var rows = _queues.SelectMany(pair => pair.Value.Rejected.Select(item =>
+            $"{pair.Key}: {item.Code} — {item.Message}\n{item.Body}"));
+        MessageBox.Show(this, string.Join("\n\n", rows.DefaultIfEmpty("Không có sự kiện bị từ chối.")), "Sự kiện bị từ chối");
+    }
+
+    private void ToggleAutomatic()
+    {
+        if (_autoTimer.Enabled)
+        {
+            _autoTimer.Stop();
+            _autoButton.Text = "Bật tự động";
+            return;
+        }
+        var seed = Random.Shared.Next();
+        _autoGenerator = new AutomaticSaleGenerator(seed);
+        _autoSeed.Text = $"Seed: {seed}";
+        _autoTimer.Interval = checked((int)_autoInterval.Value * 1000);
+        _autoTimer.Start();
+        _autoButton.Text = "Dừng tự động";
+    }
+
+    private async Task AutomaticSaleAsync()
+    {
+        if (_busy || _autoGenerator is null || CurrentTerminal is not { } terminal) return;
+        _busy = true;
+        try
+        {
+            var sale = _autoGenerator.Create(terminal, _config.Products);
+            await SendCoreAsync(terminal, sale, PosEventJson.Serialize(sale), addHistory: true);
+        }
+        catch (Exception error) { _resultPanel.ShowInfo(error.Message); }
+        finally { _busy = false; }
     }
 
     private void AddHistory(TxnRecord record)
@@ -1595,6 +1732,8 @@ public sealed class MainForm : Form
         _closing = true;
         _monitorTimer.Stop();
         _statusTimer.Stop();
+        _queueTimer.Stop();
+        _autoTimer.Stop();
         foreach (var client in _liveClients.Values)
         {
             client.Dispose();

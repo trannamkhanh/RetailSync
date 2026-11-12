@@ -139,8 +139,13 @@ gần nhất, tồn kho của store, 5 dòng audit gần nhất.
 3. Chọn dòng SALE, bấm **Return…**, trả 1. Kỳ vọng `OK`, tồn 39.
 4. Mở **Scenarios (F12)** và chạy từng kịch bản; so mã với nhãn trên nút.
 5. Bán một đơn mới rồi bấm **Cancel** (đơn chưa có Return). Kỳ vọng `OK`, tồn trở lại như trước.
-6. Tắt middleware, bán một đơn: kết quả cam “no answer”. Bật lại, bấm **Retry**: `OK` với cùng
-   `transaction_id`.
+6. Tắt gateway, bán hàng: sự kiện được lưu và hiển thị đang chờ. Bật gateway: hàng đợi tự gửi lại
+   theo thứ tự với cùng `transaction_id`. Nhấn số sự kiện bị từ chối ở thanh trạng thái để xem chi tiết.
+
+Nút **Bật tự động** gửi SALE cho terminal đang chọn theo chu kỳ (giây) và hiển thị seed; bấm lại để dừng.
+Trong chế độ LIVE, mỗi terminal lưu hàng đợi tại `%LOCALAPPDATA%\RetailSync\DemoPos\` trước khi gửi.
+Sau khi khởi động lại, các sự kiện còn chờ được gửi tiếp. Các giao dịch bị từ chối được giữ trong danh sách
+để thu ngân kiểm tra; kết quả `OK` và `DUPLICATE` được xóa khỏi hàng đợi.
 
 Mỗi lần gửi, **Request log** hiện method, URL đầy đủ kèm port, status, thời gian, request/response
 và certificate đã dùng. Log không bao giờ hiển thị bearer token; chỉ hiện role/subject.
