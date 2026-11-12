@@ -233,11 +233,8 @@ public static class ConfigLoader
             }
         }
 
-        if (!tokens.ContainsKey(TokenNames.Auditor))
-        {
-            problems.Add($"Missing '{TokenNames.Auditor}' token in {paths.TokensFile}.\nRun:\n  {SetupCommands.IssueTokens}");
-        }
-
+        // The auditor token is optional on machines A and B: without it the audit panel stays
+        // empty, while selling and stock keep working. Only the seller tokens are required.
         return problems.Distinct(StringComparer.Ordinal).ToList();
     }
 

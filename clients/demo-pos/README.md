@@ -122,7 +122,9 @@ Máy S đặt `POS_BIND_ADDRESS` và `MIDDLEWARE_BIND_ADDRESS` trong `.env` bằ
 bằng quyền admin. Chi tiết từng bước ở `docs/demo/Sprint_3_Demo.md` (mục Network).
 
 Trên A và B, copy đúng bộ tệp của máy đó: `.certs/ca.crt`, `.certs/pos/<pos_id>.crt|key`, file token
-chỉ chứa token terminal của máy và token Staff của store (`staff_dn1`, `staff_dn2`, ...).
+chỉ chứa token terminal của máy và token Staff của store (`staff_dn1`, `staff_dn2`, ...). A và B
+**không** giữ token `auditor`; khi thiếu token này, panel Audit hiện “Không có token auditor trên máy
+này” và để trống, còn bán hàng và xem tồn kho vẫn chạy bình thường.
 
 Đặt `appsettings.Local.json` cạnh file exe đã publish, trỏ `PosBaseUrl`/`MonitorBaseUrl` về IP của S
 và khai báo `Terminals` chỉ gồm terminal của máy đó; đường dẫn CA, certificate và token dùng đường dẫn
