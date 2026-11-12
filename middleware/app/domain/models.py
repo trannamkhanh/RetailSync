@@ -159,3 +159,33 @@ class SalesSummaryLine(Base):
     sold_qty: Mapped[int] = mapped_column(Integer)
     returned_qty: Mapped[int] = mapped_column(Integer)
     net_revenue: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+
+
+class NearExpiryConfig(Base):
+    """The alert window of one product category (PB-21, 002_batches_alerts_forecast.sql)."""
+
+    __tablename__ = "near_expiry_config"
+    category: Mapped[str] = mapped_column(String(50), primary_key=True)
+    threshold_days: Mapped[int] = mapped_column(Integer)
+    updated_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("staff_user.user_id"))
+    updated_at: Mapped[datetime] = mapped_column(DATETIME2, server_default=text("SYSUTCDATETIME()"))
+
+
+class NearExpiryAlert(Base):
+    """One alert per batch; the unique index keeps at most one OPEN alert (PB-21).
+
+    ``alert_type`` is NEAR_EXPIRY or EXPIRED and ``status`` is OPEN or RESOLVED.
+    ``days_to_expiry`` is written when the alert is created or changed, and the
+    reader recalculates it, as DS-04 says.
+    """
+
+    __tablename__ = "near_expiry_alert"
+    alert_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    batch_id: Mapped[str] = mapped_column(String(30), ForeignKey("product_batch.batch_id"))
+    store_id: Mapped[str] = mapped_column(String(10), ForeignKey("store.store_id"))
+    sku: Mapped[str] = mapped_column(String(20), ForeignKey("product.sku"))
+    days_to_expiry: Mapped[int] = mapped_column(Integer)
+    remaining_qty: Mapped[int] = mapped_column(Integer)
+    alert_type: Mapped[str] = mapped_column(String(12))
+    status: Mapped[str] = mapped_column(String(10))
+    created_at: Mapped[datetime] = mapped_column(DATETIME2, server_default=text("SYSUTCDATETIME()"))

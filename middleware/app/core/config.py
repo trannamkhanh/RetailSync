@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     hq_ca_file: str | None = None
     hq_jwt_secret: SecretStr | None = None
     hq_timeout_seconds: float = Field(default=3, gt=0)
+    # The alert window of a product category that has no near_expiry_config row.
+    near_expiry_default_days: int = Field(default=3, ge=0, le=3650)
 
 
 settings = Settings()

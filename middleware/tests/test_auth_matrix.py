@@ -58,6 +58,8 @@ RUN_JOB = ("POST", "/api/v1/admin/jobs/{name}/run")
 # A test-only daily job, so the allowed call runs something harmless (PB-15-6).
 RUN_JOB_NAME = "TEST-am-job"
 HQ_SNAPSHOT = ("POST", "/api/v1/hq/snapshot")
+NEAR_EXPIRY_THRESHOLDS = ("GET", "/api/v1/admin/near-expiry-thresholds")
+NEAR_EXPIRY_THRESHOLD = ("PUT", "/api/v1/admin/near-expiry-thresholds/{category}")
 
 # Expected status for every protected route on main, by caller.
 #                  POS  Staff  Manager  HQ   Admin  Auditor  no token
@@ -72,6 +74,8 @@ MATRIX = {
     BARCODE:      (403, 200,   403,     403, 403,   403,     401),
     RUN_JOB:      (403, 403,   403,     403, 200,   403,     401),
     HQ_SNAPSHOT:  (403, 403,   403,     422, 403,   403,     401),
+    NEAR_EXPIRY_THRESHOLDS: (403, 403, 403, 403, 200, 403,  401),
+    NEAR_EXPIRY_THRESHOLD:  (403, 403, 403, 403, 200, 403,  401),
 }
 CALLERS = [*ROLES, None]
 
@@ -155,6 +159,11 @@ REQUESTS: dict[tuple[str, str], Callable[[TestClient, dict], object]] = {
     RUN_JOB: lambda client, headers: client.post(RUN_JOB[1].format(name=RUN_JOB_NAME), headers=headers),
     HQ_SNAPSHOT: lambda client, headers: client.post(HQ_SNAPSHOT[1], headers=headers,
                                                      json={"store_id": STORE_ID}),
+    NEAR_EXPIRY_THRESHOLDS: lambda client, headers: client.get(
+        NEAR_EXPIRY_THRESHOLDS[1], headers=headers),
+    NEAR_EXPIRY_THRESHOLD: lambda client, headers: client.put(
+        NEAR_EXPIRY_THRESHOLD[1].format(category="TEST-AM-CAT"), headers=headers,
+        json={"threshold_days": 4}),
 }
 
 
@@ -273,6 +282,7 @@ def test_matrix_allows_exactly_the_ds04_roles():
         BARCODE: {"Staff"},
         RUN_JOB: {"Admin"},
         HQ_SNAPSHOT: {"HQ"},
+        NEAR_EXPIRY_THRESHOLDS: {"Admin"}, NEAR_EXPIRY_THRESHOLD: {"Admin"},
     }
 
 
