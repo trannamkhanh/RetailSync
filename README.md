@@ -237,7 +237,9 @@ refuses `RTS_DB` and `RTS_DB_TEST`. See `clients/demo-console/README.md`.
 of history and batches near expiry. The one-action scripts `sync_run.ps1`,
 `hq_mode.ps1`, `hq_snapshot.ps1`, `run_job.ps1`, `set_threshold.ps1`,
 `cross_store.ps1` and `audit_tail.ps1` in the same folder are the fallback when the
-console fails. The runbook is `docs/demo/Sprint_3_Demo.md`.
+console fails. `export_terminal_tokens.ps1` copies one terminal token, the Staff
+token of its store and that terminal's certificate onto machine A or B. The runbook
+is `docs/demo/Sprint_3_Demo.md`.
 
 ## Test
 
