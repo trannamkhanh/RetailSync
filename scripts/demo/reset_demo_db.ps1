@@ -24,17 +24,27 @@
     first error, prints no secret and can be run again at any time. It never edits
     .env: -DemoMode prints the lines the operator should set for the demo.
 
+    -NoBuild runs without Internet: it builds and pulls nothing (docker compose
+    gets --pull never and --no-build) and stops before touching any database if
+    an image of compose.yaml is missing. Build the images the evening before with
+    docker compose build middleware hq-demo and docker compose pull sqlserver
+    pos-gateway.
+
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts/demo/reset_demo_db.ps1
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts/demo/reset_demo_db.ps1 -DemoMode
+
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File scripts/demo/reset_demo_db.ps1 -NoBuild
 #>
 [CmdletBinding()]
 param(
     [string]$Database = "RTS_DB_DEMO",
     [string]$HqDatabase = "RTS_HQ",
-    [switch]$DemoMode
+    [switch]$DemoMode,
+    [switch]$NoBuild
 )
 
 $ErrorActionPreference = "Stop"
@@ -84,6 +94,35 @@ if ([string]::IsNullOrWhiteSpace($EnvHqDbName)) { $EnvHqDbName = "RTS_HQ" }
 
 # --- Helpers ----------------------------------------------------------------
 
+# With -NoBuild nothing is pulled or built; a missing image is an error instead.
+$PullArgs = if ($NoBuild) { @("--pull", "never") } else { @() }
+$UpArgs = if ($NoBuild) { @("--pull", "never", "--no-build") } else { @() }
+
+function Assert-ImagesPresent {
+    $images = & docker compose config --images
+    if ($LASTEXITCODE -ne 0) {
+        throw "docker compose config failed with exit code $LASTEXITCODE. Is Docker Desktop running?"
+    }
+    $missing = @()
+    # Windows PowerShell turns native stderr into errors under "Stop"; the exit code is enough here.
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        foreach ($image in ($images | Sort-Object -Unique)) {
+            & docker image inspect $image *> $null
+            if ($LASTEXITCODE -ne 0) { $missing += $image }
+        }
+    }
+    finally {
+        $ErrorActionPreference = $previous
+    }
+    if ($missing.Count -gt 0) {
+        throw ("-NoBuild: missing image(s) " + ($missing -join ", ") + ". Nothing was changed. " +
+            "Where there is Internet, run: docker compose build middleware hq-demo; docker compose pull sqlserver pos-gateway")
+    }
+    Write-Host "All images of compose.yaml are present: $(($images | Sort-Object -Unique) -join ', ')"
+}
+
 function Invoke-Compose {
     param([string[]]$ComposeArgs)
     & docker compose @ComposeArgs
@@ -106,7 +145,7 @@ function Invoke-Sql {
 
 function Invoke-Migration {
     param([string]$DatabaseName, [string]$HqDatabaseName)
-    & docker compose run --rm -e "DB_NAME=$DatabaseName" -e "HQ_DB_NAME=$HqDatabaseName" migrate
+    & docker compose run --rm @PullArgs -e "DB_NAME=$DatabaseName" -e "HQ_DB_NAME=$HqDatabaseName" migrate
     if ($LASTEXITCODE -ne 0) {
         throw "the migration failed for '$DatabaseName' with exit code $LASTEXITCODE."
     }
@@ -114,7 +153,7 @@ function Invoke-Migration {
 
 function Invoke-MiddlewareScript {
     param([string]$DatabaseName, [string]$Script, [string]$VolumeMode)
-    & docker compose run --rm -e "DB_NAME=$DatabaseName" `
+    & docker compose run --rm @PullArgs -e "DB_NAME=$DatabaseName" `
         --volume "${PWD}:/repo:$VolumeMode" --workdir /repo `
         middleware python $Script
     if ($LASTEXITCODE -ne 0) {
@@ -135,8 +174,13 @@ END
 
 # --- Rebuild the databases --------------------------------------------------
 
+if ($NoBuild) {
+    Write-Host "==> -NoBuild: checking that every image is already on this machine"
+    Assert-ImagesPresent
+}
+
 Write-Host "==> Starting SQL Server"
-Invoke-Compose @("up", "-d", "--wait", "sqlserver")
+Invoke-Compose (@("up", "-d", "--wait") + $UpArgs + @("sqlserver"))
 
 Write-Host "==> Stopping the services that may hold connections"
 Invoke-Compose @("stop", "middleware", "pos-gateway", "hq-demo")
@@ -151,8 +195,13 @@ Remove-Database -Name $HqDatabase
 Write-Host "==> Applying migrations, the demo seed and the HQ tables"
 Invoke-Migration -DatabaseName $Database -HqDatabaseName $HqDatabase
 
-Write-Host "==> Building the middleware image (cached when unchanged)"
-Invoke-Compose @("build", "middleware")
+if ($NoBuild) {
+    Write-Host "==> -NoBuild: using the existing middleware image"
+}
+else {
+    Write-Host "==> Building the middleware image (cached when unchanged)"
+    Invoke-Compose @("build", "middleware")
+}
 
 Write-Host "==> Registering the POS certificate fingerprints"
 Invoke-MiddlewareScript -DatabaseName $Database `
@@ -165,7 +214,7 @@ Invoke-MiddlewareScript -DatabaseName $Database `
 $HistoryLoaded = $false
 if ($Database -ieq "RTS_DB_DEMO") {
     Write-Host "==> Loading 90 days of sales history (seed 42)"
-    & docker compose run --rm -e "DB_NAME=$Database" `
+    & docker compose run --rm @PullArgs -e "DB_NAME=$Database" `
         --volume "${PWD}:/repo:ro" --workdir /repo/tools/history-generator `
         -e PYTHONPATH=/repo/middleware -e PYTHONDONTWRITEBYTECODE=1 `
         middleware python -m history_generator --database $Database --days 90 --seed 42
@@ -218,7 +267,7 @@ COMMIT TRANSACTION;
 $ServicesStarted = $false
 if ($EnvDbName -ieq $Database -and $EnvHqDbName -ieq $HqDatabase) {
     Write-Host "==> .env has DB_NAME=${Database}, so starting middleware, pos-gateway and hq-demo"
-    Invoke-Compose @("up", "-d", "--force-recreate", "--wait", "middleware", "pos-gateway", "hq-demo")
+    Invoke-Compose (@("up", "-d", "--force-recreate", "--wait") + $UpArgs + @("middleware", "pos-gateway", "hq-demo"))
     $ServicesStarted = $true
 }
 
@@ -284,7 +333,8 @@ if ($DemoMode) {
     Write-Host "Demo mode: set these lines in .env yourself (never commit .env), then restart the middleware:"
     Write-Host "  DB_NAME=$Database"
     Write-Host "  HQ_DB_NAME=$HqDatabase"
-    Write-Host "  SYNC_INTERVAL=60"
+    Write-Host "  SYNC_INTERVAL=3600   (when POST /sync/run is on main: batches appear only when the button is pressed)"
+    Write-Host "  SYNC_INTERVAL=60     (when it is not: the scheduler syncs every minute)"
     Write-Host "  SYNC_RETRY_BASE_SECONDS=10"
 }
 
@@ -294,6 +344,6 @@ if (-not $ServicesStarted) {
     Write-Host "  - Set DB_NAME=$Database in .env (never commit .env), then run this script again,"
     Write-Host "    or: docker compose up -d --force-recreate --wait middleware pos-gateway hq-demo"
 }
-Write-Host "  - Smoke check: docker compose run --rm --volume `"`${PWD}:/repo`" --workdir /repo middleware python scripts/demo/sprint2_smoke.py"
+Write-Host "  - Smoke check: docker compose run --rm --no-deps --volume `"`${PWD}:/repo`" --workdir /repo middleware python scripts/demo/sprint2_smoke.py"
 Write-Host "  - Console on machine S: clients/demo-console/DemoConsole/bin/Debug/net8.0-windows/DemoConsole.exe"
 Write-Host "  - Demo POS on machines A and B: clients/demo-pos/DemoPos/bin/Debug/net8.0-windows/DemoPos.exe"
