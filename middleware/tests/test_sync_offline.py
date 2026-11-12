@@ -12,6 +12,8 @@ RTS_DB_TEST and the fake HQ of ``test_sync_sender``.
 
 from collections.abc import Generator
 from datetime import timedelta
+import importlib.util
+from pathlib import Path
 
 import httpx
 import pytest
@@ -187,3 +189,44 @@ def test_sync17_6_a_failed_batch_does_not_block_later_ones(world, hq):
     assert [world.row(batch_id).status for batch_id in batches] == ["FAILED", "ACKED", "ACKED"]
     assert world.row(failed_before).status == "FAILED"
     assert batches[0] in result.rejected and result.failed is None
+
+
+# scripts/sync_reconcile.py (SYNC17-5 is run live; these check its arguments)
+
+
+RECONCILE = Path(__file__).resolve().parents[2] / "scripts" / "sync_reconcile.py"
+
+
+@pytest.fixture(scope="module")
+def reconcile():
+    spec = importlib.util.spec_from_file_location("sync_reconcile", RECONCILE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("name", ["RTS_DB", "rts_db"])
+def test_pb17_reconcile_refuses_the_development_database(reconcile, name, capsys):
+    with pytest.raises(SystemExit) as stopped:
+        reconcile.parse_args(["--db", name])
+
+    assert stopped.value.code == 2
+    assert "refusing RTS_DB" in capsys.readouterr().err
+
+
+def test_pb17_reconcile_reads_rts_db_only_with_allow_dev(reconcile):
+    assert reconcile.parse_args(["--db", "RTS_DB", "--allow-dev"]).db == "RTS_DB"
+
+
+def test_pb17_reconcile_defaults_and_openings(reconcile):
+    args = reconcile.parse_args(["--opening", "STORE-DN1=50", "--opening", "TEST-X=7"])
+
+    assert (args.db, args.hq_db) == ("RTS_DB_DEMO", "RTS_HQ")
+    assert args.openings == {"STORE-DN1": 50, "STORE-DN2": 25, "STORE-DN3": 15, "TEST-X": 7}
+
+
+@pytest.mark.parametrize("argv", [["--db", "RTS_DB_DEMO;DROP"], ["--hq-db", "a b"], ["--opening", "STORE-DN1"],
+                                  ["--opening", "=5"], ["--opening", "STORE-DN1=-1"]])
+def test_pb17_reconcile_rejects_bad_arguments(reconcile, argv):
+    with pytest.raises(SystemExit):
+        reconcile.parse_args(argv)
