@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import importlib
 import json
+import logging
 import sys
 import threading
 from uuid import uuid4
@@ -28,6 +29,7 @@ from app.integration import hq_client
 from app.jobs import scheduler, sync_send
 from app.jobs.scheduler import Job, Scheduler
 from app.jobs.sync_send import run_send_cycle
+from app.services import sync_sender
 from app.services.sync_message import batch_hash, build_message
 
 
@@ -59,6 +61,7 @@ class FakeHq:
         self.plan: dict[str, list[str]] = {}
         self.hold: threading.Event | None = None
         self.entered = threading.Event()
+        self.message = "Rejected by the test HQ."
 
     def answer_next(self, batch_id: str, *answers: str) -> None:
         self.plan.setdefault(batch_id, []).extend(answers)
@@ -78,6 +81,13 @@ class FakeHq:
         if answer == "OFFLINE":
             return httpx.Response(503, json={"status": "NACK", "batch_id": batch_id, "code": "HQ_OFFLINE",
                                              "message": "HQ is offline for this demo."})
+        if answer == "TIMEOUT":
+            raise httpx.ReadTimeout("HQ did not answer in time")
+        if answer.startswith("HTTP_"):
+            return httpx.Response(int(answer[5:]), json={"status": "NACK", "batch_id": batch_id,
+                                                         "code": "HQ_REJECTED", "message": self.message})
+        if answer == "BAD_ACK":
+            return httpx.Response(200, json={"status": "OK"})
         if answer == "TIMEOUT_AFTER_STORE":
             self.stored.setdefault(batch_id, batch_id)
             raise httpx.ReadTimeout("HQ stored the batch but the answer was lost")
@@ -227,6 +237,7 @@ def test_pb15_hash_is_the_same_on_resend(world, test_engine, hq):
         before = build_message(session, batch_id)
 
     run_send_cycle()
+    sync_send.clock.now = world.row(batch_id).next_retry_at
     run_send_cycle()
 
     with Session(test_engine) as session:
@@ -287,6 +298,7 @@ def test_sync16_2_lost_ack_is_resent_with_the_same_id_and_acked_once(world, hq, 
     assert (row.status, row.attempts) == ("PENDING", 1)
     assert row.last_error
     assert first.failed == batch_id
+    sync_send.clock.now = row.next_retry_at
 
     second = run_send_cycle()
 
@@ -334,17 +346,28 @@ def test_pb15_failed_batch_is_never_picked(world, hq):
     assert world.row(failed).status == "FAILED"
 
 
-def test_pb15_batch_whose_retry_is_not_due_is_not_picked(world, hq):
-    later = world.batch(world.store(), timedelta(hours=2), next_retry_at=NOW + timedelta(minutes=5))
-    due = world.batch(world.store(), timedelta(hours=1), next_retry_at=NOW - timedelta(minutes=5))
+def test_pb16_4_oldest_batch_waiting_for_its_retry_holds_back_newer_ones(world, hq):
+    # Decided 12 Nov 2026: batches reach HQ oldest first, across stores, also after an outage.
+    waiting = world.batch(world.store(), timedelta(hours=2), next_retry_at=NOW + timedelta(minutes=5))
+    newer = world.batch(world.store(), timedelta(hours=1))
 
     run_send_cycle()
 
-    assert hq.ids({later, due}) == [due]
-    assert world.row(later).status == "PENDING"
+    assert hq.ids({waiting, newer}) == []
+    assert {world.row(waiting).status, world.row(newer).status} == {"PENDING"}
 
 
-def test_pb15_any_other_answer_returns_the_batch_and_stops_the_cycle(world, hq):
+def test_pb16_4_when_the_retry_is_due_the_waiting_batch_goes_first(world, hq):
+    waiting = world.batch(world.store(), timedelta(hours=2), next_retry_at=NOW - timedelta(minutes=5))
+    newer = world.batch(world.store(), timedelta(hours=1))
+
+    run_send_cycle()
+
+    assert hq.ids({waiting, newer}) == [waiting, newer]
+    assert {world.row(waiting).status, world.row(newer).status} == {"ACKED"}
+
+
+def test_pb15_an_answer_to_retry_returns_the_batch_and_stops_the_cycle(world, hq):
     first = world.batch(world.store(), timedelta(hours=2))
     second = world.batch(world.store(), timedelta(hours=1))
     hq.answer_next(first, "OFFLINE")
@@ -354,6 +377,7 @@ def test_pb15_any_other_answer_returns_the_batch_and_stops_the_cycle(world, hq):
     row = world.row(first)
     assert (row.status, row.attempts) == ("PENDING", 1)
     assert row.last_error.startswith("503 HQ_OFFLINE")
+    assert row.next_retry_at == NOW + timedelta(seconds=settings.sync_retry_base_seconds)
     assert row.payload_bytes > 0
     assert hq.ids({first, second}) == [first]
     assert world.row(second).status == "PENDING"
@@ -440,3 +464,145 @@ def test_sync15_1_sync_send_is_registered_every_sync_interval(monkeypatch):
     jobs = {job.name: job for job in scheduler.registered_jobs()}
     assert jobs["sync-send"].run is run_send_cycle
     assert (jobs["sync-send"].every_seconds, jobs["sync-send"].daily_at) == (60, None)
+
+
+# NACK and backoff (PB-16-3, PB-16-4, SYNC16-3 to 16-7)
+
+
+@pytest.fixture
+def base_60(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "sync_retry_base_seconds", 60)
+
+
+def test_sync16_3_nack_422_fails_the_batch_and_the_next_is_still_sent(world, hq):
+    rejected = world.batch(world.store(), timedelta(hours=2))
+    later = world.batch(world.store(), timedelta(hours=1))
+    hq.answer_next(rejected, "HTTP_422")
+
+    result = run_send_cycle()
+
+    row = world.row(rejected)
+    assert (row.status, row.attempts, row.next_retry_at) == ("FAILED", 1, None)
+    assert row.last_error == "422 HQ_REJECTED: Rejected by the test HQ."
+    assert [(audit.action, audit.details) for audit in world.audits(rejected)] == [
+        ("SYNC_FAILED", row.last_error)]
+    assert hq.ids({rejected, later}) == [rejected, later]
+    assert world.row(later).status == "ACKED"
+    assert rejected in result.rejected and result.failed is None
+
+    sync_send.clock.now = NOW + timedelta(days=1)
+    run_send_cycle()
+
+    assert hq.ids({rejected, later}) == [rejected, later]
+    assert world.row(rejected).status == "FAILED"
+
+
+@pytest.mark.parametrize("status", [400, 409])
+def test_pb16_3_nack_400_and_409_also_fail_the_batch(world, hq, status):
+    batch_id = world.batch(world.store(), timedelta(hours=1))
+    hq.answer_next(batch_id, f"HTTP_{status}")
+
+    run_send_cycle()
+
+    row = world.row(batch_id)
+    assert (row.status, row.last_error[:3]) == ("FAILED", str(status))
+    assert [audit.action for audit in world.audits(batch_id)] == ["SYNC_FAILED"]
+
+
+def test_pb16_3_last_error_is_cut_to_the_column_length(world, hq):
+    batch_id = world.batch(world.store(), timedelta(hours=1))
+    hq.message = "\N{GRINNING FACE}" * 150 + "x" * 100
+    hq.answer_next(batch_id, "HTTP_422")
+
+    run_send_cycle()
+
+    row = world.row(batch_id)
+    assert row.status == "FAILED"
+    assert row.last_error.startswith("422 HQ_REJECTED: \N{GRINNING FACE}")
+    assert len(row.last_error.encode("utf-16-le")) // 2 <= 200
+
+
+def test_sync16_4_timeout_returns_the_batch_to_pending_with_a_retry_time(world, hq, base_60):
+    batch_id = world.batch(world.store(), timedelta(hours=2))
+    later = world.batch(world.store(), timedelta(hours=1))
+    hq.answer_next(batch_id, "TIMEOUT")
+
+    result = run_send_cycle()
+
+    row = world.row(batch_id)
+    assert (row.status, row.attempts) == ("PENDING", 1)
+    assert row.next_retry_at == NOW + timedelta(seconds=60)
+    assert row.last_error.startswith("No answer from HQ: ReadTimeout")
+    assert result.failed == batch_id
+    assert hq.ids({batch_id, later}) == [batch_id]
+    assert world.audits(batch_id) == []
+
+
+def test_sync16_5_5xx_is_retried_with_backoff(world, hq, base_60):
+    batch_id = world.batch(world.store(), timedelta(hours=1))
+    hq.answer_next(batch_id, "HTTP_500")
+    run_send_cycle()
+    assert (world.row(batch_id).status, world.row(batch_id).attempts) == ("PENDING", 1)
+
+    sync_send.clock.now = NOW + timedelta(seconds=59)
+    run_send_cycle()
+    assert hq.ids({batch_id}) == [batch_id]
+
+    sync_send.clock.now = NOW + timedelta(seconds=60)
+    run_send_cycle()
+    assert hq.ids({batch_id}) == [batch_id, batch_id]
+    assert world.row(batch_id).status == "ACKED"
+
+
+def test_sync16_6_401_keeps_the_batch_pending_and_is_logged(world, hq, base_60, caplog):
+    batch_id = world.batch(world.store(), timedelta(hours=1))
+    hq.answer_next(batch_id, "HTTP_401")
+
+    with caplog.at_level(logging.ERROR, logger=sync_sender.__name__):
+        run_send_cycle()
+
+    row = world.row(batch_id)
+    assert (row.status, row.attempts) == ("PENDING", 1)
+    assert row.last_error.startswith("401 HQ_REJECTED")
+    assert row.next_retry_at == NOW + timedelta(seconds=60)
+    assert world.audits(batch_id) == []
+    assert any(batch_id in record.getMessage() and "401" in record.getMessage() for record in caplog.records)
+
+
+@pytest.mark.parametrize("answer", ["HTTP_403", "HTTP_404", "HTTP_408", "HTTP_429", "HTTP_502", "HTTP_503",
+                                    "BAD_ACK"])
+def test_pb16_4_other_answers_keep_the_batch_pending_and_stop_the_cycle(world, hq, base_60, answer):
+    batch_id = world.batch(world.store(), timedelta(hours=2))
+    later = world.batch(world.store(), timedelta(hours=1))
+    hq.answer_next(batch_id, answer)
+
+    result = run_send_cycle()
+
+    row = world.row(batch_id)
+    assert (row.status, row.attempts, row.next_retry_at) == ("PENDING", 1, NOW + timedelta(seconds=60))
+    assert result.failed == batch_id
+    assert hq.ids({batch_id, later}) == [batch_id]
+
+
+def test_sync16_7_backoff_doubles_from_60_seconds_to_60_minutes(world, hq, base_60):
+    batch_id = world.batch(world.store(), timedelta(hours=1))
+    hq.answer_next(batch_id, *["HTTP_503"] * 9)
+    delays = []
+
+    for _ in range(9):
+        run_send_cycle()
+        row = world.row(batch_id)
+        delays.append((row.next_retry_at - sync_send.clock.now).total_seconds())
+        sync_send.clock.now = row.next_retry_at
+
+    assert delays == [60, 120, 240, 480, 960, 1920, 3600, 3600, 3600]
+    assert (row.status, row.attempts) == ("PENDING", 9)
+
+
+@pytest.mark.parametrize(("base", "attempts", "seconds"), [
+    (10, 1, 10), (10, 2, 20), (10, 3, 40), (10, 9, 2560), (10, 10, 3600), (60, 10_000, 3600),
+])
+def test_pb16_4_retry_delay_follows_the_base_and_the_cap(monkeypatch, base, attempts, seconds):
+    monkeypatch.setattr(settings, "sync_retry_base_seconds", base)
+
+    assert sync_sender.retry_delay(attempts) == timedelta(seconds=seconds)
