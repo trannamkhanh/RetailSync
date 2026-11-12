@@ -15,6 +15,7 @@ from app.api.jobs import router as jobs_router
 from app.api.near_expiry import router as near_expiry_router
 from app.api.pos import router as pos_router
 from app.api.products import router as products_router
+from app.api.sync import router as sync_router
 from app.core.config import API_PREFIX, settings
 from app.core.errors import register_error_handlers
 from app.jobs import scheduler
@@ -43,3 +44,4 @@ app.include_router(jobs_router, prefix=API_PREFIX)
 app.include_router(near_expiry_router, prefix=API_PREFIX)
 app.include_router(pos_router, prefix=API_PREFIX)
 app.include_router(products_router, prefix=API_PREFIX)
+app.include_router(sync_router, prefix=API_PREFIX)
