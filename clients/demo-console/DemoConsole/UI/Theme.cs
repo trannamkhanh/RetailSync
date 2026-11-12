@@ -18,6 +18,7 @@ internal static class Theme
     public static readonly Color Warn = Color.FromArgb(180, 90, 0);
     public static readonly Color Error = Color.FromArgb(200, 0, 0);
     public static readonly Color Muted = Color.FromArgb(70, 70, 70);
+    public static readonly Color ButtonBack = Color.FromArgb(230, 236, 245);
 
     public static Font Regular(float size) => new("Segoe UI", size, FontStyle.Regular);
 
@@ -84,13 +85,20 @@ internal static class Theme
             Font = Bold(fontSize),
             Padding = new Padding(10, 4, 10, 4),
             Margin = new Padding(4),
-            BackColor = Color.FromArgb(230, 236, 245),
+            BackColor = ButtonBack,
             ForeColor = Text,
             FlatStyle = FlatStyle.Flat,
             UseVisualStyleBackColor = false,
         };
         button.FlatAppearance.BorderColor = Header;
         button.FlatAppearance.BorderSize = 2;
+        // A disabled button (feature not deployed, or a call in progress) must look
+        // disabled on a projector too.
+        button.EnabledChanged += (_, _) =>
+        {
+            button.BackColor = button.Enabled ? ButtonBack : Color.FromArgb(205, 205, 205);
+            button.FlatAppearance.BorderColor = button.Enabled ? Header : Color.FromArgb(150, 150, 150);
+        };
         return button;
     }
 

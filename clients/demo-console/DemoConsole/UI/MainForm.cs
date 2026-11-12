@@ -703,7 +703,7 @@ internal sealed class MainForm : Form
 
             foreach (var item in _modeButtons)
             {
-                item.BackColor = item == button ? Theme.Changed : Color.FromArgb(230, 236, 245);
+                item.BackColor = item == button ? Theme.Changed : Theme.ButtonBack;
             }
         }
 
