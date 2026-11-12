@@ -10,7 +10,7 @@
     is not on main yet (PB-35) or the barcode is unknown; the message says which.
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File scripts/demo/cross_store.ps1 -Barcode 8930000000011 -Store STORE-DN1 -Token staff_dn1 -BaseUrl https://192.168.1.10:8443/api/v1
+    powershell -ExecutionPolicy Bypass -File scripts/demo/cross_store.ps1 -Barcode 8930000000011 -Store STORE-DN1 -Token staff_dn1 -BaseUrl https://192.168.43.200:8443/api/v1
 #>
 [CmdletBinding()]
 param(
