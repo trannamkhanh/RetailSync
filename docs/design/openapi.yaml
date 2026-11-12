@@ -593,6 +593,7 @@ paths:
                 threshold_days:
                   type: integer
                   minimum: 0
+                  maximum: 3650
       responses:
         '200':
           description: Threshold stored
@@ -1270,6 +1271,7 @@ components:
         threshold_days:
           type: integer
           minimum: 0
+          maximum: 3650
     AuditEntry:
       type: object
       required: [audit_id, action, entity_name, created_at]
