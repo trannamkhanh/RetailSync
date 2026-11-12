@@ -10,6 +10,7 @@ Regional middleware between POS terminals and HQ: realtime multi-store inventory
 | `database/` | Versioned SQL Server migrations, HQ mock tables, seed data |
 | `docs/design/` | DS-04 OpenAPI contract, DS-05 sync design, DS-07 guardrail rules |
 | `clients/demo-pos/` | WinForms demo POS with monitor panels (PB-45 part 1) |
+| `clients/demo-console/` | WinForms demo console for the presenter on machine S (PB-42-6) |
 
 Planned: `hq-demo/` (PB-18) and `staff-app/` (WinForms client, PB-46, PB-47).
 
@@ -223,6 +224,22 @@ content, 422 NACK `INVALID_BATCH` for a body outside DS-04, and 503/500 for the
 key-sorted batch message from DS-05 section 2: `net_revenue` as a string with two
 decimals and `created_at` excluded. The middleware `batch_hash(message)` must use
 the same form.
+
+### Demo console and demo scripts (PB-42-6, PB-42-7)
+
+`clients/demo-console/` is the presenter's window on machine S: live stock and
+batches, transactions and audit, sync batches and HQ totals, near-expiry alerts and
+forecasts, with buttons for sync, HQ modes, the snapshot and job runs. It reads
+`.env`, `.certs/` and `.tokens/` at run time, runs only SELECT statements and
+refuses `RTS_DB` and `RTS_DB_TEST`. See `clients/demo-console/README.md`.
+
+`scripts/demo/reset_demo_db.ps1` rebuilds `RTS_DB_DEMO` and `RTS_HQ` with 90 days
+of history and batches near expiry. The one-action scripts `sync_run.ps1`,
+`hq_mode.ps1`, `hq_snapshot.ps1`, `run_job.ps1`, `set_threshold.ps1`,
+`cross_store.ps1` and `audit_tail.ps1` in the same folder are the fallback when the
+console fails. `export_terminal_tokens.ps1` copies one terminal token, the Staff
+token of its store and that terminal's certificate onto machine A or B. The runbook
+is `docs/demo/Sprint_3_Demo.md`.
 
 ## Test
 
