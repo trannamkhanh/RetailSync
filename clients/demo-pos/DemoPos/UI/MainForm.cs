@@ -1282,42 +1282,74 @@ public sealed class MainForm : Form
 
             var staffToken = _loaded.StaffTokenForStore(terminal.StoreId);
             var auditorToken = _loaded.AuditorToken;
-            if (staffToken is null || auditorToken is null)
+            if (staffToken is null && auditorToken is null)
             {
                 _stockStatus.Text = "Thiếu token staff/auditor.";
-                _auditStatus.Text = "Thiếu token auditor.";
+                _auditStatus.Text = "Không có token auditor trên máy này.";
                 return;
             }
 
-            var stockTask = _monitorClient.GetStockAsync(terminal.StoreId, staffToken);
-            var auditTask = _monitorClient.GetAuditAsync(auditorToken);
-            await Task.WhenAll(stockTask, auditTask);
-            var stock = await stockTask;
-            var audit = await auditTask;
-
-            if (stock.IsSuccess && stock.Data is { } inventory)
+            var stockTask = staffToken is null
+                ? null
+                : _monitorClient.GetStockAsync(terminal.StoreId, staffToken);
+            var auditTask = auditorToken is null
+                ? null
+                : _monitorClient.GetAuditAsync(auditorToken);
+            if (stockTask is not null && auditTask is not null)
             {
-                ReplaceStock(inventory.Items.Select(line => new StockRow
+                await Task.WhenAll(stockTask, auditTask);
+            }
+            else if (stockTask is not null)
+            {
+                await stockTask;
+            }
+            else if (auditTask is not null)
+            {
+                await auditTask;
+            }
+
+            if (stockTask is null)
+            {
+                ReplaceStock(Array.Empty<StockRow>());
+                _stockStatus.Text = "Thiếu token staff.";
+            }
+            else
+            {
+                var stock = await stockTask;
+                if (stock.IsSuccess && stock.Data is { } inventory)
                 {
-                    Sku = line.Sku,
-                    Name = _productConfigs.TryGetValue(line.Sku, out var value) ? value.Name : line.Sku,
-                    Quantity = line.Quantity,
-                }).ToList());
-                _stockStatus.Text = $"{terminal.StoreId} · {stock.ElapsedMs:0} ms · cập nhật {DateTime.Now:HH:mm:ss}";
-            }
-            else
-            {
-                _stockStatus.Text = stock.Error ?? "Không đọc được tồn kho.";
+                    ReplaceStock(inventory.Items.Select(line => new StockRow
+                    {
+                        Sku = line.Sku,
+                        Name = _productConfigs.TryGetValue(line.Sku, out var value) ? value.Name : line.Sku,
+                        Quantity = line.Quantity,
+                    }).ToList());
+                    _stockStatus.Text = $"{terminal.StoreId} · {stock.ElapsedMs:0} ms · cập nhật {DateTime.Now:HH:mm:ss}";
+                }
+                else
+                {
+                    _stockStatus.Text = stock.Error ?? "Không đọc được tồn kho.";
+                }
             }
 
-            if (audit.IsSuccess && audit.Data is { } entries)
+            if (auditTask is null)
             {
-                ReplaceAudit(entries.Items.Select(entry => AuditRow.From(entry)).ToList());
-                _auditStatus.Text = $"{audit.Data.Items.Count} dòng · {audit.ElapsedMs:0} ms · cập nhật {DateTime.Now:HH:mm:ss}";
+                // Machines A and B hold only their own certificate, token and the store Staff token.
+                ReplaceAudit(Array.Empty<AuditRow>());
+                _auditStatus.Text = "Không có token auditor trên máy này.";
             }
             else
             {
-                _auditStatus.Text = audit.Error ?? "Không đọc được audit log.";
+                var audit = await auditTask;
+                if (audit.IsSuccess && audit.Data is { } entries)
+                {
+                    ReplaceAudit(entries.Items.Select(entry => AuditRow.From(entry)).ToList());
+                    _auditStatus.Text = $"{audit.Data.Items.Count} dòng · {audit.ElapsedMs:0} ms · cập nhật {DateTime.Now:HH:mm:ss}";
+                }
+                else
+                {
+                    _auditStatus.Text = audit.Error ?? "Không đọc được audit log.";
+                }
             }
         }
         catch (Exception error)
@@ -1543,11 +1575,7 @@ public sealed class MainForm : Form
             }
         }
 
-        if (_loaded.AuditorToken is null)
-        {
-            problems.Add($"Thiếu token auditor.\nChạy:\n  {SetupCommands.IssueTokens}");
-        }
-
+        // No auditor token is required on machines A and B: the audit panel shows why it is empty.
         reason = problems.Count == 0
             ? string.Empty
             : string.Join("\n\n", problems.Distinct());

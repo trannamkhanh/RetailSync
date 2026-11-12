@@ -93,4 +93,64 @@ public sealed class ConfigLoaderTests
         Assert.Contains(loaded.Problems, problem => problem.Contains("CA certificate", StringComparison.OrdinalIgnoreCase));
         Assert.Empty(loaded.Tokens);
     }
+
+    [Fact]
+    public void StartsWithTheOwnTerminalTokenAndStoreStaffTokenOnly_PB45_6()
+    {
+        using var temporary = new TemporaryDirectory();
+        var settings = PrepareTrimmedMachine(temporary.Path,
+            ("POS-DN1-01", "terminal-token"), ("staff_dn1", "staff-token"));
+
+        var loaded = ConfigLoader.Load(temporary.Path, settings);
+
+        Assert.Empty(loaded.Problems);
+        Assert.False(loaded.IsMock);
+        Assert.Null(loaded.AuditorToken);
+        Assert.Equal("terminal-token", loaded.TokenForTerminal(loaded.Config.Terminals[0]));
+        Assert.Equal("staff-token", loaded.StaffTokenForStore("STORE-DN1"));
+    }
+
+    [Fact]
+    public void MissingStoreStaffTokenStillBlocksStartup_PB45_6()
+    {
+        using var temporary = new TemporaryDirectory();
+        var settings = PrepareTrimmedMachine(temporary.Path, ("POS-DN1-01", "terminal-token"));
+
+        var loaded = ConfigLoader.Load(temporary.Path, settings);
+
+        Assert.Contains(loaded.Problems, problem => problem.Contains("staff_dn1", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void MissingTerminalTokenStillBlocksStartup_PB45_6()
+    {
+        using var temporary = new TemporaryDirectory();
+        var settings = PrepareTrimmedMachine(temporary.Path, ("staff_dn1", "staff-token"));
+
+        var loaded = ConfigLoader.Load(temporary.Path, settings);
+
+        Assert.Contains(loaded.Problems, problem => problem.Contains("Missing token 'POS-DN1-01'", StringComparison.Ordinal));
+    }
+
+    /// <summary>One terminal, its own certificate and key, the CA, and no Auditor token.</summary>
+    private static string PrepareTrimmedMachine(string root, params (string Name, string Value)[] tokens)
+    {
+        File.WriteAllText(Path.Combine(root, "compose.yaml"), "name: test");
+        using var authority = TestCertificates.CreateAuthority();
+        using var client = TestCertificates.CreateClientCertificate(authority, "POS-DN1-01");
+        var certificates = Path.Combine(root, ".certs", "pos");
+        Directory.CreateDirectory(certificates);
+        TestCertificates.WriteClientPem(certificates, client, "POS-DN1-01");
+        File.WriteAllText(Path.Combine(root, ".certs", "ca.crt"), authority.ExportCertificatePem());
+
+        var tokenDirectory = Path.Combine(root, ".tokens");
+        Directory.CreateDirectory(tokenDirectory);
+        File.WriteAllText(Path.Combine(tokenDirectory, "demo_tokens.json"),
+            JsonSerializer.Serialize(tokens.ToDictionary(pair => pair.Name, pair => pair.Value)));
+
+        var settings = Path.Combine(root, "appsettings.json");
+        File.WriteAllText(settings, Settings.Replace("\"UseMock\": true", "\"UseMock\": false",
+            StringComparison.Ordinal));
+        return settings;
+    }
 }

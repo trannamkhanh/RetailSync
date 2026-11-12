@@ -153,20 +153,62 @@ powershell -ExecutionPolicy Bypass -File scripts/demo/hq_mode.ps1 -Mode ONLINE
 dotnet run --project clients/demo-pos/DemoPos/DemoPos.csproj --no-build
 ```
 
-Lưu ý (kiểm tra ngày 12/11 trên `main`): Demo POS **chưa khởi động được** chỉ với hai
-token. Nó đòi chứng chỉ và token của mọi terminal trong `appsettings.json`, token Staff
-của mọi cửa hàng, và token `auditor` cho panel audit. Khai báo trong
-`appsettings.Local.json` chỉ terminal của máy (`"Terminals": [ ... ]`) bỏ được yêu cầu về
-terminal và cửa hàng khác, nhưng vẫn thiếu `auditor`. Cần sửa ở `clients/demo-pos/`
-(PB-45-6) trước buổi diễn tập.
+Lưu ý (sửa trong PR PB-45-6): Demo POS khởi động được chỉ với chứng chỉ, token của terminal trong
+`appsettings.Local.json` và token Staff của store đó. Thiếu token `auditor` chỉ làm panel Audit trống
+(“Không có token auditor trên máy này”), không chặn bán hàng.
 
 Máy A chạy thêm script tra cứu liên cửa hàng (màn 6 bước 3), dùng token `staff_dn1` vừa
 chép.
 
 ## 3. Mạng riêng (Khánh, PB-45-6)
 
-Khánh bổ sung trong PR PB-45-6: hotspot, IP tĩnh máy S, chế độ mạng Private, firewall mở
-9443 và 8443, chứng chỉ server có IP máy S (`EXTRA_SANS`), cấu hình Demo POS trên A và B.
+Hotspot/router riêng, không ra Internet. Máy S đặt IP tĩnh (ví dụ `192.168.1.10`) và chọn profile mạng
+**Private** cho card đang dùng; A và B nối vào cùng mạng đó.
+
+Trên S, đặt trong `.env`:
+
+```dotenv
+POS_BIND_ADDRESS=192.168.1.10        # gateway 9443
+MIDDLEWARE_BIND_ADDRESS=192.168.1.10 # middleware 8443
+```
+
+Hai biến mặc định `127.0.0.1`. Đặt xong chạy
+`docker compose up -d --force-recreate --wait middleware pos-gateway`.
+
+Sinh lại server certificate có IP của S (client certificate của các terminal không đổi), trong Git Bash:
+
+```bash
+EXTRA_SANS=IP:192.168.1.10 bash scripts/generate_dev_certs.sh
+docker compose restart middleware pos-gateway
+```
+
+Mở firewall chỉ cho profile Private, PowerShell as Administrator trên S:
+
+```powershell
+.\scripts\demo\open_firewall.ps1   # mở 9443 và 8443
+.\scripts\demo\close_firewall.ps1  # đóng sau buổi demo
+```
+
+Chép sang A và B đúng bộ tệp của máy đó: `.certs/ca.crt`, `.certs/pos/<pos_id>.crt|key`, và file token
+chỉ gồm token terminal của máy + token Staff của store (`staff_dn1`/`staff_dn2`/`staff_dn3`). A và B
+**không** giữ token `auditor`, không giữ private key hay token của máy khác.
+
+`appsettings.Local.json` cạnh exe (hoặc trong `clients/demo-pos/DemoPos/` khi chạy từ repo) trỏ về S và
+chỉ khai báo terminal của máy:
+
+```json
+{
+  "PosBaseUrl": "https://192.168.1.10:9443/api/v1",
+  "MonitorBaseUrl": "https://192.168.1.10:8443/api/v1",
+  "Terminals": [
+    { "StoreId": "STORE-DN1", "StoreName": "Cửa hàng Hải Châu", "PosId": "POS-DN1-01" }
+  ]
+}
+```
+
+IP trong URL phải trùng SAN của server certificate. Thiếu token `auditor` không chặn khởi động: panel
+Audit hiện “Không có token auditor trên máy này” và để trống, bán hàng và tồn kho vẫn chạy. Trước giờ
+demo, từ A và B gọi `https://<ip-máy-S>:8443/api/v1/health` và bán thử một đơn.
 
 ## 4. Kịch bản trên bảng điều khiển
 
