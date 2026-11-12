@@ -1,11 +1,13 @@
-"""The send cycle job (PB-15-3, 15-4, PB-16-1, 16-2), run every SYNC_INTERVAL seconds.
+"""The send cycle job (PB-15-3, 15-4, PB-16-1 to 16-4), run every SYNC_INTERVAL seconds.
 
 Like a router, this module owns its transactions:
 
 1. Return batches SENT for more than 60 seconds to PENDING.
-2. Take the oldest due PENDING batch of any store, mark it SENT and commit.
+2. Take the oldest PENDING batch of any store, if its retry is due, mark it SENT
+   and commit. While it waits for its retry, nothing newer is sent.
 3. Build and send its message; record HQ's answer in its own transaction.
-4. Repeat until no batch is due, or stop after the first answer that is not an ACK.
+4. Repeat until no batch is due. A NACK (400, 409, 422) fails that batch and the
+   cycle goes on; any other answer but an ACK backs the batch off and stops it.
 
 Only one cycle runs at a time in the process; a second call returns at once.
 """
@@ -38,7 +40,8 @@ class SendResult:
     skipped: bool = False
     released: int = 0
     acked: list[str] = field(default_factory=list)
-    failed: str | None = None
+    rejected: list[str] = field(default_factory=list)  # NACKed, now FAILED
+    failed: str | None = None  # the batch that stopped the cycle, back to PENDING
     error: str | None = None
 
 
@@ -78,6 +81,9 @@ def _send_due_batches() -> SendResult:
             session.commit()
         if answer.kind == "ACK":
             result.acked.append(batch_id)
+        elif sync_sender.is_nack(answer):
+            logger.warning("Sync batch %s rejected by HQ: %s", batch_id, answer.describe())
+            result.rejected.append(batch_id)
         if not keep_going:
             logger.warning("Sync batch %s not acknowledged: %s", batch_id, answer.describe())
             result.failed, result.error = batch_id, answer.describe()
