@@ -86,6 +86,19 @@ class ProductBatch(Base):
     received_at: Mapped[datetime] = mapped_column(DATETIME2, server_default=text("SYSUTCDATETIME()"))
 
 
+class Forecast(Base):
+    __tablename__ = "forecast"
+    forecast_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    store_id: Mapped[str] = mapped_column(String(10), ForeignKey("store.store_id"))
+    sku: Mapped[str] = mapped_column(String(20), ForeignKey("product.sku"))
+    horizon_days: Mapped[int] = mapped_column(Integer)
+    predicted_demand: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    surplus_shortage: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    balance_status: Mapped[str] = mapped_column(String(10))
+    model_version: Mapped[str] = mapped_column(String(30))
+    created_at: Mapped[datetime] = mapped_column(DATETIME2, server_default=text("SYSUTCDATETIME()"))
+
+
 class SyncBatch(Base):
     __tablename__ = "sync_batch"
     sync_batch_id: Mapped[str] = mapped_column(String(40), primary_key=True)
