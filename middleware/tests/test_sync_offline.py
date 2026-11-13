@@ -2,9 +2,9 @@
 
 SYNC17-1 and 17-2 run the POS and Staff paths while every call to HQ fails:
 the HQ client is replaced by one that records the call and raises, so a test
-fails if any of these requests calls HQ or waits for it. The cross-store
-lookup (PB-35) is not on main yet and the alerts endpoint is PB-34 in Sprint 4,
-so SYNC17-2 covers the stock query and the barcode lookup.
+fails if any of these requests calls HQ or waits for it. SYNC17-2 covers the
+stock query, the barcode lookup and the cross-store lookup (PB-35); the alerts
+endpoint is PB-34 in Sprint 4.
 
 SYNC17-3, 17-4 and 17-6 drive the send cycle with committed batches in
 RTS_DB_TEST and the fake HQ of ``test_sync_sender``.
@@ -12,6 +12,7 @@ RTS_DB_TEST and the fake HQ of ``test_sync_sender``.
 
 from collections.abc import Generator
 from datetime import timedelta
+from decimal import Decimal
 import importlib.util
 from pathlib import Path
 
@@ -23,11 +24,19 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import create_token
-from app.domain.models import PosTransaction, StaffUser
+from app.domain.models import PosTransaction, StaffUser, Store
 from app.integration import hq_client
 from app.jobs import sync_send
 from app.jobs.sync_send import run_send_cycle
-from tests.pos_test_support import post, return_payload, sale_payload, seed_sale, stock, uid
+from tests.pos_test_support import (
+    add_stock,
+    post,
+    return_payload,
+    sale_payload,
+    seed_sale,
+    stock,
+    uid,
+)
 from tests.test_sync_sender import HQ_SECRET, NOW, Clock, FakeHq, World
 
 
@@ -98,6 +107,41 @@ def test_sync17_2_staff_stock_query_and_barcode_lookup_answer_while_hq_is_down(c
         sku: 10 for sku in world.skus}
     assert lookup.status_code == 200, lookup.text
     assert lookup.json()["sku"] == world.skus[0]
+    assert hq_down.calls == 0
+
+
+def test_sync17_2_cross_store_lookup_answers_from_local_data_while_hq_is_down(
+        client, db_session, hq_down):
+    """The lookup reads this Middleware's own database, so an HQ outage cannot touch it."""
+    world = seed_sale(db_session)
+    near = Store(store_id=f"TEST-{uid(5)}", name="Nearby store",
+                 latitude=Decimal("10.600000"), longitude=Decimal("106.600000"),
+                 region_id="TEST", is_active=True)
+    empty = Store(store_id=f"TEST-{uid(5)}", name="Store without stock",
+                  latitude=Decimal("10.700000"), longitude=Decimal("106.700000"),
+                  region_id="TEST", is_active=True)
+    db_session.add_all([near, empty])
+    db_session.flush()
+    add_stock(db_session, near.store_id, world.skus[0], 4)
+    username = f"TEST-STAFF-{uid(8)}"
+    db_session.add(StaffUser(username=username, full_name="Offline staff", role="STORE_STAFF",
+                             store_id=world.store_id))
+    db_session.flush()
+    db_session.commit()
+    headers = {"Authorization": f"Bearer {create_token(username, 'Staff', store_id=world.store_id)}"}
+
+    response = client.get(f"/api/v1/products/barcode/BC-{world.skus[0]}/stock",
+                          params={"from_store": world.store_id}, headers=headers)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["sku"] == world.skus[0]
+    listed = {line["store_id"]: line for line in body["stores"]}
+    assert listed[near.store_id]["qty"] == 4
+    assert listed[empty.store_id]["qty"] == 0
+    # Nearest first, and the caller's own store is never in its own answer.
+    assert listed[near.store_id]["distance_km"] < listed[empty.store_id]["distance_km"]
+    assert world.store_id not in listed
     assert hq_down.calls == 0
 
 
