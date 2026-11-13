@@ -9,6 +9,7 @@ from app.core import clock
 from app.domain.models import Forecast, PosTerminal, PosTransaction, Product, Store, TransactionItem
 from app.jobs import forecast as job
 from app.repositories import forecast as repository
+from app.repositories.forecast import load_demand
 from app.services import forecast
 from tests.pos_test_support import add_stock, uid
 
@@ -16,10 +17,9 @@ from tests.pos_test_support import add_stock, uid
 TODAY = date(2026, 11, 23)
 
 
-@pytest.fixture
-def world(db_session, monkeypatch):
-    suffix = uid(5)
-    store = f"TEST-{suffix}"
+def make_world(db_session, *, store_prefix="TEST-A"):
+    suffix = uid(4)
+    store = f"{store_prefix}{suffix}"
     pos, sku = f"TEST-POS-{suffix}", f"TEST-SKU-{suffix}"
     db_session.add_all([
         Store(store_id=store, name="Forecast", latitude=0, longitude=0, region_id="TEST"),
@@ -28,6 +28,13 @@ def world(db_session, monkeypatch):
     db_session.flush()
     db_session.add(PosTerminal(pos_id=pos, store_id=store, status="ACTIVE"))
     db_session.flush()
+    return store, pos, sku
+
+
+@pytest.fixture
+def world(db_session, monkeypatch):
+    world = make_world(db_session)
+    store = world[0]
     monkeypatch.setattr(clock, "today_local", lambda: TODAY)
     connection = db_session.connection()
     db_session.commit()
@@ -35,7 +42,7 @@ def world(db_session, monkeypatch):
     load = repository.load_demand
     monkeypatch.setattr(repository, "load_demand",
                         lambda session, end: [d for d in load(session, end) if d.store == store])
-    return store, pos, sku
+    return world
 
 
 def seed(session, world, days=42, *, prefix="TEST-", qty=10):
@@ -62,7 +69,13 @@ def test_exp22_1_job_stores_seven_day_forecast(db_session, world):
     assert (row.sku, row.horizon_days, row.predicted_demand) == (world[2], 7, 70)
 
 
-def test_exp22_2_short_history_is_logged(db_session, world, caplog):
+def test_exp22_2_persists_supported_model_version(db_session, world):
+    seed(db_session, world)
+    assert job.run_forecast()[world[0]] == 1
+    assert saved(db_session, world).model_version in {"hgb-v1", "seasonal-naive-v1"}
+
+
+def test_exp22_3_short_history_is_logged(db_session, world, caplog):
     seed(db_session, world, 27)
     with caplog.at_level(logging.INFO):
         job.run_forecast()
@@ -70,7 +83,7 @@ def test_exp22_2_short_history_is_logged(db_session, world, caplog):
     assert f"{world[0]}/{world[2]} with 27 days" in caplog.text
 
 
-def test_exp22_3_daily_demand_fills_missing_days_and_subtracts_reversals(db_session, world):
+def test_pb22_daily_demand_fills_missing_days_and_subtracts_reversals(db_session, world):
     seed(db_session, world, 2)
     store, pos, sku = world
     for kind, quantity in [("RETURN", 3), ("CANCELLATION", 2)]:
@@ -95,18 +108,27 @@ def test_exp22_5_failed_store_rolls_back_and_keeps_earlier_forecast(db_session, 
     assert job.run_forecast()[world[0]] == 1
     prior_id = saved(db_session, world).forecast_id
     db_session.commit()
+    other = make_world(db_session, store_prefix="TEST-Z")
+    seed(db_session, other)
+    monkeypatch.setattr(repository, "load_demand", lambda session, end: [
+        demand for demand in load_demand(session, end)
+        if demand.store in {world[0], other[0]}
+    ])
     monkeypatch.setattr(clock, "today_local", lambda: TODAY + timedelta(days=1))
     save = job._save_store
 
-    def fail_after_flush(session, *args):
-        save(session, *args)
-        session.flush()
-        raise RuntimeError("forced failure")
+    def fail_after_flush(session, store, *args):
+        count = save(session, store, *args)
+        if store == world[0]:
+            session.flush()
+            raise RuntimeError("forced failure")
+        return count
 
     monkeypatch.setattr(job, "_save_store", fail_after_flush)
-    assert job.run_forecast() == {}
+    assert job.run_forecast() == {other[0]: 1}
     assert list(db_session.scalars(select(Forecast.forecast_id).where(Forecast.store_id == world[0]))) == [prior_id]
     assert world[0] in caplog.text
+    assert saved(db_session, other).sku == other[2]
 
 
 @pytest.mark.parametrize(("stock", "balance", "status"), [
