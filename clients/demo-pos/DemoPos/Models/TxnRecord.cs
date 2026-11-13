@@ -16,12 +16,15 @@ public sealed class TxnRecord
 
     public required string ItemsText { get; init; }
 
-    public required string Outcome { get; init; }
+    public required string Outcome { get; set; }
 
-    public required string Code { get; init; }
+    public required string Code { get; set; }
 
     /// <summary>The exact body sent, used by Send again and Retry.</summary>
     public required string RawBody { get; init; }
+
+    /// <summary>The journal entry this record waits for, when it was accepted into the durable queue.</summary>
+    public string? QueueEntryId { get; set; }
 
     public List<PosEventItem> Items { get; init; } = new();
 

@@ -156,8 +156,10 @@ gần nhất, tồn kho của store, 5 dòng audit gần nhất.
 3. Chọn dòng SALE, bấm **Return…**, trả 1. Kỳ vọng `OK`, tồn 39.
 4. Mở **Scenarios (F12)** và chạy từng kịch bản; so mã với nhãn trên nút.
 5. Bán một đơn mới rồi bấm **Cancel** (đơn chưa có Return). Kỳ vọng `OK`, tồn trở lại như trước.
-6. Tắt middleware, bán một đơn: kết quả cam “no answer”. Bật lại, bấm **Retry**: `OK` với cùng
-   `transaction_id`.
+6. Tắt gateway, bán hàng: đơn được lưu vào hàng đợi của terminal và hiện “đang chờ”, không phải lỗi.
+   Bật lại gateway: hàng đợi tự gửi theo thứ tự với cùng `transaction_id`. Tắt hẳn ứng dụng rồi mở lại
+   cũng gửi tiếp các đơn còn chờ. Bấm vào “Chờ gửi … · Bị từ chối … · Link …” ở thanh trạng thái để xem
+   các sự kiện bị từ chối.
 
 Mỗi lần gửi, **Request log** hiện method, URL đầy đủ kèm port, status, thời gian, request/response
 và certificate đã dùng. Log không bao giờ hiển thị bearer token; chỉ hiện role/subject.
@@ -177,6 +179,8 @@ Bộ lọc mặc định chỉ hiện POS event và kịch bản; chọn “Tấ
 
 - Sai chứng chỉ có audit `EVENT_REJECTED`; không chứng chỉ và bỏ qua gateway thì không có audit.
 - “Bán 999”, Conflict, Store lạ và Trả quá số không làm đổi tồn kho.
+- Các kịch bản F12 gửi trực tiếp, **không** đi qua hàng đợi bền: đây là request chẩn đoán, không phải
+  đơn bán thật, nên một lỗi cố định (ví dụ 400 thiếu chứng chỉ) không được nằm lại trong hàng đợi.
 
 ## 7. Chế độ MOCK (dự phòng)
 
@@ -215,4 +219,13 @@ request log không chứa bearer token, và luật nghiệp vụ của mock back
   một lần từ PKCS#12 export để private key dùng được với `SslStream` trên Windows.
 - Mỗi terminal có `HttpClient`/handler riêng, nên mỗi request mang đúng certificate của máy đó.
 - Timeout request là 5 giây.
-- Phần 2 của PB-45 (queue bền, tự động gửi lại, CLI) và Staff App không nằm trong phần này.
+- Mỗi terminal có một journal `%LOCALAPPDATA%\RetailSync\DemoPos\<pos_id>.jsonl`: sự kiện được ghi và
+  `flush` xuống đĩa trước lần gửi đầu tiên. Bản ghi cuối bị cắt giữa lúc crash được bỏ (chưa từng báo
+  cho UI); bản ghi hoàn chỉnh bị hỏng thì báo lỗi, không xóa im lặng.
+- Chỉ timeout, lỗi kết nối và 503 mới được giữ lại và thử sau 5 giây. Mọi câu trả lời không thể thành
+  công (400 thiếu chứng chỉ, body không phải JSON, 4xx khác `REJECTED`) được chuyển sang danh sách bị
+  từ chối kèm status, nên một sự kiện không bao giờ chặn các sự kiện sau.
+- Khi không còn sự kiện chờ, journal được ghi lại thành một snapshot (giữ danh sách bị từ chối) để file
+  không lớn dần. Mỗi terminal chỉ có một sender tại một thời điểm (file `.sender.lock`), kể cả khi mở
+  hai ứng dụng.
+- Staff App không nằm trong phần này.

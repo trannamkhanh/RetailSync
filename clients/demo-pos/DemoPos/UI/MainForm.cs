@@ -31,6 +31,11 @@ public sealed class MainForm : Form
     private readonly MockPosBackend _mockBackend;
     private readonly System.Windows.Forms.Timer _monitorTimer = new() { Interval = 2000 };
     private readonly System.Windows.Forms.Timer _statusTimer = new() { Interval = 5000 };
+    private readonly System.Windows.Forms.Timer _queueTimer = new() { Interval = 5000 };
+    private readonly Dictionary<string, DurableEventQueue> _queues = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTime> _retryAfter = new(StringComparer.OrdinalIgnoreCase);
+    private readonly SemaphoreSlim _queueGate = new(1, 1);
+    private readonly ToolStripStatusLabel _queueStatus = new();
 
     private X509Certificate2? _authority;
     private MonitorApiClient? _monitorClient;
@@ -40,6 +45,7 @@ public sealed class MainForm : Form
     private bool _monitorBusy;
     private bool _statusBusy;
     private bool _closing;
+    private bool? _linkUp;
     private PendingRequest? _pendingRetry;
 
     private readonly ComboBox _terminalCombo = new();
@@ -97,6 +103,14 @@ public sealed class MainForm : Form
         BuildUi();
         LoadCertificates();
         PopulateTerminals();
+        // One journal per terminal: a sale is on disk before the first network send.
+        var queueDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RetailSync", "DemoPos");
+        foreach (var terminal in _config.Terminals)
+        {
+            _queues.Add(terminal.PosId, new DurableEventQueue(queueDirectory, terminal.PosId));
+        }
+
         WireEvents();
 
         if (!_mockMode)
@@ -110,13 +124,16 @@ public sealed class MainForm : Form
         RefreshProducts();
         UpdateCartTotal();
         RefreshLogView();
+        UpdateQueueStatus();
         _monitorTimer.Start();
         _statusTimer.Start();
+        _queueTimer.Start();
 
         Shown += async (_, _) =>
         {
             await RefreshStatusAsync();
             await RefreshMonitorAsync();
+            await DrainQueuesAsync();
         };
         FormClosing += OnFormClosing;
     }
@@ -254,6 +271,7 @@ public sealed class MainForm : Form
         _statusStrip.SizingGrip = false;
         _middlewareStatus.Text = "Middleware: —";
         _gatewayStatus.Text = "Gateway: —";
+        _queueStatus.Text = "Chờ gửi: 0 · Bị từ chối: 0 · Link: —";
         _filesStatus.Text = "CA: — · tokens: —";
         _modeStatus.Text = "LIVE";
         _clockStatus.Text = string.Empty;
@@ -264,6 +282,8 @@ public sealed class MainForm : Form
             _middlewareStatus,
             new ToolStripSeparator(),
             _gatewayStatus,
+            new ToolStripSeparator(),
+            _queueStatus,
             new ToolStripSeparator(),
             _filesStatus,
             new ToolStripSeparator(),
@@ -578,6 +598,9 @@ public sealed class MainForm : Form
         _requestLog.Changed += (_, _) => OnRequestLogChanged();
         _monitorTimer.Tick += async (_, _) => await RefreshMonitorAsync();
         _statusTimer.Tick += async (_, _) => await RefreshStatusAsync();
+        _queueTimer.Tick += async (_, _) => await DrainQueuesAsync();
+        _queueStatus.IsLink = true;
+        _queueStatus.Click += (_, _) => ShowRejected();
     }
 
     private void LoadCertificates()
@@ -801,29 +824,57 @@ public sealed class MainForm : Form
 
     private async Task<PosResult> SendCoreAsync(TerminalConfig terminal, PosEvent posEvent,
                                                 string rawBody, bool addHistory,
-                                                TerminalClient? clientOverride = null,
+                                                TerminalClient? directClient = null,
                                                 bool clearCartOnSuccess = false)
     {
-        PosResult result;
-        if (_mockMode)
+        if (_mockMode || directClient is not null)
         {
-            result = await _mockBackend.SendAsync(rawBody);
-        }
-        else
-        {
-            var client = clientOverride ?? GetLiveClient(terminal);
-            result = await client.SendAsync(rawBody);
+            // MOCK mode and the F12 certificate/gateway scenarios send directly: a diagnostic
+            // request must not enter the terminal's durable queue.
+            var result = _mockMode
+                ? await _mockBackend.SendAsync(rawBody)
+                : await directClient!.SendAsync(rawBody);
+
+            _resultPanel.ShowResult(result);
+            UpdateTerminalResult(terminal, result);
+            _pendingRetry = result.CanRetry
+                ? new PendingRequest(terminal, rawBody, clearCartOnSuccess)
+                : null;
+
+            // Keep Pay and Retry consistent: a successful SALE empties the cart
+            // exactly once, whether it succeeded on the first send or on Retry.
+            if (clearCartOnSuccess && posEvent.EventType == EventTypes.Sale && result.IsSuccess)
+            {
+                _cart.Clear();
+                UpdateCartTotal();
+            }
+
+            if (addHistory)
+            {
+                AddHistory(NewRecord(posEvent, rawBody, result.Outcome.ToString(), result.Code));
+            }
+
+            await RefreshMonitorAsync();
+            return result;
         }
 
-        _resultPanel.ShowResult(result);
-        UpdateTerminalResult(terminal, result);
-        _pendingRetry = result.CanRetry
-            ? new PendingRequest(terminal, rawBody, clearCartOnSuccess)
-            : null;
+        var queue = _queues[terminal.PosId];
+        string entryId;
+        try
+        {
+            // The event is durable before the first send: a crash or a lost link cannot lose the sale.
+            entryId = queue.Enqueue(rawBody);
+        }
+        catch (Exception error)
+        {
+            _resultPanel.ShowInfo($"Không ghi được hàng đợi: {error.Message}");
+            throw new ConfigurationException(
+                $"Không ghi được hàng đợi của {terminal.PosId}: {error.Message}", error);
+        }
 
-        // Keep Pay and Retry consistent: a successful SALE empties the cart
-        // exactly once, whether it succeeded on the first send or on Retry.
-        if (clearCartOnSuccess && posEvent.EventType == EventTypes.Sale && result.IsSuccess)
+        // A manual sale is accepted into the queue even during an outage, so the cart is released now
+        // and the screen shows "đang chờ" instead of an error.
+        if (clearCartOnSuccess && posEvent.EventType == EventTypes.Sale)
         {
             _cart.Clear();
             UpdateCartTotal();
@@ -831,26 +882,41 @@ public sealed class MainForm : Form
 
         if (addHistory)
         {
-            var record = new TxnRecord
-            {
-                Time = DateTime.Now,
-                EventType = posEvent.EventType,
-                TransactionId = posEvent.TransactionId,
-                StoreId = posEvent.StoreId,
-                PosId = posEvent.PosId,
-                OriginalTransactionId = posEvent.OriginalTransactionId,
-                ItemsText = ItemsText(posEvent),
-                Outcome = result.Outcome.ToString(),
-                Code = result.Code,
-                RawBody = rawBody,
-                Items = posEvent.Items?.ToList() ?? new List<PosEventItem>(),
-            };
+            var record = NewRecord(posEvent, rawBody, "WAITING", "WAITING");
+            record.QueueEntryId = entryId;
             AddHistory(record);
         }
 
-        await RefreshMonitorAsync();
-        return result;
+        _pendingRetry = null;
+        var waiting = new PosResult
+        {
+            Outcome = PosOutcome.ERROR,
+            Code = "WAITING",
+            Message = "Đã lưu vào hàng đợi, đang gửi.",
+        };
+        _resultPanel.ShowInfo(waiting.Message);
+        UpdateQueueStatus();
+
+        // The queue sends in the background so Pay returns at once; the row turns OK/DUPLICATE or a
+        // rejected status when the gateway answers.
+        _ = DrainTerminalAsync(terminal);
+        return waiting;
     }
+
+    private static TxnRecord NewRecord(PosEvent posEvent, string rawBody, string outcome, string code) => new()
+    {
+        Time = DateTime.Now,
+        EventType = posEvent.EventType,
+        TransactionId = posEvent.TransactionId,
+        StoreId = posEvent.StoreId,
+        PosId = posEvent.PosId,
+        OriginalTransactionId = posEvent.OriginalTransactionId,
+        ItemsText = ItemsText(posEvent),
+        Outcome = outcome,
+        Code = code,
+        RawBody = rawBody,
+        Items = posEvent.Items?.ToList() ?? new List<PosEventItem>(),
+    };
 
     private TerminalClient GetLiveClient(TerminalConfig terminal)
     {
@@ -875,6 +941,135 @@ public sealed class MainForm : Form
             terminal.PosId, token, _requestLog);
         _liveClients[terminal.PosId] = client;
         return client;
+    }
+
+    private Task<PosResult> SendQueuedAsync(TerminalConfig terminal, DurableEventQueue.Entry entry) =>
+        GetLiveClient(terminal).SendAsync(entry.Body);
+
+    private async Task DrainTerminalAsync(TerminalConfig terminal)
+    {
+        if (_closing || _mockMode)
+        {
+            return;
+        }
+
+        await _queueGate.WaitAsync();
+        try
+        {
+            var queue = _queues[terminal.PosId];
+            if (queue.Count == 0)
+            {
+                return;
+            }
+
+            if (_retryAfter.TryGetValue(terminal.PosId, out var retryAt) && DateTime.UtcNow < retryAt)
+            {
+                return;
+            }
+
+            var result = await queue.DrainAsync(
+                entry => SendQueuedAsync(terminal, entry),
+                (entry, settled) => OnQueuedSettled(terminal, entry, settled));
+
+            if (result is null)
+            {
+                return;
+            }
+
+            _linkUp = !DurableEventQueue.ShouldRetry(result);
+            if (DurableEventQueue.ShouldRetry(result))
+            {
+                // DS-05 section 8: keep the event, stop this cycle, retry after 5 seconds.
+                _retryAfter[terminal.PosId] = DateTime.UtcNow.AddSeconds(5);
+                if (CurrentTerminal?.PosId == terminal.PosId)
+                {
+                    _resultPanel.ShowInfo("Mất liên lạc tới gateway — sự kiện đã lưu, sẽ gửi lại.");
+                }
+            }
+            else
+            {
+                _retryAfter.Remove(terminal.PosId);
+            }
+        }
+        catch (Exception error)
+        {
+            if (!_closing)
+            {
+                _resultPanel.ShowInfo($"Hàng đợi {terminal.PosId}: {error.Message}");
+            }
+        }
+        finally
+        {
+            _queueGate.Release();
+            if (!_closing)
+            {
+                UpdateQueueStatus();
+            }
+        }
+    }
+
+    private async Task DrainQueuesAsync()
+    {
+        if (_closing || _mockMode)
+        {
+            return;
+        }
+
+        foreach (var terminal in _config.Terminals)
+        {
+            await DrainTerminalAsync(terminal);
+        }
+    }
+
+    private void OnQueuedSettled(TerminalConfig terminal, DurableEventQueue.Entry entry, PosResult result)
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        var record = _historyByPos[terminal.PosId].FirstOrDefault(item => item.QueueEntryId == entry.Id);
+        if (record is not null)
+        {
+            // "Gửi lại" keeps the body and its transaction_id: this row turns DUPLICATE, not a new sale.
+            record.Outcome = result.Outcome.ToString();
+            record.Code = result.Code;
+            _historyView.ResetBindings();
+            UpdateHistoryButtons();
+        }
+
+        UpdateTerminalResult(terminal, result);
+        if (CurrentTerminal?.PosId == terminal.PosId)
+        {
+            _resultPanel.ShowResult(result);
+        }
+
+        UpdateQueueStatus();
+        _ = RefreshMonitorAsync();
+    }
+
+    private void UpdateQueueStatus()
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        var pending = _queues.Values.Sum(queue => queue.Count);
+        var rejected = _queues.Values.Sum(queue => queue.Rejected.Count);
+        var link = _linkUp switch { true => "UP", false => "DOWN", _ => "—" };
+        _queueStatus.Text = $"Chờ gửi: {pending} · Bị từ chối: {rejected} · Link: {link}";
+        _queueStatus.ForeColor = _linkUp == false
+            ? Color.FromArgb(179, 38, 30)
+            : Color.FromArgb(30, 122, 52);
+    }
+
+    private void ShowRejected()
+    {
+        var rows = _queues.SelectMany(pair => pair.Value.Rejected.Select(item =>
+            $"{pair.Key}: {item.Code} ({item.HttpStatus}) — {item.Message}\n{item.Body}"));
+        MessageBox.Show(this, string.Join("\n\n", rows.DefaultIfEmpty("Không có sự kiện bị từ chối.")),
+            "Sự kiện bị từ chối");
     }
 
     private void AddHistory(TxnRecord record)
@@ -1220,7 +1415,7 @@ public sealed class MainForm : Form
                            wrongCert.Certificate, other.PosId, token, _requestLog))
                 {
                     await SendCoreAsync(terminal, wrongEvent, PosEventJson.Serialize(wrongEvent),
-                        addHistory: false, wrongClient);
+                        addHistory: false, directClient: wrongClient);
                 }
 
                 return;
@@ -1234,7 +1429,7 @@ public sealed class MainForm : Form
                            null, null, token, _requestLog))
                 {
                     await SendCoreAsync(terminal, noCertEvent, PosEventJson.Serialize(noCertEvent),
-                        addHistory: false, noCertClient);
+                        addHistory: false, directClient: noCertClient);
                 }
 
                 return;
@@ -1248,7 +1443,7 @@ public sealed class MainForm : Form
                            null, null, token, _requestLog))
                 {
                     await SendCoreAsync(terminal, skipEvent, PosEventJson.Serialize(skipEvent),
-                        addHistory: false, skipClient);
+                        addHistory: false, directClient: skipClient);
                 }
 
                 return;
@@ -1438,6 +1633,10 @@ public sealed class MainForm : Form
                 _gatewayStatus.Text = $"Gateway: DOWN ({gateway.Status}, {gateway.Error ?? "no answer"})";
                 _gatewayStatus.ForeColor = Color.FromArgb(179, 38, 30);
             }
+
+            // The queue label shows the link next to the number of events waiting.
+            _linkUp = gateway.Up;
+            UpdateQueueStatus();
         }
         catch (Exception error)
         {
@@ -1623,6 +1822,7 @@ public sealed class MainForm : Form
         _closing = true;
         _monitorTimer.Stop();
         _statusTimer.Stop();
+        _queueTimer.Stop();
         foreach (var client in _liveClients.Values)
         {
             client.Dispose();
