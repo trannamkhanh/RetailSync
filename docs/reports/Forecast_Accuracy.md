@@ -2,6 +2,7 @@
 
 Model seed `42`. Source is simulated `HIST-` transactions in `RTS_DB_DEMO`.
 Data range 2026-08-15 through 2026-11-12.
+Results depend on the business date used to generate the demo history, which determines the training and holdout dates.
 Training ends before 2026-10-30. The 14-day holdout starts on 2026-10-30.
 Both models predict the holdout recursively using only training demand and earlier predictions.
 WAPE is unavailable where total actual demand is zero.

@@ -31,6 +31,7 @@ def render_report(series: list[Demand], end: date) -> str:
         "# Forecast accuracy", "",
         f"Model seed `{SEED}`. Source is simulated `HIST-` transactions in `RTS_DB_DEMO`.",
         f"Data range {min(demand.start for demand in series)} through {end - timedelta(days=1)}.",
+        "Results depend on the business date used to generate the demo history, which determines the training and holdout dates.",
         f"Training ends before {cutoff}. The 14-day holdout starts on {cutoff}.",
         "Both models predict the holdout recursively using only training demand and earlier predictions.",
         "WAPE is unavailable where total actual demand is zero.", "",
