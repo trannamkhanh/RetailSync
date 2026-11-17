@@ -202,3 +202,47 @@ class NearExpiryAlert(Base):
     alert_type: Mapped[str] = mapped_column(String(12))
     status: Mapped[str] = mapped_column(String(10))
     created_at: Mapped[datetime] = mapped_column(DATETIME2, server_default=text("SYSUTCDATETIME()"))
+
+
+class Recommendation(Base):
+    """One suggestion for a store and SKU (PB-25, 27, 003_recommendations.sql).
+
+    ``action_type`` is DISCOUNT, CLEARANCE or REDISTRIBUTION, and ``status`` is
+    one of GENERATED, BLOCKED, PENDING, ACCEPTED, REJECTED or EXPIRED. The job
+    writes a new row as GENERATED; ``services.guardrails.apply_guardrails``
+    moves it to PENDING or BLOCKED.
+    """
+
+    __tablename__ = "recommendation"
+    rec_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    store_id: Mapped[str] = mapped_column(String(10), ForeignKey("store.store_id"))
+    sku: Mapped[str] = mapped_column(String(20), ForeignKey("product.sku"))
+    batch_id: Mapped[str | None] = mapped_column(String(30), ForeignKey("product_batch.batch_id"))
+    alert_id: Mapped[int | None] = mapped_column(BigInteger,
+                                                 ForeignKey("near_expiry_alert.alert_id"))
+    forecast_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("forecast.forecast_id"))
+    action_type: Mapped[str] = mapped_column(String(15))
+    discount_pct: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    proposed_qty: Mapped[int | None] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(Unicode(300))
+    status: Mapped[str] = mapped_column(String(12))
+    created_at: Mapped[datetime] = mapped_column(DATETIME2, server_default=text("SYSUTCDATETIME()"))
+
+
+class GuardrailResult(Base):
+    """The outcome of one guardrail rule for one recommendation (PB-27).
+
+    ``outcome`` is PASSED, ADJUSTED or BLOCKED. ``original_value`` holds the
+    value the rule compared and ``adjusted_value`` the value it replaced it
+    with, so a reader can see what the validation changed.
+    """
+
+    __tablename__ = "guardrail_result"
+    result_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    rec_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("recommendation.rec_id"))
+    rule_id: Mapped[int] = mapped_column(Integer, ForeignKey("guardrail_rule.rule_id"))
+    outcome: Mapped[str] = mapped_column(String(10))
+    original_value: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    adjusted_value: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    message: Mapped[str | None] = mapped_column(Unicode(200))
+    checked_at: Mapped[datetime] = mapped_column(DATETIME2, server_default=text("SYSUTCDATETIME()"))
