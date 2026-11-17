@@ -13,7 +13,7 @@ test that covers each row and the case id of that test:
 | 6 | MIN_PRICE 1,000; price 2,000 | 50% (result 1,000) | PASSED | `test_rec28_3` | REC28-3 |
 | 7 | MIN_PRICE 1,000; price 2,000 | 51% | ADJUSTED to 50% | `test_rec28_3` | REC28-3 |
 | 8 | MIN_PRICE 1,000; price 900 | Any discount | BLOCKED | `test_rec28_4` | REC28-4 |
-| 9 | Category MAX_DISCOUNT 30, all-category 50 | 40% in that category | ADJUSTED to 30% | `test_rec28_2` | REC28-2 |
+| 9 | Category MAX_DISCOUNT 30, all-category 50 | 40% in that category | ADJUSTED to 30% | `test_pb28_category_rule_boundary` | PB-28 |
 
 Every row asserts three things: the outcome, the value the rule stored as
 ``adjusted_value`` and the ``guardrail_result`` row itself. The test builds its
@@ -77,9 +77,10 @@ BOUNDARIES: dict[int, dict] = {
 }
 
 SHELF_LIFE_ROWS = (1, 2)
-DISCOUNT_ROWS = (3, 4, 5, 9)
+DISCOUNT_ROWS = (3, 4, 5)
 PRICE_ROWS = (6, 7)
 LIST_PRICE_ROWS = (8,)
+CATEGORY_ROWS = (9,)
 
 
 @pytest.fixture(autouse=True)
@@ -205,11 +206,16 @@ def test_rec28_4_a_list_price_below_the_minimum_blocks(db_session, row_number):
     assert_boundary(db_session, row_number)
 
 
+def test_pb28_category_rule_boundary(db_session):
+    assert_boundary(db_session, CATEGORY_ROWS[0])
+
+
 # PB-28-1: the table above is only a boundary suite if every row is covered.
 
 
 def test_pb28_every_ds07_row_is_a_test():
-    covered = set(SHELF_LIFE_ROWS) | set(DISCOUNT_ROWS) | set(PRICE_ROWS) | set(LIST_PRICE_ROWS)
+    covered = (set(SHELF_LIFE_ROWS) | set(DISCOUNT_ROWS) | set(PRICE_ROWS)
+               | set(LIST_PRICE_ROWS) | set(CATEGORY_ROWS))
     assert covered == set(BOUNDARIES)
     assert covered == set(range(1, 10))
 
