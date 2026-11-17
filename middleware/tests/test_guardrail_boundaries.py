@@ -14,6 +14,8 @@ test that covers each row and the case id of that test:
 | 7 | MIN_PRICE 1,000; price 2,000 | 51% | ADJUSTED to 50% | `test_rec28_3` | REC28-3 |
 | 8 | MIN_PRICE 1,000; price 900 | Any discount | BLOCKED | `test_rec28_4` | REC28-4 |
 | 9 | Category MAX_DISCOUNT 30, all-category 50 | 40% in that category | ADJUSTED to 30% | `test_pb28_category_rule_boundary` | PB-28 |
+| 10 | MIN_PRICE 1,000; price 1,000.01 | 50% | BLOCKED (MIN_PRICE) | `test_pb28_zero_discount_boundary` | PB-28 |
+| 11 | MAX_DISCOUNT 0 | 10% | BLOCKED (MAX_DISCOUNT) | `test_pb28_zero_discount_boundary` | PB-28 |
 
 Every row asserts three things: the outcome, the value the rule stored as
 ``adjusted_value`` and the ``guardrail_result`` row itself. The test builds its
@@ -74,6 +76,12 @@ BOUNDARIES: dict[int, dict] = {
     9: {"rule": "MAX_DISCOUNT", "discount": Decimal("40.00"), "expiry_days": 30,
         "price": PRICE, "outcome": "ADJUSTED", "adjusted": Decimal("30.00"),
         "status": "PENDING", "category_max_discount": Decimal(30)},
+    10: {"rule": "MIN_PRICE", "discount": Decimal("50.00"), "expiry_days": 30,
+         "price": Decimal("1000.01"), "outcome": "BLOCKED", "adjusted": Decimal("0.00"),
+         "status": "BLOCKED"},
+    11: {"rule": "MAX_DISCOUNT", "discount": Decimal("10.00"), "expiry_days": 30,
+         "price": PRICE, "outcome": "BLOCKED", "adjusted": Decimal("0.00"),
+         "status": "BLOCKED", "max_discount": Decimal(0)},
 }
 
 SHELF_LIFE_ROWS = (1, 2)
@@ -81,6 +89,7 @@ DISCOUNT_ROWS = (3, 4, 5)
 PRICE_ROWS = (6, 7)
 LIST_PRICE_ROWS = (8,)
 CATEGORY_ROWS = (9,)
+ZERO_DISCOUNT_ROWS = (10, 11)
 
 
 @pytest.fixture(autouse=True)
@@ -165,7 +174,8 @@ def assert_boundary(session: Session, row_number: int) -> None:
     stored = stored_result(session, recommendation.rec_id, rule.rule_id)
     assert stored.outcome == row["outcome"], f"row {row_number}"
     assert stored.adjusted_value == row["adjusted"], f"row {row_number}"
-    expected_discount = before if row["adjusted"] is None else row["adjusted"]
+    expected_discount = row["adjusted"] if row["outcome"] == "ADJUSTED" else before
+    assert fresh(session, recommendation).status == row["status"]
     if row["rule"] == "MIN_SHELF_LIFE":
         assert before == expected_discount
     else:
@@ -210,14 +220,28 @@ def test_pb28_category_rule_boundary(db_session):
     assert_boundary(db_session, CATEGORY_ROWS[0])
 
 
+@pytest.mark.parametrize("row_number", ZERO_DISCOUNT_ROWS,
+                         ids=[f"row-{n}" for n in ZERO_DISCOUNT_ROWS])
+def test_pb28_zero_discount_boundary(db_session, row_number):
+    assert_boundary(db_session, row_number)
+    checked = list(db_session.scalars(select(GuardrailResult)
+                                     .join(Recommendation,
+                                           Recommendation.rec_id == GuardrailResult.rec_id)
+                                     .where(Recommendation.sku == SKU)
+                                     .order_by(GuardrailResult.result_id)))
+    assert len(checked) == (3 if row_number == 10 else 2)
+    assert checked[-1].outcome == "BLOCKED"
+    assert "0%" in checked[-1].message
+
+
 # PB-28-1: the table above is only a boundary suite if every row is covered.
 
 
 def test_pb28_every_ds07_row_is_a_test():
     covered = (set(SHELF_LIFE_ROWS) | set(DISCOUNT_ROWS) | set(PRICE_ROWS)
-               | set(LIST_PRICE_ROWS) | set(CATEGORY_ROWS))
+               | set(LIST_PRICE_ROWS) | set(CATEGORY_ROWS) | set(ZERO_DISCOUNT_ROWS))
     assert covered == set(BOUNDARIES)
-    assert covered == set(range(1, 10))
+    assert covered == set(range(1, 12))
 
 
 def test_pb28_a_shelf_life_block_stops_the_discount_checks(db_session):
