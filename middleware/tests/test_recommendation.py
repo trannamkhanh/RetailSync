@@ -1,8 +1,16 @@
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
+from app.core import clock
+from app.domain.models import GuardrailResult, NearExpiryAlert, Product, Recommendation, Store
+from app.jobs import recommendation as job
+from app.services import guardrail_rules
 from app.services.recommendation import near_expiry_proposal, surplus_proposal
+from tests.pos_test_support import add_stock, uid
 
 
 def test_rec25_1_expired_batch_has_no_recommendation():
@@ -37,3 +45,57 @@ def test_rec25_6_discount_requires_surplus_at_least_equal_to_demand():
 def test_rec25_7_reason_includes_rounded_risk_and_remaining_quantity():
     proposal = near_expiry_proposal("TEST-B", 2, 10, Decimal("1.25"))
     assert proposal.reason == "Batch TEST-B expires in 2 day(s); 7 of 10 units may not sell in time."
+
+
+@pytest.fixture
+def recommendation_world(db_session, monkeypatch):
+    today = date(2026, 11, 23)
+    suffix = uid(5)
+    store, sku = f"TEST-{suffix}", f"TEST-SKU-{suffix}"
+    db_session.add_all([
+        Store(store_id=store, name="Recommendation", latitude=0, longitude=0, region_id="TEST"),
+        Product(sku=sku, barcode=sku, name="Recommendation SKU", category="TEST", unit_price=10),
+    ])
+    db_session.flush()
+    batch = add_stock(db_session, store, sku, 10, expiry_date=today + timedelta(days=1))
+    db_session.add(NearExpiryAlert(batch_id=batch, store_id=store, sku=sku, days_to_expiry=7,
+                                   remaining_qty=10, alert_type="NEAR_EXPIRY", status="OPEN"))
+    connection = db_session.connection()
+    db_session.commit()
+    monkeypatch.setattr(clock, "today_local", lambda: today)
+    monkeypatch.setattr(job, "session_factory",
+                        lambda: Session(bind=connection, join_transaction_mode="create_savepoint"))
+    return store, sku, batch
+
+
+def test_rec25_8_second_run_does_not_duplicate_pending_recommendation(
+    db_session, recommendation_world, monkeypatch,
+):
+    store, _, batch = recommendation_world
+    monkeypatch.setattr(guardrail_rules, "active_rules", lambda session: [])
+    assert job.run_recommendations()[store] == 1
+    assert job.run_recommendations()[store] == 0
+    row = db_session.scalars(select(Recommendation).where(Recommendation.store_id == store)).one()
+    assert (row.status, row.batch_id, row.proposed_qty) == ("PENDING", batch, 10)
+    assert row.alert_id is not None
+
+
+def test_pb25_rules_unavailable_keeps_generated_and_recovers(
+    db_session, recommendation_world, monkeypatch,
+):
+    store, _, _ = recommendation_world
+
+    def unavailable(session):
+        raise RuntimeError("forced rule read failure")
+
+    monkeypatch.setattr(guardrail_rules, "active_rules", unavailable)
+    assert job.run_recommendations()[store] == 1
+    query = select(Recommendation).where(Recommendation.store_id == store)
+    row = db_session.scalars(query).one()
+    assert row.status == "GENERATED"
+    assert db_session.scalar(select(GuardrailResult).where(GuardrailResult.rec_id == row.rec_id)) is None
+    db_session.commit()
+
+    monkeypatch.setattr(guardrail_rules, "active_rules", lambda session: [])
+    assert job.run_recommendations()[store] == 0
+    assert db_session.scalars(query).one().status == "PENDING"
