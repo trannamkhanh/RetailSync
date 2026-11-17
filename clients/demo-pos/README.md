@@ -172,6 +172,8 @@ Mỗi tick ứng dụng tự chọn 1–3 mặt hàng trong `Products` của `ap
 **Pay**, nên đơn đi đúng đường gửi của thao tác tay: ghi vào hàng đợi bền của terminal trước rồi mới gửi
 lên gateway. Nhãn `Seed: <số>` cạnh đó là seed của lượt chạy, dùng để diễn lại cùng chuỗi đơn; bỏ tick là
 dừng ngay, các đơn đã vào hàng đợi vẫn gửi tiếp. Đổi terminal hoặc đóng ứng dụng sẽ tự tắt chế độ này.
+Nếu giỏ đang có hàng, lượt tự động chờ cho đến khi giỏ trống để không xóa đơn nhập tay. Nếu ghi
+hàng đợi thất bại, chế độ tự động dừng và giữ các mặt hàng trong giỏ để nhân viên xử lý.
 
 ## 6. Kịch bản ẩn sau F12
 

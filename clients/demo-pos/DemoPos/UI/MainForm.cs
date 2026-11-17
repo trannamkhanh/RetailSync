@@ -89,7 +89,11 @@ public sealed class MainForm : Form
     private readonly ToolStripStatusLabel _clockStatus = new();
     private RowStyle? _scenarioRowStyle;
 
-    public MainForm(LoadedConfig loaded)
+    public MainForm(LoadedConfig loaded) : this(loaded, null)
+    {
+    }
+
+    internal MainForm(LoadedConfig loaded, string? queueDirectory)
     {
         _loaded = loaded;
         _config = loaded.Config;
@@ -111,7 +115,7 @@ public sealed class MainForm : Form
         LoadCertificates();
         PopulateTerminals();
         // One journal per terminal: a sale is on disk before the first network send.
-        var queueDirectory = Path.Combine(
+        queueDirectory ??= Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RetailSync", "DemoPos");
         foreach (var terminal in _config.Terminals)
         {
@@ -188,6 +192,14 @@ public sealed class MainForm : Form
     }
 
     internal Task<PosResult> PayAsync() => PayCoreAsync();
+
+    internal CheckBox AutomaticToggle => _autoToggle;
+
+    internal Task RunAutomaticTickAsync() => AutomaticTickAsync();
+
+    internal IReadOnlyList<CartItem> CartItems => _cart;
+
+    internal int HistoryCount => _historyView.Count;
 
     internal async Task ToggleMockAsync()
     {
@@ -531,10 +543,15 @@ public sealed class MainForm : Form
             return;
         }
 
+        // A manual or previously failed sale must remain available to the cashier.
+        if (_cart.Count != 0 || CurrentTerminal is null)
+        {
+            return;
+        }
+
         _autoSending = true;
         try
         {
-            ClearCart();
             foreach (var item in automatic.NextItems())
             {
                 var product = _allProducts.FirstOrDefault(candidate =>
@@ -545,7 +562,7 @@ public sealed class MainForm : Form
                 }
             }
 
-            await PayCoreAsync();
+            await PayCoreAsync(throwOnError: true);
         }
         catch (Exception error)
         {
@@ -911,7 +928,7 @@ public sealed class MainForm : Form
         _cartTotal.Text = $"Tổng: {total:N0} đ · {_cart.Sum(item => item.Quantity)} món";
     }
 
-    private async Task<PosResult> PayCoreAsync()
+    private async Task<PosResult> PayCoreAsync(bool throwOnError = false)
     {
         if (_busy)
         {
@@ -946,6 +963,10 @@ public sealed class MainForm : Form
         }
         catch (Exception error)
         {
+            if (throwOnError)
+            {
+                throw;
+            }
             _resultPanel.ShowInfo(error.Message);
             return default!;
         }
