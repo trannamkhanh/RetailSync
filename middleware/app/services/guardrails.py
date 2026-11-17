@@ -148,6 +148,9 @@ def _check_max_discount(rule: GuardrailRule, recommendation: Recommendation
                         ) -> tuple[str, Decimal | None, Decimal | None, str | None]:
     discount = _discount(recommendation)
     if discount > rule.threshold:
+        if rule.threshold == 0:
+            return (BLOCKED, discount, Decimal("0.00"),
+                    "MAX_DISCOUNT would reduce the discount to 0%; no discount remains.")
         recommendation.discount_pct = rule.threshold
         return (ADJUSTED, discount, rule.threshold,
                 f"The discount {discount}% is above the limit of {rule.threshold}%.")
@@ -164,6 +167,10 @@ def _check_min_price(rule: GuardrailRule, recommendation: Recommendation, target
     if _price_after(price, discount) >= minimum:
         return (PASSED, discount, None, None)
     adjusted = _largest_discount(price, minimum)
+    if adjusted == 0:
+        return (BLOCKED, discount, adjusted,
+                "MIN_PRICE would reduce the discount to 0% after rounding down; "
+                "no discount remains.")
     recommendation.discount_pct = adjusted
     return (ADJUSTED, discount, adjusted,
             f"A discount of {discount}% goes below the minimum price of {minimum}.")

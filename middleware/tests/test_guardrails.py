@@ -352,3 +352,62 @@ def test_pb27_results_are_read_in_the_order_the_rules_were_checked(db_session):
     ids = [row.result_id for row in results]
     assert len(results) == 3
     assert ids == sorted(ids)
+
+
+@pytest.mark.parametrize("price", [Decimal("1000.00"), Decimal("1000.01")])
+@pytest.mark.parametrize("discount", [Decimal("50.00"), Decimal("60.00")])
+def test_pb27_min_price_reducing_discount_to_zero_blocks(db_session, price, discount):
+    rules = add_default_rules(db_session)
+    recommendation = build(db_session, discount=discount, price=price)
+
+    assert guardrails.apply_guardrails(db_session, recommendation) == "BLOCKED"
+
+    row = fresh(db_session, recommendation)
+    assert row.status == "BLOCKED"
+    # MAX_DISCOUNT adjusted 60 to 50 first; the blocking rule records that 50.
+    assert row.discount_pct == Decimal("50.00")
+    assert stored_results(db_session, recommendation) == [
+        ("MIN_SHELF_LIFE", rules["MIN_SHELF_LIFE"].rule_id, "PASSED", Decimal(30), None),
+        ("MAX_DISCOUNT", rules["MAX_DISCOUNT"].rule_id,
+         "ADJUSTED" if discount > 50 else "PASSED", discount,
+         Decimal(50) if discount > 50 else None),
+        ("MIN_PRICE", rules["MIN_PRICE"].rule_id, "BLOCKED", Decimal(50), Decimal("0.00")),
+    ]
+    assert "0%" in repository.list_results(db_session, row.rec_id)[-1].message
+
+
+def test_pb27_zero_max_discount_blocks_and_stops_min_price(db_session):
+    shelf = add_rule(db_session, "MIN_SHELF_LIFE", 1)
+    maximum = add_rule(db_session, "MAX_DISCOUNT", 0)
+    add_rule(db_session, "MIN_PRICE", 1000)
+    recommendation = build(db_session, discount=Decimal("10.00"))
+
+    assert guardrails.apply_guardrails(db_session, recommendation) == "BLOCKED"
+
+    row = fresh(db_session, recommendation)
+    assert row.status == "BLOCKED"
+    assert row.discount_pct == Decimal("10.00")
+    assert stored_results(db_session, recommendation) == [
+        ("MIN_SHELF_LIFE", shelf.rule_id, "PASSED", Decimal(30), None),
+        ("MAX_DISCOUNT", maximum.rule_id, "BLOCKED", Decimal(10), Decimal("0.00")),
+    ]
+    assert "0%" in repository.list_results(db_session, row.rec_id)[-1].message
+
+
+@pytest.mark.parametrize("price", [Decimal("1000.00"), Decimal("1000.01")])
+def test_pb27_existing_zero_discount_is_not_a_reduction(db_session, price):
+    add_rule(db_session, "MAX_DISCOUNT", 0)
+    add_rule(db_session, "MIN_PRICE", 1000)
+    recommendation = build(db_session, discount=Decimal("0.00"), price=price)
+
+    assert guardrails.apply_guardrails(db_session, recommendation) == "PENDING"
+    assert all(result.outcome == "PASSED"
+               for result in repository.list_results(db_session, recommendation.rec_id))
+
+
+def test_pb27_small_positive_discount_remains_adjusted(db_session):
+    add_rule(db_session, "MIN_PRICE", 1000)
+    recommendation = build(db_session, discount=Decimal("50.00"), price=Decimal("1000.11"))
+
+    assert guardrails.apply_guardrails(db_session, recommendation) == "PENDING"
+    assert fresh(db_session, recommendation).discount_pct == Decimal("0.01")
