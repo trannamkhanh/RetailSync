@@ -84,14 +84,23 @@ def test_rec25_8_second_run_does_not_duplicate_pending_recommendation(
 def test_pb25_rules_unavailable_keeps_generated_and_recovers(
     db_session, recommendation_world, monkeypatch,
 ):
-    store, _, _ = recommendation_world
+    store, sku, _ = recommendation_world
+    expired_batch = add_stock(db_session, store, sku, 3, expiry_date=clock.today_local() - timedelta(days=1))
+    expired = Recommendation(store_id=store, sku=sku, batch_id=expired_batch,
+                             action_type="CLEARANCE", proposed_qty=3, reason="Test expiry", status="PENDING")
+    db_session.add(expired)
+    db_session.commit()
 
     def unavailable(session):
         raise RuntimeError("forced rule read failure")
 
     monkeypatch.setattr(guardrail_rules, "active_rules", unavailable)
     assert job.run_recommendations()[store] == 1
-    query = select(Recommendation).where(Recommendation.store_id == store)
+    query = select(Recommendation).where(
+        Recommendation.store_id == store, Recommendation.batch_id != expired_batch,
+    )
+    db_session.refresh(expired)
+    assert expired.status == "EXPIRED"
     row = db_session.scalars(query).one()
     assert row.status == "GENERATED"
     assert db_session.scalar(select(GuardrailResult).where(GuardrailResult.rec_id == row.rec_id)) is None
@@ -100,6 +109,36 @@ def test_pb25_rules_unavailable_keeps_generated_and_recovers(
     monkeypatch.setattr(guardrail_rules, "active_rules", lambda session: [])
     assert job.run_recommendations()[store] == 0
     assert db_session.scalars(query).one().status == "PENDING"
+
+
+def test_pb25_store_failure_rolls_back_and_other_store_still_saves(
+    db_session, recommendation_world, monkeypatch,
+):
+    failing_store, sku, _ = recommendation_world
+    surviving_store = f"TEST-Z{uid(4)}"
+    db_session.add(Store(store_id=surviving_store, name="Other store", latitude=0, longitude=0, region_id="TEST"))
+    db_session.flush()
+    batch = add_stock(db_session, surviving_store, sku, 10, expiry_date=clock.today_local())
+    db_session.add(NearExpiryAlert(batch_id=batch, store_id=surviving_store, sku=sku, days_to_expiry=0,
+                                   remaining_qty=10, alert_type="NEAR_EXPIRY", status="OPEN"))
+    db_session.commit()
+    monkeypatch.setattr(guardrail_rules, "active_rules", lambda session: [])
+    apply = job.apply_guardrails
+
+    def fail_one_store(session, recommendation):
+        if recommendation.store_id == failing_store:
+            session.flush()
+            raise RuntimeError("forced store failure")
+        return apply(session, recommendation)
+
+    monkeypatch.setattr(job, "apply_guardrails", fail_one_store)
+    results = job.run_recommendations()
+    assert failing_store not in results
+    assert results[surviving_store] == 1
+    rows = list(db_session.scalars(select(Recommendation).where(
+        Recommendation.store_id.in_((failing_store, surviving_store)),
+    )))
+    assert [(row.store_id, row.status) for row in rows] == [(surviving_store, "PENDING")]
 
 
 def test_pb25_forecast_older_than_two_days_is_ignored(db_session, recommendation_world, monkeypatch):
