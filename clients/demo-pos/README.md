@@ -170,10 +170,11 @@ Bộ lọc mặc định chỉ hiện POS event và kịch bản; chọn “Tấ
 Dưới giỏ hàng có hàng **Chế độ tự động**: tick để bật, chọn số giây giữa hai đơn (1–60, mặc định 5).
 Mỗi tick ứng dụng tự chọn 1–3 mặt hàng trong `Products` của `appsettings.json`, thêm vào giỏ rồi bấm
 **Pay**, nên đơn đi đúng đường gửi của thao tác tay: ghi vào hàng đợi bền của terminal trước rồi mới gửi
-lên gateway. Nhãn `Seed: <số>` cạnh đó là seed của lượt chạy, dùng để diễn lại cùng chuỗi đơn; bỏ tick là
+lên gateway. Nhãn `Seed: <số>` cạnh đó là seed của lượt chạy; bỏ tick là
 dừng ngay, các đơn đã vào hàng đợi vẫn gửi tiếp. Đổi terminal hoặc đóng ứng dụng sẽ tự tắt chế độ này.
 Nếu giỏ đang có hàng, lượt tự động chờ cho đến khi giỏ trống để không xóa đơn nhập tay. Nếu ghi
 hàng đợi thất bại, chế độ tự động dừng và giữ các mặt hàng trong giỏ để nhân viên xử lý.
+Trong chế độ MOCK, nếu đơn bị từ chối, chế độ tự động dừng và giữ giỏ để kiểm tra.
 
 ## 6. Kịch bản ẩn sau F12
 

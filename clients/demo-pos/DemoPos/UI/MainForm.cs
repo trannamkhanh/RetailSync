@@ -562,7 +562,12 @@ public sealed class MainForm : Form
                 }
             }
 
-            await PayCoreAsync(throwOnError: true);
+            var result = await PayCoreAsync(throwOnError: true);
+            if (_mockMode && result is not null && !result.IsSuccess)
+            {
+                StopAutomaticQuietly();
+                _resultPanel.ShowInfo($"Chế độ tự động đã dừng: {result.Code} — {result.Message}");
+            }
         }
         catch (Exception error)
         {

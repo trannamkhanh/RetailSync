@@ -1,5 +1,6 @@
 using DemoPos.Configuration;
 using DemoPos.Models;
+using DemoPos.Services;
 using DemoPos.UI;
 using Xunit;
 
@@ -48,7 +49,7 @@ public sealed class AutomaticFormTests
     }
 
     [Fact]
-    public void AutomaticTickPreservesManualCart()
+    public void Pb45_2_AutomaticTickPreservesManualCart()
     {
         OnStaThread(() =>
         {
@@ -66,7 +67,7 @@ public sealed class AutomaticFormTests
     }
 
     [Fact]
-    public void QueueWriteFailureStopsAutomaticModeAndKeepsSaleInCart()
+    public void Pb45_2_QueueWriteFailureStopsAutomaticModeAndKeepsSaleInCart()
     {
         OnStaThread(() =>
         {
@@ -85,6 +86,52 @@ public sealed class AutomaticFormTests
             form.RunAutomaticTickAsync().GetAwaiter().GetResult();
             Assert.Equal(quantity, Assert.Single(form.CartItems).Quantity);
             Assert.Equal(0, form.HistoryCount);
+        });
+    }
+
+    [Fact]
+    public void Pos45_5_FormQueuesTwoAutomaticSalesAndStopsWhenToggledOff()
+    {
+        OnStaThread(() =>
+        {
+            using var directory = new TemporaryDirectory();
+            using var form = new MainForm(Configuration(directory.Path, mock: false), directory.Path);
+            // Hold the sender lease to leave the real journal entries pending for inspection.
+            using var sender = new FileStream(Path.Combine(directory.Path, "TEST-POS.sender.lock"),
+                FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            form.AutomaticToggle.Checked = true;
+            form.RunAutomaticTickAsync().GetAwaiter().GetResult();
+            form.RunAutomaticTickAsync().GetAwaiter().GetResult();
+            var queue = new DurableEventQueue(directory.Path, "TEST-POS");
+            Assert.Equal(2, queue.Count);
+            var sales = File.ReadAllLines(Path.Combine(directory.Path, "TEST-POS.jsonl"))
+                .Select(line => System.Text.Json.JsonDocument.Parse(line))
+                .Where(record => record.RootElement.GetProperty("Kind").GetString() == "enqueue")
+                .Select(record => PosEventJson.Deserialize(
+                    record.RootElement.GetProperty("Entry").GetProperty("Body").GetString()!))
+                .ToList();
+            Assert.Equal(2, sales.Count);
+            Assert.All(sales, sale => Assert.Equal(EventTypes.Sale, sale.EventType));
+            Assert.Empty(form.CartItems);
+            form.AutomaticToggle.Checked = false;
+            form.RunAutomaticTickAsync().GetAwaiter().GetResult();
+            Assert.Equal(2, queue.Count);
+            Assert.Empty(form.CartItems);
+        });
+    }
+
+    [Fact]
+    public void Pb45_2_MockRejectionStopsAutomaticModeAndPreservesCart()
+    {
+        OnStaThread(() =>
+        {
+            using var directory = new TemporaryDirectory();
+            using var form = new MainForm(Configuration(directory.Path, mock: true), directory.Path);
+            form.AutomaticToggle.Checked = true;
+            for (var tick = 0; tick < 32 && form.AutomaticToggle.Checked; tick++)
+                form.RunAutomaticTickAsync().GetAwaiter().GetResult();
+            Assert.False(form.AutomaticToggle.Checked);
+            Assert.Single(form.CartItems);
         });
     }
 }
