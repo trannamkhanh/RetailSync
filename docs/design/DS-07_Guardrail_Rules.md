@@ -21,6 +21,7 @@ Rule 1 runs first, so a blocked recommendation is not adjusted. Rule 3 uses the 
 
 ## Results
 
+- A DISCOUNT that the rules would reduce to 0% is BLOCKED by the rule that reduced it.
 - All rules passed or adjusted: recommendation status PENDING, visible to staff.
 - Any rule BLOCKED: status BLOCKED, never shown.
 - Rules cannot be loaded: nothing is released; status stays GENERATED until the next run.
@@ -38,3 +39,5 @@ Rule 1 runs first, so a blocked recommendation is not adjusted. Rule 3 uses the 
 | 7 | MIN_PRICE 1,000; price 2,000 | 51% | ADJUSTED to 50% |
 | 8 | MIN_PRICE 1,000; price 900 | Any discount | BLOCKED |
 | 9 | Category MAX_DISCOUNT 30, all-category 50 | 40% in that category | ADJUSTED to 30% |
+| 10 | MIN_PRICE 1,000; price 1,000.01 | 50% | BLOCKED (MIN_PRICE) |
+| 11 | MAX_DISCOUNT 0 | 10% | BLOCKED (MAX_DISCOUNT) |
