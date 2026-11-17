@@ -6,8 +6,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core import clock
-from app.domain.models import GuardrailResult, NearExpiryAlert, Product, Recommendation, Store
+from app.domain.models import Forecast, GuardrailResult, NearExpiryAlert, Product, Recommendation, Store
 from app.jobs import recommendation as job
+from app.repositories.forecast import utc_start
 from app.services import guardrail_rules
 from app.services.recommendation import near_expiry_proposal, surplus_proposal
 from tests.pos_test_support import add_stock, uid
@@ -99,3 +100,17 @@ def test_pb25_rules_unavailable_keeps_generated_and_recovers(
     monkeypatch.setattr(guardrail_rules, "active_rules", lambda session: [])
     assert job.run_recommendations()[store] == 0
     assert db_session.scalars(query).one().status == "PENDING"
+
+
+def test_pb25_forecast_older_than_two_days_is_ignored(db_session, recommendation_world, monkeypatch):
+    store, sku, _ = recommendation_world
+    db_session.add(Forecast(
+        store_id=store, sku=sku, horizon_days=7, predicted_demand=70, surplus_shortage=-60,
+        balance_status="SHORTAGE", model_version="seasonal-naive-v1",
+        created_at=utc_start(clock.today_local() - timedelta(days=3)),
+    ))
+    db_session.commit()
+    monkeypatch.setattr(guardrail_rules, "active_rules", lambda session: [])
+    assert job.run_recommendations()[store] == 1
+    row = db_session.scalars(select(Recommendation).where(Recommendation.store_id == store)).one()
+    assert (row.action_type, row.proposed_qty) == ("CLEARANCE", 10)
