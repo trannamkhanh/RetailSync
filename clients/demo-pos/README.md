@@ -165,6 +165,17 @@ Mỗi lần gửi, **Request log** hiện method, URL đầy đủ kèm port, st
 và certificate đã dùng. Log không bao giờ hiển thị bearer token; chỉ hiện role/subject.
 Bộ lọc mặc định chỉ hiện POS event và kịch bản; chọn “Tất cả” để xem cả monitor/health.
 
+### Chế độ tự động (PB-45-2)
+
+Dưới giỏ hàng có hàng **Chế độ tự động**: tick để bật, chọn số giây giữa hai đơn (1–60, mặc định 5).
+Mỗi tick ứng dụng tự chọn 1–3 mặt hàng trong `Products` của `appsettings.json`, thêm vào giỏ rồi bấm
+**Pay**, nên đơn đi đúng đường gửi của thao tác tay: ghi vào hàng đợi bền của terminal trước rồi mới gửi
+lên gateway. Nhãn `Seed: <số>` cạnh đó là seed của lượt chạy; bỏ tick là
+dừng ngay, các đơn đã vào hàng đợi vẫn gửi tiếp. Đổi terminal hoặc đóng ứng dụng sẽ tự tắt chế độ này.
+Nếu giỏ đang có hàng, lượt tự động chờ cho đến khi giỏ trống để không xóa đơn nhập tay. Nếu ghi
+hàng đợi thất bại, chế độ tự động dừng và giữ các mặt hàng trong giỏ để nhân viên xử lý.
+Trong chế độ MOCK, nếu đơn bị từ chối, chế độ tự động dừng và giữ giỏ để kiểm tra.
+
 ## 6. Kịch bản ẩn sau F12
 
 | Nút | Request | Kỳ vọng |
@@ -196,7 +207,8 @@ dotnet test clients/demo-pos/DemoPos.sln
 
 Test phủ: JSON sự kiện (snake_case, `timestamp` kết thúc `Z`, CANCELLATION không items, transaction id),
 parse `OK`/`DUPLICATE`/`Error`/body không JSON, chuỗi tin cậy CA, loader certificate, thiếu token file,
-request log không chứa bearer token, và luật nghiệp vụ của mock backend.
+request log không chứa bearer token, luật nghiệp vụ của mock backend, và chế độ tự động (POS45-5: mỗi
+tick sinh một SALE 1–3 mặt hàng, gửi qua hàng đợi bền tới backend giả; cùng seed thì cùng chuỗi đơn).
 
 ## 9. Xử lý sự cố
 
