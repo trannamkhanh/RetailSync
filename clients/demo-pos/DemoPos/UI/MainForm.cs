@@ -32,6 +32,10 @@ public sealed class MainForm : Form
     private readonly System.Windows.Forms.Timer _monitorTimer = new() { Interval = 2000 };
     private readonly System.Windows.Forms.Timer _statusTimer = new() { Interval = 5000 };
     private readonly System.Windows.Forms.Timer _queueTimer = new() { Interval = 5000 };
+    private readonly System.Windows.Forms.Timer _autoTimer = new();
+    private readonly CheckBox _autoToggle = new();
+    private readonly NumericUpDown _autoInterval = new();
+    private readonly Label _autoSeed = new();
     private readonly Dictionary<string, DurableEventQueue> _queues = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, DateTime> _retryAfter = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _queueGate = new(1, 1);
@@ -42,6 +46,9 @@ public sealed class MainForm : Form
     private GatewayProbe? _gatewayProbe;
     private bool _mockMode;
     private bool _busy;
+    private bool _autoSending;
+    private bool _autoChanging;
+    private AutomaticSales? _autoSales;
     private bool _monitorBusy;
     private bool _statusBusy;
     private bool _closing;
@@ -343,9 +350,10 @@ public sealed class MainForm : Form
         products.Controls.Add(productLayout);
 
         var cartGroup = new GroupBox { Text = "Giỏ hàng", Dock = DockStyle.Fill, Padding = new Padding(8) };
-        var cartLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
+        var cartLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
         cartLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         cartLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+        cartLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         ConfigureGrid(_cartGrid);
         _cartGrid.ReadOnly = false;
         AddColumn(_cartGrid, nameof(CartItem.Sku), "SKU", 70, readOnly: true);
@@ -371,6 +379,7 @@ public sealed class MainForm : Form
         _payButton.FlatStyle = FlatStyle.Flat;
         cartButtons.Controls.Add(_payButton);
         cartLayout.Controls.Add(cartButtons, 0, 1);
+        cartLayout.Controls.Add(BuildAutomaticRow(), 0, 2);
         cartGroup.Controls.Add(cartLayout);
 
         layout.Controls.Add(products, 0, 0);
@@ -428,6 +437,127 @@ public sealed class MainForm : Form
 
         page.Controls.Add(layout);
         return page;
+    }
+
+    /// <summary>PB-45-2: the automatic-mode controls under the cart.</summary>
+    private Control BuildAutomaticRow()
+    {
+        var row = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
+        _autoToggle.Text = "Chế độ tự động";
+        _autoToggle.AutoSize = true;
+        _autoToggle.Margin = new Padding(3, 10, 8, 3);
+        _autoInterval.Minimum = 1;
+        _autoInterval.Maximum = 60;
+        _autoInterval.Value = 5;
+        _autoInterval.Width = 54;
+        _autoInterval.Margin = new Padding(3, 7, 3, 3);
+        _autoSeed.AutoSize = true;
+        _autoSeed.ForeColor = Color.FromArgb(90, 90, 90);
+        _autoSeed.Margin = new Padding(10, 10, 3, 3);
+        _autoSeed.Text = "Seed: chưa chạy";
+        row.Controls.Add(_autoToggle);
+        row.Controls.Add(new Label { Text = "mỗi", AutoSize = true, Margin = new Padding(4, 10, 2, 3) });
+        row.Controls.Add(_autoInterval);
+        row.Controls.Add(new Label
+        {
+            Text = "giây · 1–3 mặt hàng ngẫu nhiên",
+            AutoSize = true,
+            Margin = new Padding(2, 10, 6, 3),
+        });
+        row.Controls.Add(_autoSeed);
+        return row;
+    }
+
+    /// <summary>
+    /// PB-45-2: automatic mode sells on its own until the toggle is cleared. Each tick fills the
+    /// cart with one to three catalogue items and presses Pay, so it goes through the same durable
+    /// queue as a manual sale.
+    /// </summary>
+    private void OnAutomaticToggled()
+    {
+        if (_autoChanging)
+        {
+            return;
+        }
+
+        if (!_autoToggle.Checked)
+        {
+            StopAutomatic("Đã dừng chế độ tự động.");
+            return;
+        }
+
+        if (_config.Products.Count == 0)
+        {
+            _autoChanging = true;
+            _autoToggle.Checked = false;
+            _autoChanging = false;
+            _resultPanel.ShowInfo("Không có sản phẩm nào trong appsettings.json để bán tự động.");
+            return;
+        }
+
+        var seed = Environment.TickCount;
+        _autoSales = new AutomaticSales(_config.Products, seed);
+        _autoSeed.Text = $"Seed: {seed}";
+        _autoTimer.Interval = (int)_autoInterval.Value * 1000;
+        _autoTimer.Start();
+        _resultPanel.ShowInfo(
+            $"Chế độ tự động: mỗi {_autoInterval.Value} giây một SALE ngẫu nhiên, seed {seed}.");
+    }
+
+    private void StopAutomatic(string message)
+    {
+        _autoTimer.Stop();
+        _autoSales = null;
+        _resultPanel.ShowInfo(message);
+    }
+
+    /// <summary>Stops automatic mode without a message; the terminal changed or the form closes.</summary>
+    private void StopAutomaticQuietly()
+    {
+        _autoTimer.Stop();
+        _autoSales = null;
+        if (_autoToggle.Checked)
+        {
+            _autoChanging = true;
+            _autoToggle.Checked = false;
+            _autoChanging = false;
+        }
+    }
+
+    private async Task AutomaticTickAsync()
+    {
+        if (_autoSales is not { } automatic || _autoSending || _busy || _closing)
+        {
+            return;
+        }
+
+        _autoSending = true;
+        try
+        {
+            ClearCart();
+            foreach (var item in automatic.NextItems())
+            {
+                var product = _allProducts.FirstOrDefault(candidate =>
+                    string.Equals(candidate.Sku, item.Sku, StringComparison.OrdinalIgnoreCase));
+                if (product is not null)
+                {
+                    AddToCart(product, item.Quantity);
+                }
+            }
+
+            await PayCoreAsync();
+        }
+        catch (Exception error)
+        {
+            _autoChanging = true;
+            _autoToggle.Checked = false;
+            _autoChanging = false;
+            StopAutomatic($"Chế độ tự động đã dừng vì lỗi: {error.Message}");
+        }
+        finally
+        {
+            _autoSending = false;
+        }
     }
 
     private TabPage BuildMonitorPage()
@@ -599,6 +729,9 @@ public sealed class MainForm : Form
         _monitorTimer.Tick += async (_, _) => await RefreshMonitorAsync();
         _statusTimer.Tick += async (_, _) => await RefreshStatusAsync();
         _queueTimer.Tick += async (_, _) => await DrainQueuesAsync();
+        _autoToggle.CheckedChanged += (_, _) => OnAutomaticToggled();
+        _autoInterval.ValueChanged += (_, _) => _autoTimer.Interval = (int)_autoInterval.Value * 1000;
+        _autoTimer.Tick += async (_, _) => await AutomaticTickAsync();
         _queueStatus.IsLink = true;
         _queueStatus.Click += (_, _) => ShowRejected();
     }
@@ -657,6 +790,7 @@ public sealed class MainForm : Form
 
     private void OnTerminalChanged()
     {
+        StopAutomaticQuietly();
         if (CurrentTerminal is not { } terminal)
         {
             return;
@@ -1820,6 +1954,7 @@ public sealed class MainForm : Form
     private void OnFormClosing(object? sender, FormClosingEventArgs e)
     {
         _closing = true;
+        _autoTimer.Stop();
         _monitorTimer.Stop();
         _statusTimer.Stop();
         _queueTimer.Stop();
