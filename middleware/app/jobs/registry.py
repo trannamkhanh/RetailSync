@@ -21,6 +21,7 @@ from app.core.config import settings
 from app.jobs.aggregation import run_aggregation
 from app.jobs.forecast import run_forecast
 from app.jobs.near_expiry import run_near_expiry_check
+from app.jobs.recommendation import run_recommendations
 from app.jobs.scheduler import register_job
 from app.jobs.sync_send import run_send_cycle
 
@@ -28,4 +29,5 @@ from app.jobs.sync_send import run_send_cycle
 register_job("aggregation", run_aggregation, every_seconds=settings.sync_interval)
 register_job("near-expiry", run_near_expiry_check, daily_at=time(0, 30))
 register_job("forecast", run_forecast, daily_at=time(1, 0))
+register_job("recommendation", run_recommendations, daily_at=time(2, 0))
 register_job("sync-send", run_send_cycle, every_seconds=settings.sync_interval)
