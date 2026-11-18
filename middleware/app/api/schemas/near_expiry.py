@@ -1,4 +1,8 @@
-"""DS-04 NearExpiryThreshold bodies for the admin endpoints (PB-21)."""
+"""DS-04 NearExpiryThreshold bodies for the admin endpoints (PB-21) and the
+DS-04 NearExpiryAlert body for the staff list (PB-34)."""
+
+from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -31,3 +35,23 @@ class NearExpiryThresholdUpdate(BaseModel):
 
 class NearExpiryThresholdList(BaseModel):
     items: list[NearExpiryThresholdRead]
+
+
+class NearExpiryAlertRead(BaseModel):
+    """DS-04 NearExpiryAlert; ``days_to_expiry`` is computed at read time (PB-34).
+
+    ``alert_type`` is EXPIRED whenever the recomputed count is negative, so a
+    batch that expired after the last daily check is still shown as EXPIRED.
+    """
+
+    alert_id: int
+    batch_id: str
+    sku: str
+    expiry_date: date
+    remaining_qty: int = Field(ge=0)
+    days_to_expiry: int
+    alert_type: Literal["NEAR_EXPIRY", "EXPIRED"]
+
+
+class NearExpiryAlertList(BaseModel):
+    items: list[NearExpiryAlertRead]

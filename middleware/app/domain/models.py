@@ -246,3 +246,21 @@ class GuardrailResult(Base):
     adjusted_value: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     message: Mapped[str | None] = mapped_column(Unicode(200))
     checked_at: Mapped[datetime] = mapped_column(DATETIME2, server_default=text("SYSUTCDATETIME()"))
+
+
+class StaffDecision(Base):
+    """One final staff decision on one recommendation (PB-33, 003_recommendations.sql).
+
+    ``rec_id`` is unique: a recommendation can be decided at most once, so a
+    decision is final. ``decision`` is ACCEPT or REJECT and ``decided_at`` is
+    written when the staff member decides.
+    """
+
+    __tablename__ = "staff_decision"
+    decision_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    rec_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("recommendation.rec_id"),
+                                        unique=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("staff_user.user_id"))
+    decision: Mapped[str] = mapped_column(String(10))
+    decided_at: Mapped[datetime] = mapped_column(DATETIME2,
+                                                 server_default=text("SYSUTCDATETIME()"))
