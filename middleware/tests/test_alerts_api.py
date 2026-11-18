@@ -137,7 +137,7 @@ def test_stf34_1_alerts_are_ordered_expired_first_then_fewest_days(client, db_se
     assert [item["days_to_expiry"] for item in body["items"]] == [-2, 1, 1, 3]
 
 
-def test_stf34_1_every_row_carries_the_batch_fields(client, db_session, world):
+def test_pb34_every_row_carries_the_batch_fields(client, db_session, world):
     alert = add_alert(db_session, world, days_left=2, quantity=7)
     db_session.commit()
 
@@ -219,7 +219,7 @@ def test_stf34_5_an_auditor_is_forbidden(client, db_session, world):
     assert_rejected(response, 403, "FORBIDDEN")
 
 
-def test_stf34_5_a_staff_account_without_a_store_is_forbidden(client, db_session, world):
+def test_pb34_a_staff_account_without_a_store_is_forbidden(client, db_session, world):
     suffix = _uid()
     db_session.add(StaffUser(username=f"TEST-nostore-{suffix}", full_name="No store",
                              role="STORE_STAFF"))
