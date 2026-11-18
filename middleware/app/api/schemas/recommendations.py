@@ -2,7 +2,8 @@
 
 The schemas mirror ``docs/design/openapi.yaml``: ``RecommendationSummary`` for
 the list, ``RecommendationDetail`` for one recommendation with its guardrail
-results, and the decision request/response for ``POST /recommendations/{rec_id}/decision``.
+results, and the decision request/response for
+``POST /recommendations/{rec_id}/decision``.
 """
 
 from datetime import datetime
@@ -25,16 +26,28 @@ class GuardrailResultRead(BaseModel):
 class RecommendationSummary(BaseModel):
     """One PENDING recommendation of the caller's store (PB-32)."""
 
-    rec_id: int = Field(strict=True)
+    rec_id: int
     sku: str
     action_type: Literal["DISCOUNT", "CLEARANCE", "REDISTRIBUTION"]
     discount_pct: Decimal | None = Field(default=None, description="Only for DISCOUNT")
-    proposed_qty: int | None = Field(default=None, description="Only for CLEARANCE and REDISTRIBUTION")
+    proposed_qty: int | None = Field(
+        default=None, description="Only for CLEARANCE and REDISTRIBUTION")
     status: Literal["PENDING"]
 
 
+class RecommendationList(BaseModel):
+    """The list response: DS-04 wraps the rows in ``items``."""
+
+    items: list[RecommendationSummary]
+
+
 class RecommendationDetail(RecommendationSummary):
-    """One recommendation with its reason, expiry and guardrail results (PB-32)."""
+    """One recommendation with its reason, expiry and guardrail results (PB-32).
+
+    ``batch_id`` and ``expiry_date`` are ``None`` for a recommendation without
+    a batch (a REDISTRIBUTION, or the surplus DISCOUNT of DS-06 rule S2); such a
+    recommendation never expires.
+    """
 
     batch_id: str | None = None
     expiry_date: str | None = None
@@ -43,8 +56,11 @@ class RecommendationDetail(RecommendationSummary):
 
 
 class DecisionRequest(BaseModel):
-    """Accept or reject a recommendation (PB-33). The enum rejects ``MAYME``
-    and friends with 422 before anything reaches the service."""
+    """Accept or reject a recommendation (PB-33).
+
+    The enum rejects ``MAYBE`` and friends with 422 before anything reaches the
+    service.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -52,8 +68,8 @@ class DecisionRequest(BaseModel):
 
 
 class DecisionResponse(BaseModel):
-    """The stored decision (PB-33)."""
+    """The stored decision (PB-33); ``decided_at`` is UTC with an offset."""
 
-    rec_id: int = Field(strict=True)
+    rec_id: int
     status: Literal["ACCEPTED", "REJECTED"]
     decided_at: datetime
