@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core import clock
 from app.core.db import SessionLocal
-from app.domain.models import Forecast, ProductBatch, Recommendation, Store
+from app.domain.models import Forecast, ProductBatch, Recommendation, StaffDecision, Store
 from app.repositories import recommendation as repository
 from app.repositories.forecast import utc_start
 from app.services.guardrails import GuardrailRulesUnavailable, apply_guardrails
@@ -63,13 +63,19 @@ def _generate(session: Session, store: str, today: date,
 
 
 def _process_store(session: Session, store: str, today: date, forecasts: list[Forecast]) -> int:
+    start = utc_start(today)
+    end = utc_start(today + timedelta(days=1))
+    decided_today = select(StaffDecision.rec_id).where(
+        StaffDecision.decided_at >= start, StaffDecision.decided_at < end,
+    )
     active = list(session.scalars(select(Recommendation).where(
         Recommendation.store_id == store,
         or_(
             Recommendation.status.in_(("PENDING", "GENERATED")),
             and_(Recommendation.status == "BLOCKED",
-                 Recommendation.created_at >= utc_start(today),
-                 Recommendation.created_at < utc_start(today + timedelta(days=1))),
+                 Recommendation.created_at >= start, Recommendation.created_at < end),
+            and_(Recommendation.status.in_(("ACCEPTED", "REJECTED")),
+                 Recommendation.rec_id.in_(decided_today)),
         ),
     ).order_by(Recommendation.rec_id)))
     for row in active:
