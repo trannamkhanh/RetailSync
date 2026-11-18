@@ -63,6 +63,7 @@ SYNC_RUN = ("POST", "/api/v1/sync/run")
 NEAR_EXPIRY_THRESHOLDS = ("GET", "/api/v1/admin/near-expiry-thresholds")
 NEAR_EXPIRY_THRESHOLD = ("PUT", "/api/v1/admin/near-expiry-thresholds/{category}")
 CROSS_STORE = ("GET", "/api/v1/products/barcode/{barcode}/stock")
+NEAR_EXPIRY_ALERTS = ("GET", "/api/v1/near-expiry-alerts")
 
 # Expected status for every protected route on main, by caller.
 #                  POS  Staff  Manager  HQ   Admin  Auditor  no token
@@ -81,6 +82,7 @@ MATRIX = {
     NEAR_EXPIRY_THRESHOLDS: (403, 403, 403, 403, 200, 403,  401),
     NEAR_EXPIRY_THRESHOLD:  (403, 403, 403, 403, 200, 403,  401),
     CROSS_STORE:  (403, 200,   403,     403, 403,   403,     401),
+    NEAR_EXPIRY_ALERTS: (403, 200, 403,  403, 403,   403,     401),
 }
 CALLERS = [*ROLES, None]
 
@@ -180,6 +182,8 @@ REQUESTS: dict[tuple[str, str], Callable[[TestClient, dict], object]] = {
     CROSS_STORE: lambda client, headers: client.get(
         CROSS_STORE[1].format(barcode=f"BC-{SKU}"), params={"from_store": STORE_ID},
         headers=headers),
+    NEAR_EXPIRY_ALERTS: lambda client, headers: client.get(
+        NEAR_EXPIRY_ALERTS[1], headers=headers),
 }
 
 
@@ -301,6 +305,7 @@ def test_matrix_allows_exactly_the_ds04_roles():
         SYNC_RUN: {"Admin"},
         NEAR_EXPIRY_THRESHOLDS: {"Admin"}, NEAR_EXPIRY_THRESHOLD: {"Admin"},
         CROSS_STORE: {"Staff"},
+        NEAR_EXPIRY_ALERTS: {"Staff"},
     }
 
 
