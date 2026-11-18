@@ -5,7 +5,8 @@ PB-43, DS-09 section 6, EXP43-1 to EXP43-3. Measured with
 `test/PB-43-near-expiry-accuracy`, commit `42a1c5e` (the script and its
 tests; this report is the next commit).
 
-- Database: `RTS_DB_TEST` (the script refuses `RTS_DB`; `RTS_DB_DEMO` is allowed too).
+- Database: `RTS_DB_TEST` (the script writes only to `RTS_DB_DEMO` or a database
+  whose name ends in `_TEST`; every other name, `RTS_DB` included, is refused).
 - Business date: 2026-11-17, from `clock.today_local()` (UTC+7).
 - Seed: none. The script creates its own store `TEST-PB43`, 32 products and
   batches of quantity 5, and the threshold rows of its own categories; it
@@ -50,6 +51,12 @@ occurred. No near-expiry defect to report.
 The same command with `--db RTS_DB_DEMO` on the same date gave the same
 totals: 32 correct, 0 missed, 0 false of 32 batches (100.0% correct), with the
 seed stores of the demo database untouched.
+
+The run leaves the store `TEST-PB43` with its 32 batches and alerts in the
+database. On `RTS_DB_DEMO` the daily recommendation job would then create
+recommendations for those batches, so reset the demo database after a
+measurement there (`scripts/demo/reset_demo_db.ps1`). Adding `--cleanup`
+deletes the store again and leaves the database as it was.
 
 Rerun: the command above works on `RTS_DB_TEST` or `RTS_DB_DEMO` at any date;
 the bands move with the business date of the run.

@@ -4,15 +4,22 @@ Builds a dataset of batches whose expected result is known -- alert
 NEAR_EXPIRY, alert EXPIRED, or no alert -- in bands around every category
 threshold, loads it into RTS_DB_TEST or RTS_DB_DEMO, runs the real daily
 near-expiry job, and counts correct, missed and false alerts:
-
 - correct: the job flagged the batch as expected, or left it unflagged;
 - missed:  an expected alert is absent, or has the wrong type;
 - false:   an alert exists where none is expected.
 
 The script owns one store, ``TEST-PB43``, and resets its own rows before it
 loads the dataset, so it is safe to run twice. It runs the daily check for its
-own store only, so no other store of the database is touched, and it never
-touches RTS_DB.
+own store only, so no other store of the database is touched. It writes only
+to ``RTS_DB_DEMO`` or to a database whose name ends in ``_TEST``; every other
+name, the development ``RTS_DB`` included, is refused.
+
+After the run the store ``TEST-PB43`` and its 32 batches and alerts stay in
+the database, so the next run measures the same rows again. On
+``RTS_DB_DEMO`` the daily recommendation job would then see those batches, so
+reset the demo database after a measurement there
+(``scripts/demo/reset_demo_db.ps1``). ``--cleanup`` deletes the store again
+and leaves the database as it was.
 
 Run it in the middleware image from the repository root:
 
@@ -53,6 +60,7 @@ from app.domain.models import (  # noqa: E402
 from app.services import near_expiry as near_expiry_service  # noqa: E402
 
 DEV_DATABASE = "RTS_DB"
+DEMO_DATABASE = "RTS_DB_DEMO"
 STORE_ID = "TEST-PB43"
 SKU_PREFIX = "TEST-PB43-S"
 BATCH_PREFIX = "TEST-PB43-B"
@@ -100,12 +108,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Measure how accurately the near-expiry job flags batches (PB-43).")
     parser.add_argument("--db", default="RTS_DB_TEST",
                         help="database to load the dataset into (default RTS_DB_TEST)")
+    parser.add_argument("--cleanup", action="store_true",
+                        help="delete the dataset store again after the measurement")
     args = parser.parse_args(argv)
     if not re.fullmatch(r"[A-Za-z0-9_]{1,64}", args.db):
         parser.error(f"'{args.db}' is not a plain database name")
-    if args.db.upper() == DEV_DATABASE:
-        parser.error(f"refusing {DEV_DATABASE}, the development database")
+    if not allowed_database(args.db):
+        parser.error(
+            f"refusing {args.db}: the measurement writes rows, so it only runs on "
+            f"{DEMO_DATABASE} or a database whose name ends in _TEST")
     return args
+
+
+def allowed_database(name: str) -> bool:
+    """True for the two databases DS-09 allows the measurement to write.
+
+    The demo database is the one the project resets before a demo, and any
+    name ending in ``_TEST`` is a test database a reviewer may create. Every
+    other database, the development one included, is refused.
+    """
+    return name.upper() == DEMO_DATABASE or name.upper().endswith("_TEST")
 
 
 def expected_alert(days_left: int, threshold: int) -> str:
@@ -306,6 +328,11 @@ def main(argv: list[str] | None = None) -> int:
         actual = read_actual(session, cases)
     accuracy = count_results(cases, actual)
     print_report(cases, actual, accuracy)
+    if args.cleanup:
+        with Session(engine) as session:
+            reset_dataset(session)
+            session.commit()
+        print(f"Cleaned up store {STORE_ID}")
     print("NEAR-EXPIRY ACCURACY PASS" if not accuracy.problems
           else "NEAR-EXPIRY ACCURACY FAIL")
     return 0 if not accuracy.problems else 1

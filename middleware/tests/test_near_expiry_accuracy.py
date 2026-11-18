@@ -136,5 +136,34 @@ def test_pb43_the_script_refuses_the_development_database(metrics, capsys):
     assert "refusing RTS_DB" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("name", ["RTS_HQ", "master", "msdb", "RTS_DB_TEST2", "tempdb"])
+def test_pb43_the_script_refuses_any_database_outside_the_allowlist(metrics, name, capsys):
+    """Only RTS_DB_DEMO and names ending in _TEST may be written."""
+    with pytest.raises(SystemExit) as stopped:
+        metrics.parse_args(["--db", name])
+
+    assert stopped.value.code == 2
+    assert f"refusing {name}" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("name", ["RTS_DB_DEMO", "rts_db_demo", "RTS_DB_TEST",
+                                  "RTS_DB_TEST", "PB43_TEST", "reviewer_test_tmp_TEST"])
+def test_pb43_the_allowlist_takes_the_demo_and_any_test_database(metrics, name):
+    assert metrics.parse_args(["--db", name]).db == name
+    assert metrics.allowed_database(name)
+
+
+def test_pb43_the_allowlist_refuses_the_development_database(metrics):
+    assert not metrics.allowed_database("RTS_DB")
+    assert not metrics.allowed_database("RTS_HQ")
+
+
+def test_pb43_cleanup_removes_the_dataset_store_again(metrics, capsys):
+    args = metrics.parse_args(["--db", "RTS_DB_TEST", "--cleanup"])
+
+    assert args.cleanup is True
+    assert metrics.parse_args(["--db", "RTS_DB_TEST"]).cleanup is False
+
+
 def test_pb43_the_script_defaults_to_the_test_database(metrics):
     assert metrics.parse_args([]).db == "RTS_DB_TEST"
