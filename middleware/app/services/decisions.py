@@ -2,7 +2,8 @@
 
 A decision is final, audited and safe under concurrency: the repository locks
 the recommendation row, so two parallel decisions serialize and only the first
-stores. The caller's router commits the transaction.
+stores. The caller's router owns the transaction: it commits on success and on
+RECOMMENDATION_EXPIRED, and rolls back on every other refusal.
 """
 
 from app.api.schemas.recommendations import DecisionResponse
@@ -28,21 +29,18 @@ def decide(session, rec_id: int, store_id: str, user_id: int,
             answer that does not disclose which of them applies.
         ApiError(409, "ALREADY_DECIDED"): it was already decided.
         ApiError(409, "RECOMMENDATION_EXPIRED"): its batch is sold out or
-            expired. The status EXPIRED is committed before this error is
-            raised, so the row shows the state the answer describes.
+            expired. The row is left EXPIRED in the transaction, so the caller
+            must still commit; get_db would otherwise roll it back with the
+            error.
     """
     decided_at, code = repository.decide_recommendation(
         session, rec_id, store_id, user_id, decision)
     if code == "NOT_FOUND":
         raise _not_found()
     if code == "ALREADY_DECIDED":
-        session.rollback()
         raise ApiError(
             409, "ALREADY_DECIDED", "This recommendation has already been decided.")
     if code == "RECOMMENDATION_EXPIRED":
-        # The repository already turned the row EXPIRED in this transaction;
-        # commit it before refusing, or get_db would roll the change back.
-        session.commit()
         raise ApiError(
             409, "RECOMMENDATION_EXPIRED",
             "This recommendation is no longer valid; its batch is sold out or expired.")

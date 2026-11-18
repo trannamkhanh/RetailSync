@@ -69,11 +69,23 @@ def decide_recommendation(
     principal: Principal = Depends(require_role("Staff")),
     session: Session = Depends(get_db),
 ) -> DecisionResponse:
-    """Accept or reject one recommendation; the decision is final and audited (PB-33)."""
+    """Accept or reject one recommendation; the decision is final and audited (PB-33).
+
+    On RECOMMENDATION_EXPIRED the row is left EXPIRED in the transaction; that
+    state must be committed even though the request answers 409, so it is
+    committed here before the error propagates. Every other refusal rolls back.
+    """
     store_id = _store_of(principal)
     user_id = registry.find_user_id(session, principal.sub)
     if user_id is None:
         raise ApiError(403, "FORBIDDEN", "A staff account is required to decide.")
-    decision = decisions.decide(session, rec_id, store_id, user_id, payload.decision)
+    try:
+        decision = decisions.decide(session, rec_id, store_id, user_id, payload.decision)
+    except ApiError as error:
+        if error.code == "RECOMMENDATION_EXPIRED":
+            session.commit()
+        else:
+            session.rollback()
+        raise
     session.commit()
     return decision

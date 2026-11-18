@@ -445,7 +445,7 @@ def _build_committed(engine: Engine, *, batch_quantity: int = 10) -> tuple[str, 
     return store_id, username, rec_id
 
 
-def test_pb33_4_the_expired_status_is_committed(test_engine: Engine, committed):
+def test_stf33_4_the_expired_status_is_committed(test_engine: Engine, committed):
     """After a 409 RECOMMENDATION_EXPIRED the row reads EXPIRED from a new
     session, so the status change is not rolled back with the error."""
     store_id, username, rec_id = _build_committed(test_engine, batch_quantity=0)
