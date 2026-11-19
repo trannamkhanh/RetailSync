@@ -68,7 +68,7 @@ Report both per model and per category. The SRS sets no accuracy target; the req
 
 ## 6. Recommendation rules
 
-Run for each store. Evaluate rules in order; the first match creates the recommendation for that batch or SKU. Skip a batch or SKU that already has a PENDING recommendation.
+Run for each store. Evaluate rules in order; the first match creates the recommendation for that batch or SKU. Skip a batch or SKU that already has a PENDING or GENERATED recommendation. Also skip it if a BLOCKED recommendation was created on the current business date or an ACCEPTED or REJECTED recommendation was decided on that date. Use `staff_decision.decided_at` for decisions and convert UTC timestamps to business time (UTC+7 by default). On the next business date these date-based exclusions expire, so a rejected recommendation can be replaced by a higher tier as expiry approaches.
 
 `daily_demand = predicted_demand / horizon_days`
 
