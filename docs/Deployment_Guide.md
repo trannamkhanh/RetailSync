@@ -83,7 +83,7 @@ Settings load from the repository root `.env`, then a working-directory `.env` i
 | `MTLS_REQUIRED` | `false` | Overridden to `true` in `middleware` | Enforces `X-Gateway-Secret` and client certificate fingerprint check on `POST /api/v1/pos/events` |
 | `POS_GATEWAY_SECRET` | `replace-with-a-long-random-secret` | Passed to `middleware` and `pos-gateway` | Shared secret nginx injects as `X-Gateway-Secret` so POS events cannot bypass port 9443 |
 | `POS_LOCK_TIMEOUT_MS` | `2000` | Uses `.env` | Max wait (ms, positive integer) per SQL Server lock on the POS event path before returning `503 SERVICE_UNAVAILABLE` |
-| `SCHEDULER_ENABLED` | `false` | Overridden to `true` in `middleware` | Enables background scheduler (`aggregation`, `near-expiry`, `forecast`, `sync-send`) |
+| `SCHEDULER_ENABLED` | `false` | Overridden to `true` in `middleware` | Enables background scheduler (`aggregation`, `near-expiry`, `forecast`, `recommendation`, `sync-send`) |
 | `NEAR_EXPIRY_DEFAULT_DAYS` | `3` | Uses `.env` | Fallback alert window (0–3650 days) for categories without a `near_expiry_config` row |
 | `POS_BIND_ADDRESS` | `127.0.0.1` | Used for `pos-gateway` port `9443` | Private host interface for POS gateway (never bind a public internet address) |
 | `MIDDLEWARE_BIND_ADDRESS` | `127.0.0.1` | Used for `middleware` port `8443` | Private host interface for middleware API |
@@ -237,6 +237,7 @@ When `SCHEDULER_ENABLED=true` (default in Docker), `middleware/app/jobs/registry
 | `aggregation` | Every `SYNC_INTERVAL` seconds | Aggregates unbatched POS transactions per store into `sync_batch` (`PENDING`) |
 | `near-expiry` | Daily at `00:30` business time (UTC+7) | Scans sellable batches against category thresholds and creates/updates `near_expiry_alert` |
 | `forecast` | Daily at `01:00` business time (UTC+7) | Trains demand model on historical sales and writes 7-day SKU forecasts |
+| `recommendation` | Daily at `02:00` business time (UTC+7) | Expires invalid `PENDING` recommendations, generates new recommendations from near-expiry alerts and forecasts, and validates them through active guardrail rules |
 | `sync-send` | Every `SYNC_INTERVAL` seconds | Sends due `PENDING` batches oldest-first to `HQ_URL` |
 
 Daily jobs catch up automatically on startup if their scheduled time has already passed on the current business date, and can be triggered manually via `POST /api/v1/admin/jobs/{name}/run` with an `Admin` token.
