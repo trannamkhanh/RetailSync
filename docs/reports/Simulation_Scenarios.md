@@ -2,23 +2,62 @@
 
 ## 7. Duplicate storm
 
-Measured on 2026-11-17 on isolated `RTS_DB_DEMO` with seed 42 and API commit
-`762bce6` (main `41ecb28` plus the recommendation job, scheduler disabled).
-The simulator used six terminals and a 0.30 duplicate probability through
-the real mutual-TLS gateway. The run sent 236 requests in 15.297 seconds.
-All 180 original events were accepted, and all 56 deliberate replays
-returned DUPLICATE. There were no rejected events or transport errors.
+Measured on 2026-11-19 on isolated `RTS_DB_DEMO` and `RTS_HQ_TEST`.
+The API and simulator application code match main
+`abf26655ddfd7e2fc0503bfd579ded0db7750cde`. The scheduler was disabled.
+Seed 42, six terminals and `duplicate_rate: 0.3` were used through the real
+mTLS gateway with 50 ms egress netem delay.
 
-The ledger matched opening stock plus movements for all 27 store/SKU pairs.
-For this run ID, the signed movement total of every transaction and SKU
-matched its accepted item quantity. Each replay therefore left stock
-unchanged.
+Run ID `review60-20261119-duplicate-storm` sent **460 requests** in 31
+whole wall-clock seconds for a scheduled 30-second sample. All **360
+original events** were accepted, and all **100 exact resends** returned
+DUPLICATE. There were zero rejections, HTTP 503s, transport errors or skipped
+reversals. Request p50/p95/p99 were 166.23/199.34/286.11 ms.
+
+The stock snapshot reconciliation after the run printed:
+
+```text
+Ledger balanced for 27 store/SKU pairs
+```
+
+The same check compared each transaction/SKU's signed movement total with
+its accepted item quantity, including all batch movements. The 100 resends
+therefore applied no extra stock changes.
+
+The guide's `scripts/sync_reconcile.py` also ran immediately after the
+storm. With scheduling disabled at that point, all 23,400 accepted events
+from the baseline, sustained normal, peak and storm workloads were unbatched.
+The script passed its stock check and reported zero ACKed batches.
+To exercise its HQ checks against actual data, the isolated HQ service was
+then started on `RTS_HQ_TEST` and an Admin `POST /api/v1/sync/run` returned:
+
+```text
+202 {"batches_created":3,"batches_sent":3,"batches_pending":0}
+```
+
+The final reconciliation output was:
+
+```text
+Reconciling RTS_DB_DEMO with RTS_HQ_TEST
+PASS 1 stock = opening + movements: 27 inventory rows
+PASS 2 HQ totals = lines of ACKED batches: 3 ACKED batches, 27 store/SKU totals
+PASS 3 each transaction in at most one batch: 3 batches, 23400 linked transactions, 0 not batched yet
+RECONCILIATION PASS
+```
 
 With the container prepared in [Performance.md](Performance.md), run:
 
 ```bash
-python prepare_performance.py duplicate-storm --duration-minutes 0.25 --run-id phase7-final-duplicate-storm --output /tmp/storm.yaml
-python /repo/scripts/perf/reconcile_demo.py snapshot /tmp/storm-opening.json
-time python -m pos_simulator --config /tmp/storm.yaml
-python /repo/scripts/perf/reconcile_demo.py reconcile /tmp/storm-opening.json --run-id phase7-final-duplicate-storm
+python prepare_performance.py duplicate-storm --duration-minutes 0.5 --run-id review60-20261119-duplicate-storm --output /tmp/pb39-run/storm.yaml
+python /repo/scripts/perf/reconcile_demo.py snapshot /tmp/pb39-run/storm-opening.json
+time python -m pos_simulator --config /tmp/pb39-run/storm.yaml
+python /repo/scripts/perf/reconcile_demo.py reconcile /tmp/pb39-run/storm-opening.json --run-id review60-20261119-duplicate-storm
+python /repo/scripts/sync_reconcile.py --db RTS_DB_DEMO --hq-db RTS_HQ_TEST --opening STORE-DN1=5040 --opening STORE-DN2=5025 --opening STORE-DN3=5015
 ```
+
+The opening overrides account for the 5,000 units added per seeded
+store/SKU before measurement. After all measured traffic ends, configure
+the isolated HQ URL, CA and matching HQ JWT secrets, start HQ, and run
+`POST /api/v1/sync/run` with an Admin token before repeating the final
+reconciliation command. Reset the demo database after measurement to
+restore seeded stock.
