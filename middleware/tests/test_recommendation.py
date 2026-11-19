@@ -223,6 +223,35 @@ def decide(session, row, decision, decided_at):
     session.commit()
 
 
+@pytest.mark.parametrize("state", ["BLOCKED", "ACCEPTED", "REJECTED"])
+@pytest.mark.parametrize("days_ago", [0, 1], ids=["today", "yesterday"])
+def test_pb25_final_state_suppresses_only_same_business_date(
+    db_session, recommendation_world, state, days_ago,
+):
+    store, _, batch = recommendation_world
+    assert job.run_recommendations()[store] == 1
+    original, = recommendations(db_session, store)
+    business_date = clock.today_local() - timedelta(days=days_ago)
+    timestamp = utc_start(business_date) + timedelta(minutes=1)
+    # Always create the recommendation yesterday so decisions are checked by
+    # decided_at, while BLOCKED uses its own creation timestamp.
+    original.created_at = utc_start(clock.today_local() - timedelta(days=1))
+    if state == "BLOCKED":
+        original.status = state
+        original.created_at = timestamp
+        db_session.commit()
+    else:
+        decide(db_session, original, "ACCEPT" if state == "ACCEPTED" else "REJECT", timestamp)
+
+    assert job.run_recommendations()[store] == days_ago
+    rows = recommendations(db_session, store)
+    assert len(rows) == 1 + days_ago
+    assert rows[0].rec_id == original.rec_id
+    assert rows[0].status == state
+    if days_ago:
+        assert (rows[1].batch_id, rows[1].status) == (batch, "PENDING")
+
+
 @pytest.mark.parametrize(("decision", "created_days_ago", "sku_only"), [
     ("ACCEPT", 0, False), ("REJECT", 0, True), ("ACCEPT", 1, False),
 ])
