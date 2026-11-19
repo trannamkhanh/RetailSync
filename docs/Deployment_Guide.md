@@ -171,7 +171,14 @@ Re-running `docker compose run --rm migrate` prints only `Database is up to date
 ### Verify Database Schema and Seed Counts
 
 ```powershell
-docker compose exec sqlserver bash -c '/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -b -d RTS_DB -Q "SET NOCOUNT ON; SELECT COUNT(*) AS application_tables FROM sys.tables WHERE name <> ''schema_migration''; SELECT COUNT(*) AS migration_tables FROM sys.tables WHERE name = ''schema_migration''; SELECT COUNT(*) AS stores FROM dbo.store; SELECT COUNT(*) AS pos_terminals FROM dbo.pos_terminal; SELECT version FROM dbo.schema_migration ORDER BY version;"'
+@'
+SET NOCOUNT ON;
+SELECT COUNT(*) AS application_tables FROM sys.tables WHERE name <> 'schema_migration';
+SELECT COUNT(*) AS migration_tables FROM sys.tables WHERE name = 'schema_migration';
+SELECT COUNT(*) AS stores FROM dbo.store;
+SELECT COUNT(*) AS pos_terminals FROM dbo.pos_terminal;
+SELECT version FROM dbo.schema_migration ORDER BY version;
+'@ | docker compose exec -T sqlserver bash -c '/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -b -d RTS_DB'
 ```
 
 Expected on a clean setup: **19** application tables, **1** `schema_migration` table, **3** stores, **6** POS terminals, and **3** applied migration files (`001_core.sql`, `002_batches_alerts_forecast.sql`, `003_recommendations.sql`).
@@ -390,10 +397,18 @@ New-Item -ItemType Directory -Force .\backups | Out-Null
 docker compose exec -T sqlserver mkdir -p /var/opt/mssql/backup
 
 # Backup RTS_DB
-docker compose exec -T sqlserver bash -c "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"\$MSSQL_SA_PASSWORD\" -C -b -Q \"BACKUP DATABASE [RTS_DB] TO DISK = N'/var/opt/mssql/backup/RTS_DB_$stamp.bak' WITH FORMAT, INIT, COMPRESSION, CHECKSUM, NAME = N'RTS_DB-Full-$stamp';\""
+@"
+BACKUP DATABASE [RTS_DB]
+TO DISK = N'/var/opt/mssql/backup/RTS_DB_$stamp.bak'
+WITH FORMAT, INIT, COMPRESSION, CHECKSUM, NAME = N'RTS_DB-Full-$stamp';
+"@ | docker compose exec -T sqlserver bash -c '/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -b'
 
 # Backup RTS_HQ
-docker compose exec -T sqlserver bash -c "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"\$MSSQL_SA_PASSWORD\" -C -b -Q \"BACKUP DATABASE [RTS_HQ] TO DISK = N'/var/opt/mssql/backup/RTS_HQ_$stamp.bak' WITH FORMAT, INIT, COMPRESSION, CHECKSUM, NAME = N'RTS_HQ-Full-$stamp';\""
+@"
+BACKUP DATABASE [RTS_HQ]
+TO DISK = N'/var/opt/mssql/backup/RTS_HQ_$stamp.bak'
+WITH FORMAT, INIT, COMPRESSION, CHECKSUM, NAME = N'RTS_HQ-Full-$stamp';
+"@ | docker compose exec -T sqlserver bash -c '/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -b'
 
 # Copy backups out of the container to host
 docker compose cp "sqlserver:/var/opt/mssql/backup/RTS_DB_$stamp.bak" ".\backups\RTS_DB_$stamp.bak"
@@ -403,7 +418,11 @@ docker compose cp "sqlserver:/var/opt/mssql/backup/RTS_HQ_$stamp.bak" ".\backups
 Verify backup integrity before relying on it:
 
 ```powershell
-docker compose exec -T sqlserver bash -c "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"\$MSSQL_SA_PASSWORD\" -C -b -Q \"RESTORE VERIFYONLY FROM DISK = N'/var/opt/mssql/backup/RTS_DB_$stamp.bak' WITH CHECKSUM;\""
+@"
+RESTORE VERIFYONLY
+FROM DISK = N'/var/opt/mssql/backup/RTS_DB_$stamp.bak'
+WITH CHECKSUM;
+"@ | docker compose exec -T sqlserver bash -c '/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -b'
 ```
 
 > Keep `.bak` files outside tracked Git directories (never commit backups).
@@ -419,7 +438,14 @@ docker compose stop middleware pos-gateway hq-demo
 docker compose exec -T sqlserver mkdir -p /var/opt/mssql/backup
 docker compose cp ".\backups\$bakFile" "sqlserver:/var/opt/mssql/backup/$bakFile"
 
-docker compose exec -T sqlserver bash -c "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"\$MSSQL_SA_PASSWORD\" -C -b -d master -Q \"IF DB_ID(N'RTS_DB') IS NOT NULL ALTER DATABASE [RTS_DB] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; RESTORE DATABASE [RTS_DB] FROM DISK = N'/var/opt/mssql/backup/$bakFile' WITH REPLACE, STATS = 10; ALTER DATABASE [RTS_DB] SET MULTI_USER;\""
+@"
+IF DB_ID(N'RTS_DB') IS NOT NULL
+    ALTER DATABASE [RTS_DB] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+RESTORE DATABASE [RTS_DB]
+FROM DISK = N'/var/opt/mssql/backup/$bakFile'
+WITH REPLACE, STATS = 10;
+ALTER DATABASE [RTS_DB] SET MULTI_USER;
+"@ | docker compose exec -T sqlserver bash -c '/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -b -d master'
 
 docker compose up -d --wait middleware pos-gateway hq-demo
 ```
