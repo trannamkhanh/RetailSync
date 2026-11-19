@@ -9,12 +9,15 @@ Regional middleware between POS terminals and HQ: realtime multi-store inventory
 | `middleware/` | FastAPI service; modules follow the Architecture module view |
 | `database/` | Versioned SQL Server migrations, HQ mock tables, seed data |
 | `docs/design/` | DS-04 OpenAPI contract, DS-05 sync design, DS-07 guardrail rules |
+| `docs/Deployment_Guide.md` | Full deployment, LAN setup, backup/restore, test suites, and troubleshooting guide (PB-42-1) |
 | `clients/demo-pos/` | WinForms demo POS with monitor panels (PB-45 part 1) |
 | `clients/demo-console/` | WinForms demo console for the presenter on machine S (PB-42-6) |
 
 Planned: `hq-demo/` (PB-18) and `staff-app/` (WinForms client, PB-46, PB-47).
 
 ## Run
+
+For the complete setup, `.env` reference, LAN/private-network configuration, demo reset, backup/restore, test commands, and troubleshooting guide, see [docs/Deployment_Guide.md](docs/Deployment_Guide.md).
 
 Requires Docker Desktop and Python 3.12.
 
