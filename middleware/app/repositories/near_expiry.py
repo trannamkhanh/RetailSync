@@ -88,3 +88,44 @@ def list_open_alerts(session: Session, store_id: str) -> list[NearExpiryAlert]:
         .where(NearExpiryAlert.store_id == store_id, NearExpiryAlert.status == "OPEN")
         .order_by(NearExpiryAlert.alert_id)
     ))
+
+
+@dataclass(frozen=True)
+class OpenAlertWithExpiry:
+    """One OPEN alert with the expiry date of its batch (PB-34)."""
+
+    alert_id: int
+    batch_id: str
+    sku: str
+    expiry_date: date
+    remaining_qty: int
+    alert_type: str
+
+
+def list_open_alerts_with_expiry(session: Session, store_id: str) -> list[OpenAlertWithExpiry]:
+    """The OPEN alerts of one store with the expiry date of their batch.
+
+    The alert row does not store the expiry date, so the join supplies it and
+    the reader recomputes ``days_to_expiry`` from it at read time (PB-34).
+    Batch rows are never deleted, so an OPEN alert always finds its batch.
+    """
+    rows = session.execute(
+        select(
+            NearExpiryAlert.alert_id,
+            NearExpiryAlert.batch_id,
+            NearExpiryAlert.sku,
+            ProductBatch.expiry_date,
+            NearExpiryAlert.remaining_qty,
+            NearExpiryAlert.alert_type,
+        )
+        .join(ProductBatch, ProductBatch.batch_id == NearExpiryAlert.batch_id)
+        .where(NearExpiryAlert.store_id == store_id, NearExpiryAlert.status == "OPEN")
+        .order_by(NearExpiryAlert.alert_id)
+    ).all()
+    return [
+        OpenAlertWithExpiry(
+            int(alert_id), str(batch_id), str(sku), expiry_date,
+            int(remaining_qty), str(alert_type),
+        )
+        for alert_id, batch_id, sku, expiry_date, remaining_qty, alert_type in rows
+    ]

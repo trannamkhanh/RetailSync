@@ -22,7 +22,8 @@ from app.core import clock
 from app.core.config import settings
 from app.core.security import create_token, require_role
 from app.domain.models import GuardrailRule
-from app.domain.models import Inventory, PosTerminal, Product, StaffUser, Store
+from app.domain.models import (Inventory, PosTerminal, Product, ProductBatch,
+                               Recommendation, StaffUser, Store)
 from app.jobs import scheduler
 from app.jobs.sync_send import SendResult
 from app.main import app
@@ -36,6 +37,7 @@ POS_ID = "TEST-AM-POS1"
 NEW_POS_ID = "TEST-AM-POS2"
 SKU = "TEST-AM-SKU"
 ROLES = ["POS", "Staff", "Manager", "HQ", "Admin", "Auditor"]
+RECOMMENDATION_IDS: dict[str, int] = {}
 ACCOUNTS = {
     "POS": ("TEST-am-pos", "POS_SYSTEM", None),
     "Staff": ("TEST-am-staff", "STORE_STAFF", STORE_ID),
@@ -63,6 +65,10 @@ SYNC_RUN = ("POST", "/api/v1/sync/run")
 NEAR_EXPIRY_THRESHOLDS = ("GET", "/api/v1/admin/near-expiry-thresholds")
 NEAR_EXPIRY_THRESHOLD = ("PUT", "/api/v1/admin/near-expiry-thresholds/{category}")
 CROSS_STORE = ("GET", "/api/v1/products/barcode/{barcode}/stock")
+NEAR_EXPIRY_ALERTS = ("GET", "/api/v1/near-expiry-alerts")
+RECOMMENDATIONS = ("GET", "/api/v1/recommendations")
+RECOMMENDATION = ("GET", "/api/v1/recommendations/{rec_id}")
+DECISION = ("POST", "/api/v1/recommendations/{rec_id}/decision")
 
 # Expected status for every protected route on main, by caller.
 #                  POS  Staff  Manager  HQ   Admin  Auditor  no token
@@ -81,6 +87,10 @@ MATRIX = {
     NEAR_EXPIRY_THRESHOLDS: (403, 403, 403, 403, 200, 403,  401),
     NEAR_EXPIRY_THRESHOLD:  (403, 403, 403, 403, 200, 403,  401),
     CROSS_STORE:  (403, 200,   403,     403, 403,   403,     401),
+    NEAR_EXPIRY_ALERTS: (403, 200, 403,  403, 403,   403,     401),
+    RECOMMENDATIONS: (403, 200,  403,     403, 403,   403,     401),
+    RECOMMENDATION:  (403, 200,  403,     403, 403,   403,     401),
+    DECISION:        (403, 200,  403,     403, 403,   403,     401),
 }
 CALLERS = [*ROLES, None]
 
@@ -119,7 +129,7 @@ def world(db_session: Session) -> None:
                            category="TEST", unit_price=Decimal("10.00")))
     db_session.flush()
     db_session.add(PosTerminal(pos_id=POS_ID, store_id=STORE_ID, status="ACTIVE"))
-    add_stock(db_session, STORE_ID, SKU, 10)
+    batch_id = add_stock(db_session, STORE_ID, SKU, 10)
     for username, db_role, store_id in ACCOUNTS.values():
         db_session.add(StaffUser(username=username, full_name="Auth matrix account",
                                  role=db_role, store_id=store_id))
@@ -128,6 +138,12 @@ def world(db_session: Session) -> None:
     db_session.add(rule)
     db_session.flush()
     GUARDRAIL_RULE_IDS["rule"] = rule.rule_id
+    rec = Recommendation(store_id=STORE_ID, sku=SKU, batch_id=batch_id,
+                         action_type="DISCOUNT", discount_pct=Decimal("30"),
+                         proposed_qty=None, reason="Near expiry", status="PENDING")
+    db_session.add(rec)
+    db_session.flush()
+    RECOMMENDATION_IDS["rec"] = rec.rec_id
     # The fixture's outer transaction still rolls this back after the test.
     db_session.commit()
 
@@ -180,6 +196,15 @@ REQUESTS: dict[tuple[str, str], Callable[[TestClient, dict], object]] = {
     CROSS_STORE: lambda client, headers: client.get(
         CROSS_STORE[1].format(barcode=f"BC-{SKU}"), params={"from_store": STORE_ID},
         headers=headers),
+    NEAR_EXPIRY_ALERTS: lambda client, headers: client.get(
+        NEAR_EXPIRY_ALERTS[1], headers=headers),
+    RECOMMENDATIONS: lambda client, headers: client.get(
+        RECOMMENDATIONS[1], headers=headers),
+    RECOMMENDATION: lambda client, headers: client.get(
+        RECOMMENDATION[1].format(rec_id=RECOMMENDATION_IDS["rec"]), headers=headers),
+    DECISION: lambda client, headers: client.post(
+        DECISION[1].format(rec_id=RECOMMENDATION_IDS["rec"]), headers=headers,
+        json={"decision": "ACCEPT"}),
 }
 
 
@@ -301,6 +326,10 @@ def test_matrix_allows_exactly_the_ds04_roles():
         SYNC_RUN: {"Admin"},
         NEAR_EXPIRY_THRESHOLDS: {"Admin"}, NEAR_EXPIRY_THRESHOLD: {"Admin"},
         CROSS_STORE: {"Staff"},
+        NEAR_EXPIRY_ALERTS: {"Staff"},
+        RECOMMENDATIONS: {"Staff"},
+        RECOMMENDATION: {"Staff"},
+        DECISION: {"Staff"},
     }
 
 
