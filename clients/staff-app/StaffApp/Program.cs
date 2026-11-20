@@ -29,8 +29,11 @@ internal static class Program
             return;
         }
 
-        using var api = new StaffApiClient(config.Settings.BaseUrl, authority, config.Token);
-        Application.Run(new MainForm(config, api));
+        using (authority)
+        using (var api = new StaffApiClient(config.Settings.BaseUrl, authority, config.Token))
+        {
+            Application.Run(new MainForm(config, api));
+        }
     }
 
     private static void ShowError(string message) =>
