@@ -1,4 +1,4 @@
-﻿openapi: 3.1.0
+openapi: 3.1.0
 info:
   title: RetailSync Middleware API (DS-04)
   version: 1.0.0-draft
@@ -1777,19 +1777,23 @@ components:
           type: [string, 'null']
           format: date-time
           description: |
-            Earliest `effective_at` with data in the interval, or `null` when there
-            is none. The console clamps a wider request to this and says so.
+            Earliest `effective_at` with data in the requested interval, or `null`
+            when the interval holds none. It reports the data that exists; the server
+            does not clamp the answer to it, so a request reaching past the stored data
+            still returns the buckets it asked for, empty beyond this point.
         data_to:
           type: [string, 'null']
           format: date-time
           description: |
-            Latest `effective_at` with data in the interval, or `null` when there
-            is none.
+            Latest `effective_at` with data in the requested interval, or `null` when
+            the interval holds none.
         has_data:
           type: boolean
           description: >
-            `false` when no transaction matches, so the console can show the empty
-            state and the 0 KPIs.
+            `false` when the answer contains no transaction, so the console can show
+            the empty state and the 0 KPIs. It follows `include_suspect`: an interval
+            whose every transaction is suspect has `has_data: false` when the filter
+            is on, even though `quality` still counts them.
         total_revenue:
           type: number
           description: |
@@ -1798,7 +1802,11 @@ components:
         transactions:
           type: integer
           minimum: 0
-          description: Transactions counted, before any `include_suspect` filter.
+          description: |-
+            Transactions counted in this answer, so it follows `include_suspect`: with
+            `include_suspect=false` the `SUSPECT_FUTURE` and `SUSPECT_OLD` rows are
+            excluded while `unknown` rows are kept. `quality` always counts the whole
+            interval, so the two differ when the filter is on.
         quality:
           $ref: '#/components/schemas/DashboardTimeQuality'
         buckets:
@@ -1823,9 +1831,11 @@ components:
           description: Net revenue, a JSON number with two decimals.
         share:
           type: number
-          minimum: 0
-          maximum: 1
-          description: Share of the total revenue, from 0 to 1.
+          description: |-
+            Share of the total revenue: `revenue / total`. Usually between 0 and 1, but
+            a category whose net revenue is negative (returns outgrew sales) makes its
+            own share negative and pushes the others above 1, so no 0..1 bound is
+            applied. The shares still add up to 1.
 
     DashboardCategoryRevenue:
       type: object
@@ -1869,9 +1879,11 @@ components:
           description: Net revenue, a JSON number with two decimals.
         share:
           type: number
-          minimum: 0
-          maximum: 1
-          description: Share of the compared set's total revenue, from 0 to 1.
+          description: |-
+            Share of the compared set's total revenue: `revenue / total`. Usually
+            between 0 and 1, but a store whose net revenue is negative makes its own
+            share negative and pushes the others above 1, so no 0..1 bound is applied.
+            The shares still add up to 1.
 
     DashboardStoreRevenueResponse:
       type: object

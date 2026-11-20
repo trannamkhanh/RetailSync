@@ -41,10 +41,24 @@ def _to_utc_naive(value: datetime | None) -> datetime | None:
 
     ``pos_transaction`` keeps ``datetime2`` without an offset, as every other
     table does, and the convention (DS-04) is that a value without one is UTC.
+
+    A timestamp within one offset of ``datetime.min`` or ``datetime.max`` cannot be
+    converted: ``0001-01-01T00:00:00+07:00`` is a legal instant that the UTC
+    conversion pushes out of range, and ``astimezone`` raises ``OverflowError``.
+    Raising there would answer 503 for an accepted event, so the value is clamped
+    to the nearest representable instant instead. The stored moment is then a
+    boundary value, which the classifier reports as ``SUSPECT_FUTURE`` or
+    ``SUSPECT_OLD`` rather than silently trusting it (Dashboard_Review 4.4).
     """
     if value is None or value.tzinfo is None:
         return value
-    return value.astimezone(timezone.utc).replace(tzinfo=None)
+    try:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    except (OverflowError, ValueError):
+        # The conversion left the representable range. An early year underflowed below
+        # datetime.min; anything else overflowed above datetime.max. Both are pinned to
+        # the representable edge, which the classifier then reports as suspect.
+        return datetime.min if value.year < 2 else datetime.max.replace(microsecond=0)
 
 
 def claim_transaction(

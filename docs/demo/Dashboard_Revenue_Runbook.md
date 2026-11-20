@@ -75,14 +75,17 @@ Mong đợi: có bản ghi `004_pos_transaction_occurred_at.sql`; `effective_at`
 ## 2. Reset demo để lịch sử có `occurred_at`
 
 Tool `tools/history-generator` đã ghi `occurred_at` khi sinh dòng `HIST-`, nên phải
-sinh lại lịch sử **sau** khi áp 004:
+sinh lại lịch sử **sau** khi áp 004. Compose không có service riêng cho tool này, nên
+chạy nó trong image middleware (image đã có sẵn `sqlalchemy` và `pyodbc`):
 
 ```powershell
-docker compose run --rm -e DB_HOST=sqlserver -e DB_NAME=RTS_DB_DEMO --volume "${PWD}/tools/history-generator:/app" --workdir /app history-generator
+docker compose run --rm -e DB_HOST=sqlserver -e DB_NAME=RTS_DB_DEMO `
+  --volume "${PWD}/tools/history-generator:/app" --workdir /app middleware `
+  sh -c 'pip install -q -r requirements.txt && python -m history_generator --days 90 --seed 42'
 ```
 
-(Nếu compose không có service này, chạy trực tiếp:
-`python -m history_generator --days 90 --seed 42` với `DB_NAME=RTS_DB_DEMO`.)
+Chạy trực tiếp bằng Python trên máy cũng được, miễn `DB_NAME=RTS_DB_DEMO` và đã cài
+`middleware/requirements.txt`.
 
 Lịch sử sinh ra là **dữ liệu mô phỏng**, không phải doanh thu thật. Mỗi dòng có
 `occurred_at` bằng đúng thời điểm mô phỏng và `created_at` giữ nguyên giá trị cũ

@@ -55,7 +55,7 @@ def jwt_secret(monkeypatch):
 # --- pure parts, no database ----------------------------------------------
 
 
-def test_interval_is_half_open_and_rejects_an_empty_or_backwards_range() -> None:
+def test_pb49_interval_is_half_open_and_rejects_an_empty_or_backwards_range() -> None:
     start, end = datetime(2026, 11, 1), datetime(2026, 12, 1)
 
     assert parse_interval(start, end) == (start, end)
@@ -67,14 +67,14 @@ def test_interval_is_half_open_and_rejects_an_empty_or_backwards_range() -> None
     assert backwards.value.code == "VALIDATION_ERROR"
 
 
-def test_interval_rejects_an_unbounded_span() -> None:
+def test_pb49_interval_rejects_an_unbounded_span() -> None:
     with pytest.raises(ApiError) as failure:
         parse_interval(datetime(2000, 1, 1), datetime(2026, 11, 1))
 
     assert failure.value.code == "VALIDATION_ERROR"
 
 
-def test_interval_converts_an_offset_to_utc() -> None:
+def test_pb49_interval_converts_an_offset_to_utc() -> None:
     start = datetime(2026, 11, 1, 0, 0, tzinfo=timezone(timedelta(hours=7)))
 
     naive, _ = parse_interval(start, datetime(2026, 11, 2))
@@ -82,7 +82,7 @@ def test_interval_converts_an_offset_to_utc() -> None:
     assert naive == datetime(2026, 10, 31, 17, 0)
 
 
-def test_a_day_bucket_starts_at_local_midnight() -> None:
+def test_pb49_a_day_bucket_starts_at_local_midnight() -> None:
     """16:59:59Z is still the previous local day in UTC+7; 17:00:00Z starts a new one."""
     before = bucket_starts(datetime(2026, 11, 16, 16, 59, 59),
                            datetime(2026, 11, 17, 0, 0), "day", OFFSET)
@@ -94,7 +94,7 @@ def test_a_day_bucket_starts_at_local_midnight() -> None:
     assert before[0][0] != after[0][0]
 
 
-def test_week_buckets_start_on_monday() -> None:
+def test_pb49_week_buckets_start_on_monday() -> None:
     # 2026-11-17 is a Tuesday; its local week starts on Monday 2026-11-16.
     windows = bucket_starts(datetime(2026, 11, 17, 3, 0), datetime(2026, 11, 24, 3, 0),
                             "week", OFFSET)
@@ -102,7 +102,7 @@ def test_week_buckets_start_on_monday() -> None:
     assert windows[0][0] == datetime(2026, 11, 15, 17, 0)
 
 
-def test_month_buckets_advance_calendar_months() -> None:
+def test_pb49_month_buckets_advance_calendar_months() -> None:
     windows = bucket_starts(datetime(2026, 11, 1), datetime(2027, 1, 1), "month", OFFSET)
 
     # Each month starts at local midnight, which is 17:00 UTC the day before.
@@ -115,7 +115,7 @@ def test_month_buckets_advance_calendar_months() -> None:
     assert windows[-1][1] == datetime(2027, 1, 1)
 
 
-def test_zero_fill_adds_the_buckets_with_no_sales() -> None:
+def test_pb49_zero_fill_adds_the_buckets_with_no_sales() -> None:
     start, end = datetime(2026, 11, 16, 17, 0), datetime(2026, 11, 19, 17, 0)
     rows = [BucketRow(start=start + timedelta(days=1), revenue=Decimal("12.50"), transactions=2)]
 
@@ -128,7 +128,7 @@ def test_zero_fill_adds_the_buckets_with_no_sales() -> None:
     assert [row.transactions for row in filled] == [0, 2, 0]
 
 
-def test_the_last_bucket_is_clamped_to_the_interval() -> None:
+def test_pb49_the_last_bucket_is_clamped_to_the_interval() -> None:
     start, end = datetime(2026, 11, 16, 17, 0), datetime(2026, 11, 17, 12, 0)
 
     windows = bucket_starts(start, end, "day", OFFSET)
@@ -139,7 +139,7 @@ def test_the_last_bucket_is_clamped_to_the_interval() -> None:
 # --- the response contract ------------------------------------------------
 
 
-def test_money_is_a_json_number_and_times_end_with_z() -> None:
+def test_pb49_money_is_a_json_number_and_times_end_with_z() -> None:
     body = DashboardRevenue(
         scope=DashboardScope(store_id=None, is_system_wide=True),
         time_policy=DashboardTimePolicy(max_future_skew_seconds=300, max_backfill_days=30),
@@ -164,7 +164,7 @@ def test_money_is_a_json_number_and_times_end_with_z() -> None:
     assert body["buckets"][0]["to"] == "2026-11-17T17:00:00Z"
 
 
-def test_a_negative_total_stays_a_number() -> None:
+def test_pb49_a_negative_total_stays_a_number() -> None:
     body = DashboardCategoryRevenue(
         scope=DashboardScope(store_id="TEST-1", is_system_wide=False),
         time_policy=DashboardTimePolicy(max_future_skew_seconds=300, max_backfill_days=30),
@@ -226,7 +226,7 @@ def seed_world(session: Session, *, categories: tuple[str, ...] = ("Dairy",)) ->
     return World(store_id, pos_id, skus, tokens)
 
 
-def add_transaction(session: Session, world: World, *, key: str, occurred_at: datetime,
+def add_transaction(session: Session, world: World, *, key: str, occurred_at: datetime | None,
                     created_at: datetime, sku: str, quantity: int = 1,
                     txn_type: str = "SALE", unit_price: Decimal = Decimal("10.00"),
                     ref_txn_id: str | None = None, status: str = "OK") -> str:
@@ -259,7 +259,7 @@ def world(db_session: Session) -> World:
 # [from, to)
 
 
-def test_from_is_included_and_to_is_excluded(client, db_session, world) -> None:
+def test_pb49_from_is_included_and_to_is_excluded(client, db_session, world) -> None:
     day = datetime(2026, 11, 10, 0, 0)
     inside = add_transaction(db_session, world, key="D-INSIDE", occurred_at=day,
                              created_at=day, sku=world.skus[0], quantity=2)
@@ -281,7 +281,7 @@ def test_from_is_included_and_to_is_excluded(client, db_session, world) -> None:
     assert inside != ""
 
 
-def test_a_cancellation_nets_the_sale_to_zero(client, db_session, world) -> None:
+def test_pb49_a_cancellation_nets_the_sale_to_zero(client, db_session, world) -> None:
     day = datetime(2026, 11, 10, 3, 0)
     sale = add_transaction(db_session, world, key="D-SALE", occurred_at=day, created_at=day,
                            sku=world.skus[0], quantity=4)
@@ -305,7 +305,7 @@ def test_a_cancellation_nets_the_sale_to_zero(client, db_session, world) -> None
     assert body["transactions"] == 2
 
 
-def test_a_return_reduces_the_revenue(client, db_session, world) -> None:
+def test_pb49_a_return_reduces_the_revenue(client, db_session, world) -> None:
     day = datetime(2026, 11, 10, 3, 0)
     sale = add_transaction(db_session, world, key="D-S2", occurred_at=day, created_at=day,
                            sku=world.skus[0], quantity=5)
@@ -320,7 +320,7 @@ def test_a_return_reduces_the_revenue(client, db_session, world) -> None:
     assert body["total_revenue"] == 30.0   # 5 x 10 - 2 x 10
 
 
-def test_include_suspect_false_leaves_the_money_but_keeps_the_quality(
+def test_pb49_include_suspect_false_leaves_the_money_but_keeps_the_quality(
         client, db_session, world) -> None:
     day = datetime(2026, 11, 10, 3, 0)
     add_transaction(db_session, world, key="D-OK", occurred_at=day, created_at=day,
@@ -348,7 +348,7 @@ def test_include_suspect_false_leaves_the_money_but_keeps_the_quality(
     assert clean["quality"] == everything["quality"]
 
 
-def test_quality_counts_a_row_without_occurred_at_as_unknown(
+def test_pb49_quality_counts_a_row_without_occurred_at_as_unknown(
         client, db_session, world) -> None:
     day = datetime(2026, 11, 10, 3, 0)
     add_transaction(db_session, world, key="D-NULL", occurred_at=None, created_at=day,
@@ -364,7 +364,7 @@ def test_quality_counts_a_row_without_occurred_at_as_unknown(
     assert body["quality"]["on_time"] == 0
 
 
-def test_empty_buckets_are_zero_filled(client, db_session, world) -> None:
+def test_pb49_empty_buckets_are_zero_filled(client, db_session, world) -> None:
     day = datetime(2026, 11, 10, 12, 0)
     add_transaction(db_session, world, key="D-ONE", occurred_at=day, created_at=day,
                     sku=world.skus[0], quantity=1)
@@ -379,7 +379,7 @@ def test_empty_buckets_are_zero_filled(client, db_session, world) -> None:
     assert sum(bucket["revenue"] for bucket in body["buckets"]) == body["total_revenue"]
 
 
-def test_the_categories_share_the_total(client, db_session, world) -> None:
+def test_pb49_the_categories_share_the_total(client, db_session, world) -> None:
     day = datetime(2026, 11, 10, 12, 0)
     add_transaction(db_session, world, key="D-CAT1", occurred_at=day, created_at=day,
                     sku=world.skus[0], quantity=3)
@@ -398,7 +398,7 @@ def test_the_categories_share_the_total(client, db_session, world) -> None:
     assert round(sum(category["share"] for category in body["categories"]), 6) == 1
 
 
-def test_the_system_total_equals_the_sum_of_the_stores(client, db_session, world) -> None:
+def test_pb49_the_system_total_equals_the_sum_of_the_stores(client, db_session, world) -> None:
     day = datetime(2026, 11, 10, 12, 0)
     add_transaction(db_session, world, key="D-SUM1", occurred_at=day, created_at=day,
                     sku=world.skus[0], quantity=3)
@@ -411,7 +411,7 @@ def test_the_system_total_equals_the_sum_of_the_stores(client, db_session, world
     assert sum(store["revenue"] for store in compared["stores"]) == system["total_revenue"]
 
 
-def test_a_store_with_no_revenue_keeps_its_column(client, db_session, world) -> None:
+def test_pb49_a_store_with_no_revenue_keeps_its_column(client, db_session, world) -> None:
     day = datetime(2026, 11, 10, 12, 0)
     add_transaction(db_session, world, key="D-COL", occurred_at=day, created_at=day,
                     sku=world.skus[0], quantity=1)
@@ -428,7 +428,7 @@ def test_a_store_with_no_revenue_keeps_its_column(client, db_session, world) -> 
 # --- scopes and roles -----------------------------------------------------
 
 
-def test_a_second_store_appears_for_admin_and_not_for_manager(
+def test_pb49_a_second_store_appears_for_admin_and_not_for_manager(
         client, db_session, world) -> None:
     other = seed_world(db_session)
     db_session.flush()
@@ -441,7 +441,7 @@ def test_a_second_store_appears_for_admin_and_not_for_manager(
     assert [store["store_id"] for store in manager["stores"]] == [world.store_id]
 
 
-def test_a_manager_reading_another_store_gets_403(client, db_session, world) -> None:
+def test_pb49_a_manager_reading_another_store_gets_403(client, db_session, world) -> None:
     other = seed_world(db_session)
     db_session.flush()
 
@@ -454,7 +454,7 @@ def test_a_manager_reading_another_store_gets_403(client, db_session, world) -> 
     assert response.json()["code"] == "FORBIDDEN"
 
 
-def test_an_unknown_store_for_admin_gets_422(client, world) -> None:
+def test_pb49_an_unknown_store_for_admin_gets_422(client, world) -> None:
     # An id the column accepts (varchar(10)) and the route's pattern accepts, but
     # no store carries, so the answer comes from the store lookup and not from a
     # length/pattern violation.
@@ -467,7 +467,7 @@ def test_an_unknown_store_for_admin_gets_422(client, world) -> None:
     assert response.json()["code"] == "INVALID_STORE"
 
 
-def test_a_manager_comparing_another_store_gets_403(client, db_session, world) -> None:
+def test_pb49_a_manager_comparing_another_store_gets_403(client, db_session, world) -> None:
     other = seed_world(db_session)
     db_session.flush()
 
@@ -480,17 +480,22 @@ def test_a_manager_comparing_another_store_gets_403(client, db_session, world) -
     assert response.json()["code"] == "FORBIDDEN"
 
 
-def test_an_unknown_compare_store_gets_422(client, world) -> None:
+def test_pb49_an_unknown_compare_store_gets_422(client, world) -> None:
+    """A well-formed id for a store that does not exist answers INVALID_STORE.
+
+    The id must fit the column (varchar(10)) and the shared pattern; an over-long one
+    is rejected earlier as VALIDATION_ERROR, which is covered separately.
+    """
     response = client.get(URL_BY_STORE,
                           params=params(datetime(2026, 11, 1), datetime(2026, 11, 2),
-                                        **{"compare_store_ids": ["TEST-NOT-A-STORE"]}),
+                                        **{"compare_store_ids": ["TEST-NOSU"]}),
                           headers=headers(world, "Admin"))
 
     assert response.status_code == 422, response.text
     assert response.json()["code"] == "INVALID_STORE"
 
 
-def test_the_comparison_syntax_repeats_the_parameter(client, db_session, world) -> None:
+def test_pb49_the_comparison_syntax_repeats_the_parameter(client, db_session, world) -> None:
     other = seed_world(db_session)
     db_session.flush()
 
@@ -508,7 +513,7 @@ def test_the_comparison_syntax_repeats_the_parameter(client, db_session, world) 
     }
 
 
-def test_a_closed_store_is_listed_with_its_flag(client, db_session, world) -> None:
+def test_pb49_a_closed_store_is_listed_with_its_flag(client, db_session, world) -> None:
     closed = seed_world(db_session)
     db_session.execute(
         Store.__table__.update().where(Store.store_id == closed.store_id).values(is_active=False))
@@ -520,7 +525,7 @@ def test_a_closed_store_is_listed_with_its_flag(client, db_session, world) -> No
     assert entry["is_active"] is False
 
 
-def test_an_invalid_bucket_gets_422(client, world) -> None:
+def test_pb49_an_invalid_bucket_gets_422(client, world) -> None:
     response = client.get(URL_REVENUE,
                           params=params(datetime(2026, 11, 1), datetime(2026, 11, 2),
                                         bucket="fortnight"),
@@ -530,7 +535,7 @@ def test_an_invalid_bucket_gets_422(client, world) -> None:
     assert response.json()["code"] == "VALIDATION_ERROR"
 
 
-def test_a_missing_interval_gets_422(client, world) -> None:
+def test_pb49_a_missing_interval_gets_422(client, world) -> None:
     response = client.get(URL_REVENUE, params={"from": "2026-11-01T00:00:00"},
                           headers=headers(world, "Admin"))
 
@@ -541,7 +546,7 @@ def test_a_missing_interval_gets_422(client, world) -> None:
 # --- the service's own scope rules ---------------------------------------
 
 
-def test_scope_filters_the_row_set_for_a_manager(db_session, world) -> None:
+def test_pb49_scope_filters_the_row_set_for_a_manager(db_session, world) -> None:
     other = seed_world(db_session)
     query = service.build_query(
         db_session, _principal(db_session, world, "Manager"),
@@ -566,3 +571,166 @@ def _principal(session: Session, world: World, role: str):
         select(StaffUser.username).where(StaffUser.store_id == world.store_id))
     store_id = world.store_id if role == "Manager" else None
     return Principal(sub=username, role=role, store_id=store_id, pos_id=None)
+
+
+# --- the datetime limits (Dashboard_Review 2) ------------------------------
+
+
+@pytest.mark.parametrize("start,end", [
+    (datetime.min.replace(tzinfo=timezone(timedelta(hours=7))),
+     datetime(2026, 11, 2, tzinfo=timezone.utc)),
+    (datetime(2026, 11, 1, tzinfo=timezone.utc),
+     datetime.max.replace(microsecond=0, tzinfo=timezone(timedelta(hours=-7)))),
+])
+def test_pb49_a_bound_at_the_datetime_limit_is_a_bad_request(start, end) -> None:
+    """A bound whose UTC conversion overflows is the caller's mistake, so 422, not 503."""
+    with pytest.raises(ApiError) as failure:
+        parse_interval(start, end)
+
+    assert failure.value.status == 422
+
+
+# --- include_suspect and rows without occurred_at (Dashboard_Review 2) -----
+
+
+def test_pb49_include_suspect_false_keeps_a_row_without_occurred_at(client, db_session, world) -> None:
+    """A pre-migration row has real revenue; the filter must not drop it.
+
+    Both suspect comparisons are NULL for such a row, and ``NOT NULL`` is still NULL,
+    so a bare ``NOT (...)`` predicate would hide its money while the badge still
+    counted it. The row belongs to no suspect group, so it is kept.
+    """
+    day = datetime(2026, 11, 10, 3, 0)
+    add_transaction(db_session, world, key="PB49-NULL", occurred_at=None,
+                    created_at=day, sku=world.skus[0], quantity=2)
+
+    response = client.get(URL_REVENUE, params=params(day, day + timedelta(days=1),
+                                                    store_id=world.store_id,
+                                                    include_suspect="false"),
+                          headers=headers(world, "Admin"))
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["total_revenue"] == 20.0
+    assert body["quality"]["unknown"] == 1
+    assert body["transactions"] == 1
+
+
+# --- categories count a basket once (Dashboard_Review 4) -------------------
+
+
+def test_pb49_a_basket_with_two_categories_counts_one_transaction(client, db_session, world) -> None:
+    """One sale across two categories must not double-count the transaction."""
+    day = datetime(2026, 11, 10, 3, 0)
+    txn = f"TEST-PB49-MULTI"
+    db_session.add(PosTransaction(
+        txn_id=txn, store_id=world.store_id, pos_id=world.pos_id, txn_type="SALE",
+        ref_txn_id=None, status="OK", payload_hash="0" * 64,
+        occurred_at=day, created_at=day,
+    ))
+    db_session.add(TransactionItem(txn_id=txn, sku=world.skus[0], qty=1,
+                                   unit_price=Decimal("10.00")))
+    db_session.add(TransactionItem(txn_id=txn, sku=world.skus[1], qty=1,
+                                   unit_price=Decimal("10.00")))
+    db_session.flush()
+
+    response = client.get(URL_CATEGORY, params=params(day, day + timedelta(days=1),
+                                                      store_id=world.store_id),
+                          headers=headers(world, "Admin"))
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["transactions"] == 1
+    assert len(body["categories"]) == 2
+    assert body["total_revenue"] == 20.0
+
+
+# --- the comparison set (Dashboard_Review 3) -------------------------------
+
+
+def test_pb49_duplicate_compare_ids_give_one_column_each(client, world) -> None:
+    response = client.get(URL_BY_STORE, params=params(
+        datetime(2026, 11, 1), datetime(2026, 11, 2),
+        **{"compare_store_ids": [world.store_id, world.store_id]}),
+        headers=headers(world, "Admin"))
+
+    assert response.status_code == 200, response.text
+    ids = [store["store_id"] for store in response.json()["stores"]]
+    assert ids == [world.store_id]
+
+
+def test_pb49_an_over_long_compare_id_is_rejected_not_truncated(client, world) -> None:
+    """A 16-char id must answer 422, not silently query a truncated 10-char store."""
+    response = client.get(URL_BY_STORE, params=params(
+        datetime(2026, 11, 1), datetime(2026, 11, 2),
+        **{"compare_store_ids": ["TEST-NOT-A-STORE"]}),
+        headers=headers(world, "Admin"))
+
+    assert response.status_code == 422, response.text
+    assert response.json()["code"] == "VALIDATION_ERROR"
+
+
+def test_pb49_a_manager_probing_an_unknown_store_gets_403_not_422(client, db_session, world) -> None:
+    """Existence must not leak: outside and unknown answer the same for a Manager.
+
+    The two requests run in separate tests below, because a 403 makes ``get_db``
+    roll the fixture's transaction back, so a second request in the same test would
+    no longer find the accounts it needs.
+    """
+    unknown = client.get(URL_BY_STORE, params=params(
+        datetime(2026, 11, 1), datetime(2026, 11, 2),
+        **{"compare_store_ids": ["TEST-NOSU"]}),
+        headers=headers(world, "Manager"))
+
+    # 403, not 422: the store does not exist, but a Manager is not told that.
+    assert unknown.status_code == 403, unknown.text
+    assert unknown.json()["code"] == "FORBIDDEN"
+
+
+# --- the hourly span (Dashboard_Review 7) ----------------------------------
+
+
+def test_pb49_an_hour_bucket_over_too_long_a_span_is_a_bad_request(client, world) -> None:
+    response = client.get(URL_REVENUE, params=params(
+        datetime(2026, 1, 1), datetime(2026, 12, 1), bucket="hour"),
+        headers=headers(world, "Admin"))
+
+    assert response.status_code == 422, response.text
+    assert response.json()["code"] == "VALIDATION_ERROR"
+
+
+# --- the bucket axis at the datetime limits (Dashboard_Review 2) -----------
+
+
+@pytest.mark.parametrize("bucket", ["hour", "day", "week", "month"])
+def test_pb49_the_bucket_axis_survives_year_1_and_year_9999(bucket) -> None:
+    """The axis must not raise: SQL anchors on datetime2, Python clamps the shift.
+
+    A bare `0` anchor is a `datetime` in SQL Server, whose range starts in 1753, so a
+    year-1 instant used to raise "datetime2 to datetime out of range" and answer 503.
+    """
+    windows = bucket_starts(datetime(1, 1, 1), datetime(1, 1, 3), bucket, 7)
+
+    assert windows
+    assert windows[0][0] == datetime(1, 1, 1)
+
+
+@pytest.mark.parametrize("bucket", ["day", "week", "month"])
+def test_pb49_the_bucket_axis_ends_at_the_ceiling(bucket) -> None:
+    """A span reaching year 9999 ends the axis instead of raising."""
+    windows = bucket_starts(datetime(9999, 12, 1), datetime.max.replace(microsecond=0),
+                            bucket, 7)
+
+    assert windows
+    assert windows[-1][1] == datetime.max.replace(microsecond=0)
+
+
+def test_pb49_an_hourly_window_back_to_year_1_is_answered(client, world) -> None:
+    """The endpoint itself answers 200 over that window, not 503."""
+    response = client.get(URL_REVENUE, params={
+        "from": "0001-01-01T00:00:00Z", "to": "0001-01-03T00:00:00Z",
+        "bucket": "day", "store_id": world.store_id,
+    }, headers=headers(world, "Admin"))
+
+    assert response.status_code == 200, response.text
+    assert response.json()["buckets"]

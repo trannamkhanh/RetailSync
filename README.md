@@ -245,7 +245,7 @@ Four read-only routes, all guarded by `require_role("Admin", "Auditor",
 
 | Route | Answer |
 |---|---|
-| `GET /dashboard/revenue` | Net revenue per bucket (`day`, `week`, `month`, `quarter`), the total, the transaction count and the time-quality counts |
+| `GET /dashboard/revenue` | Net revenue per bucket (`hour`, `day`, `week`, `month`), the total, the transaction count and the time-quality counts |
 | `GET /dashboard/revenue-by-category` | Net revenue and share per product category |
 | `GET /dashboard/revenue-by-store` | Net revenue and share per store of the comparison set |
 | `GET /dashboard/stores` | The stores of the caller's scope, with `is_active` |
@@ -271,8 +271,10 @@ and may compare only stores it owns, because the comparison set is intersected w
 the allowed set, never unioned with it. An unknown store answers 422 `INVALID_STORE`.
 
 ```powershell
-$h = @{ Authorization = "Bearer $env:ADMIN_TOKEN" }
-Invoke-RestMethod "https://localhost:8443/api/v1/dashboard/revenue?from=2026-08-22T00:00:00Z&to=2026-11-20T00:00:00Z&bucket=day" -Headers $h -SkipCertificateCheck
+# curl.exe works on Windows PowerShell 5.1, where -SkipCertificateCheck does not
+# exist (it arrived in PowerShell 7). The dev CA is trusted explicitly.
+curl.exe --ssl-no-revoke --cacert .certs/ca.crt -H "Authorization: Bearer $env:ADMIN_TOKEN" `
+  "https://localhost:8443/api/v1/dashboard/revenue?from=2026-08-22T00:00:00Z&to=2026-11-20T00:00:00Z&bucket=day"
 ```
 
 `scripts/demo/reset_demo_db.ps1` rebuilds `RTS_DB_DEMO` and `RTS_HQ` with 90 days
