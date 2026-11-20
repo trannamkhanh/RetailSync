@@ -2,6 +2,93 @@
 
 Live verification results for the DS-09 Section 7 simulation scenarios (`docs/design/DS-09_Test_Strategy_and_Simulator.md`). Each owner records their assigned scenarios (Scenarios 1–5: Kiet; Scenarios 6 and 8: Khanh; Scenario 7: Sang).
 
+## Scenarios 1 to 5: common setup (Kiet)
+
+- **Owner:** Kiet (DS-09 Section 7 rows 1 to 5; DS-05 Section 10 #6, #7, #11)
+- **Branch / Commit:** `feat/PB-40-sync-metrics` at `f5d82ee` (main `86245a7` plus `sync_batch.raw_bytes`); HQ demo image from `main`
+- **Database:** `RTS_DB_DEMO` (middleware, not reset; stock replenished with `scripts/perf/replenish_demo.sql`, openings 5,040 / 5,025 / 5,015 per SKU) and `RTS_HQ_KIET` (temporary HQ database, created for the run and dropped after it)
+- **Seed:** simulator `seed: 42`, `run_id: kiet-pb40-20261120-normal`
+- **Business date:** `2026-11-20` (UTC+7); run from `02:27Z` to `03:27Z`
+- **Stack:** an isolated stack on a private Docker network (the dev stack was not touched): middleware of the branch with `SCHEDULER_ENABLED=true`, `SYNC_INTERVAL=60`, `SYNC_RETRY_BASE_SECONDS=5`, `HQ_TIMEOUT_SECONDS=3`, `MTLS_REQUIRED=true`; the nginx POS gateway from `deploy/nginx/pos-gateway.conf.template`; `hq-demo` with `HQ_DB_NAME=RTS_HQ_KIET`. Every POS event went through the gateway with the terminal's certificate and token.
+- **Reconciliation after each scenario:**
+  ```bash
+  python scripts/sync_reconcile.py --db RTS_DB_DEMO --hq-db RTS_HQ_KIET --opening STORE-DN1=5040 --opening STORE-DN2=5025 --opening STORE-DN3=5015
+  ```
+- **Scenarios 2 to 5:** for 3 sync cycles (3 minutes) HQ stays in the scenario's mode (`PUT /api/v1/demo/mode`) while each store sells once per cycle (DN1 a SALE and a RETURN, DN2 a SALE and its CANCELLATION, DN3 a SALE); then HQ goes back to `ONLINE` and the run waits until every batch is ACKED and no transaction is left unbatched. The order check compares the batches' creation order with the order in which HQ first received them (`GET /api/v1/demo/batches`).
+
+Data reduction and success rate of these runs: [Sync_Metrics.md](Sync_Metrics.md).
+
+## 1. Normal day
+
+- **Result:** **PASS** -- 21,600 of 21,600 events OK (0 rejected, 1 `503` retried with the same id), 93 of 93 batches ACKED at the first attempt, `RECONCILIATION PASS`; data reduction 98.91 %.
+- **Command** (in a container on the private network, repository at `/repo`):
+  ```bash
+  cd /repo/tools/pos-simulator
+  python prepare_performance.py normal --run-id kiet-pb40-20261120-normal --output /tmp/run/normal.yaml
+  python -m pos_simulator --config /tmp/run/normal.yaml
+  ```
+- **Simulator summary:** planned 21,600, ok 21,600, sent 21,601, service_unavailable 1, p50 124.91 ms, p95 239.25 ms, p99 382.56 ms, wall time 30 min 6 s (`02:38:50Z` to `03:08:56Z`).
+- **Reconciliation:**
+  ```text
+  PASS 1 stock = opening + movements: 27 inventory rows
+  PASS 2 HQ totals = lines of ACKED batches: 94 ACKED batches, 27 store/SKU totals
+  PASS 3 each transaction in at most one batch: 94 batches, 21604 linked transactions, 0 not batched yet
+  RECONCILIATION PASS
+  ```
+  (94 includes one batch of 4 older transactions from 12 Nov, aggregated when the stack started.)
+
+## 2. HQ outage
+
+- **Result:** **PASS** -- HQ `OFFLINE` from `03:10:18Z` to `03:13:21Z`: 15/15 events answered 200; 9 batches stayed PENDING; the oldest had 3 attempts with `503 HQ_OFFLINE` and backoff 5, 10, 20 s, the 8 newer ones waited untouched behind it (global send gate, DS-05 section 6). HQ back at `03:13:21Z`; all 9 ACKED by `03:14:01Z`, received oldest first; `RECONCILIATION PASS`.
+- **Observed:**
+  ```text
+  SB-STORE-DN1-20261120031057  PENDING txns=2 attempts=3 retry_at=03:13:18 503 HQ_OFFLINE: HQ is offline for this demo.
+  ... 8 newer batches PENDING, attempts=0
+  ORDER OK (oldest first)
+  PASS 1 stock = opening + movements: 27 inventory rows
+  PASS 2 HQ totals = lines of ACKED batches: 103 ACKED batches, 27 store/SKU totals
+  PASS 3 each transaction in at most one batch: 103 batches, 21620 linked transactions, 0 not batched yet
+  RECONCILIATION PASS
+  ```
+
+## 3. Slow HQ
+
+- **Result:** **PASS** -- HQ `SLOW` (4 s per call, client timeout 3 s) from `03:14:03Z` to `03:17:05Z`: 15/15 events answered 200; the oldest batch timed out 3 times (`No answer from HQ: ReadTimeout`) and was retried with backoff; HQ stored it during the slow calls, so the resend after `ONLINE` got `duplicate: true` and totals were not counted twice. All 9 batches ACKED by `03:17:59Z`, oldest first; `RECONCILIATION PASS`.
+- **Observed:**
+  ```text
+  SB-STORE-DN1-20261120031457  PENDING txns=2 attempts=3 retry_at=03:17:21 No answer from HQ: ReadTimeout: The read operation timed out
+  ORDER OK (oldest first)
+  PASS 2 HQ totals = lines of ACKED batches: 112 ACKED batches, 27 store/SKU totals
+  PASS 3 each transaction in at most one batch: 112 batches, 21635 linked transactions, 0 not batched yet
+  RECONCILIATION PASS
+  ```
+
+## 4. Lost ACK
+
+- **Result:** **PASS** -- HQ `DROP_ACK` from `03:18:02Z` to `03:21:04Z`: 15/15 events answered 200; HQ stored the oldest batch and answered `500 ACK_DROPPED` 3 times; the batch stayed PENDING with backoff. After `ONLINE` the resend was ACKED with `duplicate: true` (audit `SYNC_ACKED ... (duplicate)`), all 9 batches ACKED by `03:21:58Z`, oldest first, no double count; `RECONCILIATION PASS`.
+- **Observed:**
+  ```text
+  SB-STORE-DN1-20261120031858  PENDING txns=2 attempts=3 retry_at=03:21:18 500 ACK_DROPPED: Batch stored, ACK dropped.
+  ORDER OK (oldest first)
+  PASS 2 HQ totals = lines of ACKED batches: 121 ACKED batches, 27 store/SKU totals
+  PASS 3 each transaction in at most one batch: 121 batches, 21650 linked transactions, 0 not batched yet
+  RECONCILIATION PASS
+  ```
+
+## 5. HQ errors
+
+- **Result:** **PASS** -- HQ `ERROR` from `03:22:02Z` to `03:25:04Z`: 15/15 events answered 200; the oldest batch got `500 HQ_ERROR` 3 times and stayed PENDING with backoff, the others waited. All 9 ACKED by `03:25:58Z` after `ONLINE`, oldest first; `RECONCILIATION PASS`.
+- **Observed:**
+  ```text
+  SB-STORE-DN1-20261120032258  PENDING txns=2 attempts=3 retry_at=03:25:18 500 HQ_ERROR: HQ failed for this demo.
+  ORDER OK (oldest first)
+  PASS 1 stock = opening + movements: 27 inventory rows
+  PASS 2 HQ totals = lines of ACKED batches: 130 ACKED batches, 27 store/SKU totals
+  PASS 3 each transaction in at most one batch: 130 batches, 21665 linked transactions, 0 not batched yet
+  RECONCILIATION PASS
+  ```
+- **Across scenarios 1 to 5:** 130 `SYNC_ACKED` audits, 2 of them with `duplicate: true` (scenarios 3 and 4), no `SYNC_FAILED`.
+
 ## 6. WAN outage between POS and Middleware (5 minutes)
 
 - **Owner:** Khanh (DS-09 Section 7 row 6; DS-05 Section 8 & Section 10 #13)
