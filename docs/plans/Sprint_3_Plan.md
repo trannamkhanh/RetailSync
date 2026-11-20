@@ -12,6 +12,7 @@ Mục tiêu: batch doanh số đi từ Middleware lên HQ demo có ACK, retry v�
 | Kiệt | Gửi batch lên HQ | PB-15, PB-16, PB-17 | 46,5 |
 | Khánh | Phía HQ và Demo POS | PB-18, PB-14, PB-13, PB-45 | 52 |
 | Sang | Mô phỏng và dự báo | PB-03, PB-22, PB-23, PB-24, PB-31-2 | 55,5 |
+| Quang (luồng song song) | Dashboard doanh thu | PB-49 (D1, D2, D3) | chưa tính trong cột Giờ ở trên |
 
 Tổng 213,5 giờ trên năng lực 224 giờ (95%), gồm 2,5 giờ họp. Mỗi người có 56 giờ (14 ngày × 4 giờ).
 
