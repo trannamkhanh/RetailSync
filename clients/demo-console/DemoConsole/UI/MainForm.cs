@@ -586,8 +586,17 @@ internal sealed class MainForm : Form
             }
 
             var (fromUtc, toUtc) = _dashboard.Window();
-            var answer = await _api.GetDashboardRevenueAsync(fromUtc, toUtc, _dashboard.SelectedStoreId,
-                _dashboard.Period);
+            var storeId = _dashboard.SelectedStoreId;
+
+            // The three charts share one interval. The line and the pie follow the view
+            // scope; the bar follows the comparison set, which is the caller's whole
+            // scope unless a selection narrows it, so it is requested with no ids.
+            var line = _api.GetDashboardRevenueAsync(fromUtc, toUtc, storeId, _dashboard.Period);
+            var pie = _api.GetDashboardCategoryAsync(fromUtc, toUtc, storeId);
+            var bar = _api.GetDashboardStoresRevenueAsync(fromUtc, toUtc, null);
+            await Task.WhenAll(line, pie, bar);
+
+            var answer = await line;
             if (Gone)
             {
                 return;
@@ -602,6 +611,10 @@ internal sealed class MainForm : Form
                 try
                 {
                     _dashboard.Show(ApiParsers.DashboardRevenue(answer.Body));
+                    TryShow(answer2 => _dashboard.ShowCategories(
+                        ApiParsers.DashboardCategoryRevenue(answer2.Body)), await pie);
+                    TryShow(answer3 => _dashboard.ShowStores(
+                        ApiParsers.DashboardStoreRevenue(answer3.Body)), await bar);
                     _dashboardStatus.Text = $"Làm mới lúc {time}. Không có lỗi.";
                     _dashboardStatus.ForeColor = Theme.Ok;
                 }
@@ -629,6 +642,28 @@ internal sealed class MainForm : Form
             _dashboard.SetBusy(false);
             _dashboardRefreshing = false;
             UpdateFeatureControls();
+        }
+    }
+
+    /// <summary>
+    /// Feeds one extra chart from its own answer. A failure there must not blank the
+    /// other two charts or the KPI, so it is reported and the last good chart stays.
+    /// </summary>
+    private void TryShow(Action<ApiResult> show, ApiResult answer)
+    {
+        if (!answer.IsSuccess)
+        {
+            _dashboard.ShowPartialError(answer.Summary);
+            return;
+        }
+
+        try
+        {
+            show(answer);
+        }
+        catch (FormatException error)
+        {
+            _dashboard.ShowPartialError($"không đọc được câu trả lời: {error.Message}");
         }
     }
 

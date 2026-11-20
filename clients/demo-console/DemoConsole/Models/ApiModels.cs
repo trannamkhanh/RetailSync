@@ -77,3 +77,45 @@ public sealed record DashboardRevenue(
 /// <summary>One entry of GET /dashboard/stores.</summary>
 public sealed record DashboardStore(string StoreId, string Name, string RegionId, bool IsActive);
 
+/// <summary>One slice of the category pie: a category's revenue and its share.</summary>
+public sealed record DashboardCategory(string Category, decimal Revenue, decimal Share);
+
+/// <summary>GET /dashboard/revenue-by-category.</summary>
+public sealed record DashboardCategoryRevenue(
+    DashboardScope Scope,
+    DashboardTimePolicy TimePolicy,
+    decimal TotalRevenue,
+    int Transactions,
+    DashboardTimeQuality Quality,
+    IReadOnlyList<DashboardCategory> Categories)
+{
+    /// <summary>
+    /// The slices the pie can draw. A negative category cannot be drawn as a share of
+    /// a whole, so it is kept out of the pie and reported in a note instead of being
+    /// silently dropped (design §6.6).
+    /// </summary>
+    public IReadOnlyList<DashboardCategory> PositiveSlices =>
+        Categories.Where(category => category.Revenue > 0).ToList();
+
+    /// <summary>The categories the pie cannot show, so the note can name them.</summary>
+    public IReadOnlyList<DashboardCategory> NegativeCategories =>
+        Categories.Where(category => category.Revenue < 0).ToList();
+}
+
+/// <summary>One column of the store comparison bar chart.</summary>
+public sealed record DashboardStoreRevenue(string StoreId, string Name, string RegionId,
+                                           decimal Revenue, decimal Share);
+
+/// <summary>GET /dashboard/revenue-by-store.</summary>
+public sealed record DashboardStoreRevenueResponse(
+    DashboardScope Scope,
+    DashboardTimePolicy TimePolicy,
+    DateTime? DataFromUtc,
+    DateTime? DataToUtc,
+    bool HasData,
+    decimal TotalRevenue,
+    int Transactions,
+    DashboardTimeQuality Quality,
+    IReadOnlyList<DashboardStoreRevenue> Stores);
+
+
