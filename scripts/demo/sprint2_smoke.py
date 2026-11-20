@@ -293,7 +293,8 @@ def run() -> int:
 
     # 12. Guardrail rules (PB-26). Restore the threshold even if a check fails.
     status, body = call("GET", f"{MIDDLEWARE}/admin/guardrail-rules", token=TOKENS["admin"])
-    rule = next((item for item in body.get("items", [])
+    rule_body = body if isinstance(body, dict) else {}
+    rule = next((item for item in rule_body.get("items", [])
                  if item["rule_type"] == "MAX_DISCOUNT" and item["category"] is None), None)
     if rule is None:
         check(12, "the seeded MAX_DISCOUNT rule", False, f"{status} {body}")

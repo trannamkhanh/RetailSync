@@ -37,7 +37,7 @@ def _features(demand: Demand, day: date, history: Sequence[float]) -> dict[str, 
     return {
         "weekday": day.weekday(), "weekend": int(day.weekday() >= 5), "month_day": day.day,
         "lag_1": history[-1], "lag_7": history[-7], "lag_14": history[-14],
-        "mean_7": mean(history[-7:]), "mean_28": sum(history[-28:]) / 28,
+        "mean_7": mean(history[-7:]), "mean_28": mean(history[-28:]),
         "store": demand.store, "sku": demand.sku, "category": demand.category,
         "price": demand.unit_price,
     }

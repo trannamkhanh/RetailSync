@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from fractions import Fraction
 import logging
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, or_, select, true, update
 from sqlalchemy.orm import Session
 
 from app.core import clock
@@ -117,8 +117,9 @@ def _process_store(session: Session, store: str, today: date, forecasts: list[Fo
 def run_recommendations() -> dict[str, int]:
     today = clock.today_local()
     with session_factory() as session:
-        stores = list(session.scalars(select(Store.store_id).order_by(Store.store_id)))
-        forecasts = repository.recent_forecasts(session, today)
+        stores = list(session.scalars(select(Store.store_id).where(Store.is_active == true())
+                                      .order_by(Store.store_id)))
+        forecasts = [row for row in repository.recent_forecasts(session, today) if row.store_id in stores]
     created = {}
     for store in stores:
         try:
