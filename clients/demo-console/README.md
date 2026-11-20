@@ -19,6 +19,24 @@ Tests (no running stack needed):
 dotnet test clients/demo-console/DemoConsole.sln
 ```
 
+If `dotnet test` aborts before running anything with
+`System.ComponentModel.Win32Exception (5): Access is denied` from the VSTest
+testhost, that is the host denying the testhost a handle to its parent process, not
+a test failure — the same abort happens on untouched code. Use the console runner
+instead, which runs the test assembly in its own process:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/demo/run_console_tests.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/demo/run_console_tests.ps1 -Filter "DemoConsole.Tests.DashboardTests.Parses_every_field_of_the_revenue_contract"
+```
+
+It builds the solution, downloads `xunit.runner.console` 2.9.2 into the temp folder
+once, arranges the runtime and native assets the runner needs (WindowsDesktop
+framework, the real `Microsoft.Data.SqlClient.dll` rather than the reference
+assembly, and `Microsoft.Data.SqlClient.SNI.dll`), then exits 1 if any test fails so
+it can gate a merge. Add `-Rebuild` when a source file's timestamp is older than the
+binaries and MSBuild skips recompiling it.
+
 ## What it reads and how
 
 | Tab | Data | Source |
