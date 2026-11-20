@@ -1,9 +1,8 @@
 """Run a daily job now (PB-15-6). Admin only; the audit commits in the router.
 
-The run takes the scheduler's per-job lock (``Job.running`` of
-``registered_jobs()``), so a scheduled run and a requested run never overlap.
-It works whether or not the scheduler is enabled. Sync keeps its own
-``POST /sync/run``.
+The run takes both the registered job's local lock and the per-job SQL session
+lock shared with other worker processes. It works whether or not the scheduler
+is enabled. Sync keeps its own ``POST /sync/run``.
 """
 
 import logging
@@ -18,6 +17,7 @@ from app.core.errors import ApiError
 from app.core.security import Principal, require_role
 from app.jobs import registry  # noqa: F401  registers the jobs, also when the scheduler is off
 from app.jobs.scheduler import Job, registered_jobs
+from app.jobs.locks import job_lock
 from app.repositories.registry import find_user_id
 from app.services.audit import record_audit
 
@@ -56,13 +56,16 @@ def run_job(name: str = JOB_NAME,
     if not job.running.acquire(blocking=False):
         raise ApiError(409, "JOB_RUNNING", f"Job '{name}' is already running.")
     try:
-        _audit_request(session, name, principal)
-        try:
-            job.run()
-        except Exception:
-            logger.exception("Requested run of job %s failed", name)
-            raise ApiError(503, "SERVICE_UNAVAILABLE", f"Job '{name}' failed. Try again later.",
-                           outcome="ERROR") from None
+        with job_lock(name) as acquired:
+            if not acquired:
+                raise ApiError(409, "JOB_RUNNING", f"Job '{name}' is already running.")
+            _audit_request(session, name, principal)
+            try:
+                job.run()
+            except Exception:
+                logger.exception("Requested run of job %s failed", name)
+                raise ApiError(503, "SERVICE_UNAVAILABLE", f"Job '{name}' failed. Try again later.",
+                               outcome="ERROR") from None
     finally:
         job.running.release()
     return JobRunResult(job=name, status="COMPLETED")

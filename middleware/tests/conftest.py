@@ -109,3 +109,9 @@ def mtls_off_by_default(monkeypatch) -> None:
 @pytest.fixture(autouse=True)
 def scheduler_off_by_default(monkeypatch) -> None:
     monkeypatch.setattr(settings, "scheduler_enabled", False)
+
+
+@pytest.fixture(autouse=True)
+def job_locks_test_database(monkeypatch) -> None:
+    from app.jobs import locks
+    monkeypatch.setattr(locks, "database_url", lambda: database_url(settings.test_db_name))
