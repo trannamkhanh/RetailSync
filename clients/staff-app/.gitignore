@@ -1,0 +1,5 @@
+# Never commit the staff token or local settings (PB-46).
+staff_token.txt
+*.token
+appsettings.Local.json
+ca.crt
