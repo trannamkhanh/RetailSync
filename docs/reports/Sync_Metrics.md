@@ -14,11 +14,13 @@ back).
 
 - **`raw_bytes`** (filled by aggregation since this PR, TST40-3): the sum, over every transaction of
   the batch (SALE, RETURN and CANCELLATION), of the UTF-8 byte length of
-  `json.dumps(event, separators=(",", ":"))`, where `event` is the POS event as the POS sends it
-  (DS-04): `event_type`, `transaction_id`, `store_id`, `pos_id`, `timestamp` (ISO 8601 UTC, seconds,
-  `Z`), `items` with `sku`, `quantity` and `unit_price` (a string with two decimals), plus
-  `original_transaction_id` for RETURN and CANCELLATION only; a CANCELLATION carries no items on the
-  wire. See `middleware/app/services/aggregation.py`.
+  `json.dumps(event, separators=(",", ":"))`, where `event` is the DS-04 POS event rebuilt from the
+  stored transaction: `event_type`, `transaction_id`, `store_id`, `pos_id`, `timestamp` (ISO 8601 UTC,
+  seconds, `Z`), `items` with `sku`, `quantity` and `unit_price`, plus `original_transaction_id` for
+  RETURN and CANCELLATION only; a CANCELLATION carries no items on the wire. `unit_price` is
+  normalised to a two-decimal string, as the POS simulator sends it; DS-04 types it as a number and
+  the demo POS sends a number, which is 2 bytes shorter per item, so the reduction would differ by
+  well under 0.1 point. See `middleware/app/services/aggregation.py`.
 - **`payload_bytes`**: the UTF-8 length of the batch message the sender posts to HQ
   (`len(payload)` in `app/integration/hq_client.py`), so both sizes are measured the same way.
 - **Data reduction** = `1 - Σ payload_bytes / Σ raw_bytes` over ACKED batches.

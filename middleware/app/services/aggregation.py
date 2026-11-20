@@ -6,13 +6,16 @@ calls this once per store.
 ``raw_bytes`` (PB-40, TST40-3) is what the batch's transactions would cost if
 they were sent to HQ one by one: the sum, over every transaction of the batch
 (SALE, RETURN and CANCELLATION), of the UTF-8 byte length of
-``json.dumps(event, separators=(",", ":"))``, where ``event`` is the POS event
-as the POS sends it (DS-04): ``event_type``, ``transaction_id``, ``store_id``,
-``pos_id``, ``timestamp`` (ISO 8601 UTC, seconds, ``Z``), ``items`` with
-``sku``, ``quantity`` and ``unit_price`` (a string with two decimals), plus
-``original_transaction_id`` for RETURN and CANCELLATION only. A CANCELLATION
-carries no items on the wire (its stored items are copied from the sale). It is
-measured like ``payload_bytes``, the UTF-8 length of the body sent to HQ.
+``json.dumps(event, separators=(",", ":"))``, where ``event`` is the DS-04 POS
+event rebuilt from the stored transaction: ``event_type``, ``transaction_id``,
+``store_id``, ``pos_id``, ``timestamp`` (ISO 8601 UTC, seconds, ``Z``),
+``items`` with ``sku``, ``quantity`` and ``unit_price``, plus
+``original_transaction_id`` for RETURN and CANCELLATION only. ``unit_price`` is
+normalised to a two-decimal string, as the POS simulator sends it; DS-04 types
+it as a number and the demo POS sends a number, which is 2 bytes shorter per
+item. A CANCELLATION carries no items on the wire (its stored items are copied
+from the sale). It is measured like ``payload_bytes``, the UTF-8 length of the
+body sent to HQ.
 """
 
 from collections.abc import Iterable
@@ -41,7 +44,7 @@ def batch_id_for(store_id: str, moment: datetime) -> str:
 
 
 def pos_event(transaction: PosTransaction, items: Iterable[TransactionItem]) -> dict:
-    """The DS-04 POS event of a stored transaction, as the POS sends it."""
+    """The DS-04 POS event rebuilt from a stored transaction, ``unit_price`` as a two-decimal string."""
     event: dict = {"event_type": transaction.txn_type, "transaction_id": transaction.txn_id}
     if transaction.txn_type != "SALE":
         event["original_transaction_id"] = transaction.ref_txn_id
