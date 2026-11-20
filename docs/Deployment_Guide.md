@@ -136,6 +136,16 @@ Re-running the script preserves existing valid certificates. Only re-issue what 
 
 > **Important:** Whenever client certificates are generated or renewed (or when switching to a fresh database), you must re-register their SHA-256 fingerprints in `dbo.pos_terminal`.
 
+Each Docker service mounts only the certificate files it uses (read-only); `.certs/ca.key` and `.certs/pos/*.key` are never mounted into any container:
+
+| Service | Mounted `/certs/*` files (`:ro`) |
+|---|---|
+| `middleware` | `ca.crt`, `server.crt`, `server.key` |
+| `pos-gateway` | `ca.crt`, `server.crt`, `server.key` |
+| `hq-demo` | `server.crt`, `server.key` |
+
+Run `scripts/generate_dev_certs.sh` **before** the first `docker compose up`, so Docker mounts existing files rather than creating empty directories at missing paths.
+
 ### 4.2. Register POS Fingerprints and Issue Demo JWTs
 
 After building `middleware` and migrating the target database (Section 5), run from the repository root:
@@ -201,6 +211,17 @@ docker compose pull sqlserver pos-gateway
 docker compose up -d --wait sqlserver middleware pos-gateway hq-demo
 docker compose ps
 ```
+
+### Startup Order and Health Checks (`compose.yaml`)
+
+`compose.yaml` enforces the startup chain automatically:
+
+1. `sqlserver` starts and passes its `sqlcmd SELECT 1` healthcheck.
+2. `migrate` runs `database/migrate.sh` to completion (`service_completed_successfully`) before `middleware` or `hq-demo` starts, so the middleware scheduler never runs catch-up jobs against missing tables or unseeded data.
+3. `middleware` starts and passes its HTTPS healthcheck (`curl -fsS --cacert /certs/ca.crt https://localhost:8443/api/v1/health`, interval 5 s, 20 retries, 10 s start period); `hq-demo` starts in parallel after `migrate`.
+4. `pos-gateway` waits for `middleware` (`service_healthy`) before exposing port `9443`.
+
+Because `middleware` defines a healthcheck, `docker compose up -d --wait middleware pos-gateway hq-demo` does not return until `middleware` is actively serving HTTPS on port `8443`.
 
 ### Verify Health and TLS / mTLS
 
@@ -521,7 +542,7 @@ docker compose run --rm --volume "${PWD}:/repo" --workdir /repo/tools/history-ge
 | POS returns `403 FORBIDDEN` through port `9443` | Terminal cert fingerprint not registered in the active `DB_NAME`, wrong `POS_GATEWAY_SECRET`, cert/terminal mismatch, or request sent directly to `8443` | Check `POS_GATEWAY_SECRET` in `.env`, re-run `scripts/register_pos_certificates.py` (or `reset_demo_db.ps1`) against the active `DB_NAME`, and verify the client cert matches `pos_id` |
 | POS gateway returns `400 Bad Request` (nginx HTML) | Request arrived at port `9443` without a valid CA-issued client certificate | Confirm `.certs/pos/<pos_id>.crt` and `.key` exist and were issued by the current `.certs/ca.crt` |
 | All API calls return `401 UNAUTHORIZED` | Stale `.tokens/demo_tokens.json` or `JWT_SECRET` changed after tokens were issued | Re-run `scripts/issue_demo_tokens.py` (or `reset_demo_db.ps1`) and re-export tokens to Machines A/B if on LAN |
-| `docker compose up middleware` exits immediately | Missing `.certs/server.crt` or `.certs/server.key` | Run `& "$env:ProgramFiles\Git\bin\bash.exe" scripts/generate_dev_certs.sh` |
+| `docker compose up middleware` exits immediately or fails mounting `/certs/*` | Missing `.certs/ca.crt`, `.certs/server.crt`, or `.certs/server.key` (Docker creates empty directories if a file bind-mount source is missing) | Remove any accidental empty directories under `.certs/`, then run `& "$env:ProgramFiles\Git\bin\bash.exe" scripts/generate_dev_certs.sh` |
 | `Access denied` when `DemoPos` loads a client certificate | Restricted workspace/sandbox blocks Windows certificate store writes during PKCS#12 re-import | Copy the built output outside the restricted directory (e.g., `%TEMP%\DemoPos`) or run on a standard Windows desktop session |
 | `IM002` / `Can't open lib` in native Python | 64-bit Microsoft ODBC Driver 18 for SQL Server is not installed on Windows | Install 64-bit ODBC Driver 18, or run Python commands inside the `middleware` Docker container |
 | SQL Server login failure or SQLPAL startup error | Changing `MSSQL_SA_PASSWORD` in `.env` does not change the password inside an existing `sqlserver_data` volume; or an older/corrupted volume fails SQLPAL startup | Restore the original `MSSQL_SA_PASSWORD` matching the volume, or start an isolated Compose project (`docker compose -p retailsync-fresh ...`) without deleting an existing data volume |
