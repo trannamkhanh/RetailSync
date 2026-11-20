@@ -33,7 +33,7 @@ def process_cancellation(session: Session, event: PosEvent, principal: Principal
     sale = lock_original_sale(session, event.store_id, original_id)
     payload_hash = content_hash("CANCELLATION", event.store_id, event.pos_id, original_id, [])
     if not claim_transaction(session, event.transaction_id, event.store_id, event.pos_id,
-                             "CANCELLATION", original_id, payload_hash):
+                             "CANCELLATION", original_id, payload_hash, event.timestamp):
         return {
             "outcome": "DUPLICATE", "code": "DUPLICATE_IGNORED",
             "message": "Transaction already recorded",

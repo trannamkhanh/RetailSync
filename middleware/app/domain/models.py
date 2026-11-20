@@ -4,7 +4,7 @@ from datetime import datetime
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Boolean, CHAR, ForeignKey, ForeignKeyConstraint, Integer, Numeric, Unicode, String, text
+from sqlalchemy import BigInteger, Boolean, CHAR, Computed, ForeignKey, ForeignKeyConstraint, Integer, Numeric, Unicode, String, text
 from sqlalchemy import Date
 from sqlalchemy.dialects.mssql import DATETIME2
 from sqlalchemy.orm import Mapped, mapped_column
@@ -117,6 +117,22 @@ class SyncBatch(Base):
 
 
 class PosTransaction(Base):
+    """One POS event as stored (004_pos_transaction_occurred_at.sql).
+
+    ``occurred_at`` is the moment the POS declares the event happened; it is NULL
+    for transactions stored before migration 004. ``created_at`` stays the moment
+    the Middleware received the event, and nothing ever overwrites either.
+
+    ``effective_at`` is the computed, persisted column the database keeps as
+    ``COALESCE(occurred_at, created_at)``, and the Dashboard reads it. It is mapped
+    with ``Computed`` so the model and the real table agree column for column
+    (``test_model_matches_real_table``) and an INSERT still never writes it:
+    SQLAlchemy leaves a computed column out of the INSERT, so mapping it as an
+    ordinary column would fail with "cannot insert into computed column".
+    ``PERSISTED`` is required, because only a persisted computed column can be
+    indexed and the range queries index this one.
+    """
+
     __tablename__ = "pos_transaction"
     txn_id: Mapped[str] = mapped_column(String(40), primary_key=True)
     store_id: Mapped[str] = mapped_column(String(10), ForeignKey("store.store_id"))
@@ -126,6 +142,11 @@ class PosTransaction(Base):
     status: Mapped[str] = mapped_column(String(12))
     sync_batch_id: Mapped[str | None] = mapped_column(String(40), ForeignKey("sync_batch.sync_batch_id"))
     payload_hash: Mapped[str] = mapped_column(CHAR(64))
+    occurred_at: Mapped[datetime | None] = mapped_column(DATETIME2)
+    # SQL Server reports a persisted computed column as nullable even when its
+    # expression never yields NULL, and the model must say what the table says.
+    effective_at: Mapped[datetime | None] = mapped_column(
+        DATETIME2, Computed("COALESCE(occurred_at, created_at)", persisted=True))
     created_at: Mapped[datetime] = mapped_column(DATETIME2, server_default=text("SYSUTCDATETIME()"))
 
 
