@@ -1,6 +1,6 @@
 """Queries for guardrail rules (PB-26). Read-only, never commits."""
 
-from sqlalchemy import case, select
+from sqlalchemy import case, or_, select
 from sqlalchemy.orm import Session
 
 from app.domain.models import GuardrailRule
@@ -11,7 +11,7 @@ def list_rules(session: Session) -> list[GuardrailRule]:
     return list(session.scalars(
         select(GuardrailRule).order_by(
             GuardrailRule.rule_type,
-            case((GuardrailRule.category.is_(None), 0), else_=1),
+            case((or_(GuardrailRule.category.is_(None), GuardrailRule.category == ""), 0), else_=1),
             GuardrailRule.category,
             GuardrailRule.rule_id,
         )
