@@ -25,6 +25,7 @@ Rule 1 runs first, so a blocked recommendation is not adjusted. Rule 3 uses the 
 - All rules passed or adjusted: recommendation status PENDING, visible to staff.
 - Any rule BLOCKED: status BLOCKED, never shown.
 - Rules cannot be loaded: nothing is released; status stays GENERATED until the next run.
+- The recommendation job loads rules once per store before releasing any rows and uses that snapshot for all earlier and newly generated recommendations in that store's transaction.
 
 ## Boundary tests (PB-28)
 
