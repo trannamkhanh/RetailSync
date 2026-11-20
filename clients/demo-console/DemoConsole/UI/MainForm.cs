@@ -542,7 +542,11 @@ internal sealed class MainForm : Form
         _dashboard.SetBusy(true);
         try
         {
-            if (_dashboardFeature != FeatureState.NotDeployed)
+            // Probe only until the answer is known. Re-probing every tick spent an
+            // extra GET /dashboard/revenue each 30 seconds for a route that had
+            // already answered, and the old condition also stopped probing once the
+            // route went missing, so a restarted middleware was never picked up.
+            if (_dashboardFeature == FeatureState.Unknown)
             {
                 _dashboardFeature = Merge(_dashboardFeature, await ProbeDashboardAsync());
             }
@@ -611,18 +615,33 @@ internal sealed class MainForm : Form
                 try
                 {
                     _dashboard.Show(ApiParsers.DashboardRevenue(answer.Body));
-                    TryShow(answer2 => _dashboard.ShowCategories(
-                        ApiParsers.DashboardCategoryRevenue(answer2.Body)), await pie);
-                    TryShow(answer3 => _dashboard.ShowStores(
-                        ApiParsers.DashboardStoreRevenue(answer3.Body)), await bar);
-                    _dashboardStatus.Text = $"Làm mới lúc {time}. Không có lỗi.";
-                    _dashboardStatus.ForeColor = Theme.Ok;
                 }
                 catch (FormatException error)
                 {
                     _dashboard.ShowError(answer);
                     _dashboardStatus.Text = $"Làm mới lúc {time}. Không đọc được câu trả lời: {error.Message}";
                     _dashboardStatus.ForeColor = Theme.Error;
+                    return;
+                }
+
+                // A missing pie or bar is a partial failure: the status line must say
+                // so instead of claiming "Không có lỗi" while a chart is stale.
+                var partial = new List<string>();
+                TryShow(answer2 => _dashboard.ShowCategories(
+                    ApiParsers.DashboardCategoryRevenue(answer2.Body)), await pie, partial);
+                TryShow(answer3 => _dashboard.ShowStores(
+                    ApiParsers.DashboardStoreRevenue(answer3.Body)), await bar, partial);
+
+                if (partial.Count == 0)
+                {
+                    _dashboardStatus.Text = $"Làm mới lúc {time}. Không có lỗi.";
+                    _dashboardStatus.ForeColor = Theme.Ok;
+                }
+                else
+                {
+                    _dashboardStatus.Text = $"Làm mới lúc {time}. Một phần chưa tải được: " +
+                                            string.Join("; ", partial);
+                    _dashboardStatus.ForeColor = Theme.Warn;
                 }
             }
             else
@@ -647,13 +666,15 @@ internal sealed class MainForm : Form
 
     /// <summary>
     /// Feeds one extra chart from its own answer. A failure there must not blank the
-    /// other two charts or the KPI, so it is reported and the last good chart stays.
+    /// other two charts or the KPI, so it is recorded for the status line and the last
+    /// good chart stays.
     /// </summary>
-    private void TryShow(Action<ApiResult> show, ApiResult answer)
+    private void TryShow(Action<ApiResult> show, ApiResult answer, List<string> problems)
     {
         if (!answer.IsSuccess)
         {
             _dashboard.ShowPartialError(answer.Summary);
+            problems.Add(answer.Summary);
             return;
         }
 
@@ -663,7 +684,9 @@ internal sealed class MainForm : Form
         }
         catch (FormatException error)
         {
-            _dashboard.ShowPartialError($"không đọc được câu trả lời: {error.Message}");
+            var summary = $"không đọc được câu trả lời: {error.Message}";
+            _dashboard.ShowPartialError(summary);
+            problems.Add(summary);
         }
     }
 

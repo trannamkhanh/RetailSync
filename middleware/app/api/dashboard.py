@@ -1,4 +1,4 @@
-﻿"""Dashboard revenue endpoints (PB-49, plan B5). Read-only: they never commit.
+"""Dashboard revenue endpoints (PB-49, plan B5). Read-only: they never commit.
 
 Four routes, each guarded by ``require_role("Admin", "Auditor", "Manager")``.
 The two view-scope routes accept ``store_id``; the comparison route accepts
@@ -12,6 +12,7 @@ maps the service's result to the response model.
 """
 
 from datetime import datetime
+import re
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -31,6 +32,7 @@ from app.api.schemas.dashboard import (
 )
 from app.api.schemas.registry import ID_PATTERN
 from app.core.db import get_db
+from app.core.errors import ApiError
 from app.core.security import Principal, require_role
 from app.services import dashboard as service
 
@@ -39,6 +41,32 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
 # Every Dashboard route allows the same three roles and nothing else.
 DASHBOARD_ROLES = ("Admin", "Auditor", "Manager")
+
+# A comparison set is a handful of stores; the cap keeps one request from asking the
+# repository for an unbounded list, which would also overflow its nvarchar concat.
+MAX_COMPARE_STORES = 100
+
+
+def _validated_compare(ids: list[str] | None) -> list[str] | None:
+    """Each id must be one the store column could hold and the shared pattern allows.
+
+    FastAPI validates the list length but not the shape of its items, so a 16-character
+    id would pass here and then be silently truncated by the repository's
+    ``CAST(value AS varchar(10))``, answering about a different store. Rejecting it is
+    both safer and more honest than truncating.
+
+    Raises:
+        ApiError(422, "VALIDATION_ERROR"): an item is empty, too long, or off-pattern.
+    """
+    if not ids:
+        return ids
+    for value in ids:
+        if not 1 <= len(value) <= 10 or not re.fullmatch(ID_PATTERN, value):
+            raise ApiError(
+                422, "VALIDATION_ERROR",
+                f"Invalid field 'compare_store_ids': '{value}' must be 1-10 characters "
+                f"matching {ID_PATTERN}.")
+    return ids
 
 
 def _scope_response(query: service.DashboardQuery) -> DashboardScope:
@@ -139,14 +167,23 @@ def get_dashboard_revenue_by_category(
 def get_dashboard_revenue_by_store(
     from_time: datetime = Query(alias="from"),
     to: datetime = Query(),
-    compare_store_ids: list[str] | None = Query(default=None),
+    compare_store_ids: list[str] | None = Query(
+        default=None,
+        # The list length is capped, so one request cannot ask the repository for an
+        # unbounded set; each id is validated below against the same rules as
+        # store_id, because a longer value would be silently truncated by the CAST
+        # inside the repository rather than rejected.
+        max_length=MAX_COMPARE_STORES,
+        description=f"At most {MAX_COMPARE_STORES} store ids; the key repeats.",
+    ),
     include_suspect: bool = Query(default=True),
     session: Session = Depends(get_db),
     principal: Principal = Depends(require_role(*DASHBOARD_ROLES)),
 ) -> DashboardStoreRevenueResponse:
     """Net revenue per store of the comparison set, sorted by revenue descending."""
     query = service.build_query(
-        session, principal, store_id=None, compare_store_ids=compare_store_ids,
+        session, principal, store_id=None,
+        compare_store_ids=_validated_compare(compare_store_ids),
         start=from_time, end=to, include_suspect=include_suspect,
     )
     result = service.store_comparison(session, query)

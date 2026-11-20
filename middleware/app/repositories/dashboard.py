@@ -1,4 +1,4 @@
-﻿"""Revenue reads for the Dashboard (PB-49, plan B2). Never commits.
+"""Revenue reads for the Dashboard (PB-49, plan B2). Never commits.
 
 Four rules shape every statement here:
 
@@ -46,7 +46,14 @@ _SUSPECT_FUTURE = "t.occurred_at > DATEADD(SECOND, :skew, t.created_at)"
 _SUSPECT_OLD = "t.occurred_at <= DATEADD(DAY, -:backfill, t.created_at)"
 
 # What include_suspect=false keeps: a row that is not in either suspect group.
-NOT_SUSPECT = f"NOT ({_SUSPECT_FUTURE}) AND NOT ({_SUSPECT_OLD})"
+#
+# A NULL ``occurred_at`` (a row stored before migration 004) must be kept. Both
+# comparisons below are NULL for such a row, and ``NOT NULL`` is still NULL, so a
+# bare ``NOT (...) AND NOT (...)`` silently drops every pre-migration row — its
+# revenue is real, only its timing is approximate, so hiding it would understate
+# the total. The explicit IS NULL arm makes that intent part of the predicate
+# instead of a side effect of three-valued logic.
+NOT_SUSPECT = f"(t.occurred_at IS NULL OR (NOT ({_SUSPECT_FUTURE}) AND NOT ({_SUSPECT_OLD})))"
 
 # One row per transaction, and each carries exactly one of the five labels. The
 # labels are computed from the two stored moments, without a helper column, as
@@ -88,16 +95,37 @@ EMPTY_CATEGORY = "Khác"
 
 # Bucket keys are computed in the store's business time and converted back to
 # UTC, so a bucket starts where the local hour, day, week or month starts.
-# 1900-01-01 was a Monday, so day 0 is a week boundary.
+#
+# The anchor is `CAST('0001-01-01' AS datetime2)`, not the bare `0` literal. A bare
+# `0` is an int that SQL Server converts to `datetime`, whose range starts in 1753, so
+# `DATEDIFF(DAY, 0, <a year-1 instant>)` raised "datetime2 to datetime out of range"
+# and the whole request answered 503. A datetime2 anchor covers the full range the
+# column can hold; 0001-01-01 was a Monday, so a multiple of 7 days is still a week
+# boundary.
+_ANCHOR = "CAST('0001-01-01' AS datetime2)"
+
 _BUCKET_LOCAL = {
-    "hour": "DATEADD(HOUR, DATEDIFF(HOUR, 0, DATEADD(HOUR, :offset, {moment})), 0)",
-    "day": "DATEADD(DAY, DATEDIFF(DAY, 0, DATEADD(HOUR, :offset, {moment})), 0)",
-    "week": "DATEADD(DAY, (DATEDIFF(DAY, 0, DATEADD(HOUR, :offset, {moment})) / 7) * 7, 0)",
-    "month": "DATEADD(MONTH, DATEDIFF(MONTH, 0, DATEADD(HOUR, :offset, {moment})), 0)",
+    "hour": f"DATEADD(HOUR, DATEDIFF(HOUR, {_ANCHOR}, DATEADD(HOUR, :offset, {{moment}})), {_ANCHOR})",
+    "day": f"DATEADD(DAY, DATEDIFF(DAY, {_ANCHOR}, DATEADD(HOUR, :offset, {{moment}})), {_ANCHOR})",
+    "week": f"DATEADD(DAY, (DATEDIFF(DAY, {_ANCHOR}, DATEADD(HOUR, :offset, {{moment}})) / 7) * 7, {_ANCHOR})",
+    "month": f"DATEADD(MONTH, DATEDIFF(MONTH, {_ANCHOR}, DATEADD(HOUR, :offset, {{moment}})), {_ANCHOR})",
 }
 
 # The bucket key back in UTC, so the answer is in the caller's interval.
-_BUCKET_START = "DATEADD(HOUR, -:offset, {bucket})"
+#
+# `_at_least_anchor` keeps the subtraction from underflowing: a bucket that starts at
+# the very first representable instant cannot move back by the business offset, and
+# SQL Server raises "Adding a value to a 'datetime2' column caused an overflow". The
+# first bucket is then anchored rather than shifted, which is the closest instant the
+# type can express; only a request reaching back to year 1 is affected.
+def _back_to_utc(bucket: str) -> str:
+    return (
+        "CASE WHEN {bucket} < DATEADD(HOUR, :offset, {anchor}) "
+        "THEN {anchor} ELSE DATEADD(HOUR, -:offset, {bucket}) END"
+    ).format(bucket=bucket, anchor=_ANCHOR)
+
+
+_BUCKET_START = _back_to_utc("{bucket}")
 
 BUCKETS = tuple(_BUCKET_LOCAL)
 

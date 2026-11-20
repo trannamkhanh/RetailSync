@@ -13,15 +13,17 @@
 #   * Microsoft.Data.SqlClient.SNI.dll, the native SNI layer.
 #
 # Usage, from the repository root:
-#   pwsh scripts/demo/run_console_tests.ps1
-#   pwsh scripts/demo/run_console_tests.ps1 -Filter "FullyQualifiedName~DashboardTests"
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/demo/run_console_tests.ps1
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/demo/run_console_tests.ps1 -Method "DemoConsole.Tests.DashboardTests.Parses_every_field_of_the_revenue_contract"
 #
 # The script exits 1 when a test fails, so it can gate a merge.
 
 [CmdletBinding()]
 param(
     [string]$Configuration = 'Debug',
-    [string]$Filter = '',
+    # An xunit console -method value: a full test name, or a prefix ending in '*' or
+    # '!'. This is not the VSTest -Filter syntax ("FullyQualifiedName~...").
+    [string]$Method = '',
     # Rebuild from scratch; use it when a source file's timestamp looks older than
     # the binaries and MSBuild would otherwise skip recompiling it.
     [switch]$Rebuild
@@ -36,21 +38,25 @@ $runnerDir = Join-Path $env:TEMP "xunit.console.$runnerVersion"
 
 # Always build: testing a stale DemoConsole.Tests.dll would report the previous
 # source, which looks like a passing run of code nobody compiled.
-Write-Host "Building $solution ..."
-dotnet build $solution --nologo | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'dotnet build failed.' }
-
-# MSBuild decides by timestamp, so a file restored or checked out with an older
-# mtime than the binary is silently left out of the build. Rebuild the test project
-# from scratch when asked, so the run can never test yesterday's source.
+#
+# MSBuild decides by timestamp, so a file restored or checked out with an older mtime
+# than the binary is silently left out. -Rebuild discards incremental state so the run
+# can never test yesterday's source. It is the only build in that case: building twice
+# would just compile the same sources again.
 if ($Rebuild) {
     Write-Host "Rebuilding $solution without incremental state ..."
     dotnet build $solution --nologo --no-incremental | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'dotnet build failed.' }
+} else {
+    Write-Host "Building $solution ..."
+    dotnet build $solution --nologo | Out-Null
 }
+if ($LASTEXITCODE -ne 0) { throw 'dotnet build failed.' }
 
 # Fetch the console runner once, into the temp folder rather than the repository.
-if (-not (Test-Path (Join-Path $runnerDir 'tools/net6.0/xunit.console.dll'))) {
+# The check and the extraction must agree on the path, or every run re-downloads and
+# an offline machine fails even though the runner is already cached.
+$runnerSource = Join-Path $runnerDir 'pkg/tools/net6.0'
+if (-not (Test-Path (Join-Path $runnerSource 'xunit.console.dll'))) {
     Write-Host "Downloading xunit.console $runnerVersion ..."
     New-Item -ItemType Directory -Force -Path $runnerDir | Out-Null
     $nupkg = Join-Path $runnerDir 'runner.nupkg'
@@ -61,7 +67,6 @@ if (-not (Test-Path (Join-Path $runnerDir 'tools/net6.0/xunit.console.dll'))) {
     Expand-Archive -Path (Join-Path $runnerDir 'runner.zip') -DestinationPath (Join-Path $runnerDir 'pkg') -Force
 }
 
-$runnerSource = Join-Path $runnerDir 'pkg/tools/net6.0'
 Copy-Item (Join-Path $runnerSource '*') $testBin -Force
 
 # The runner targets net6.0; ask for the desktop framework the tests actually need.
@@ -98,7 +103,7 @@ $arguments = @(
     '-nologo',
     '-parallel', 'none'
 )
-if ($Filter) { $arguments += @('-method', $Filter) }
+if ($Method) { $arguments += @('-method', $Method) }
 
 Push-Location $testBin
 try {

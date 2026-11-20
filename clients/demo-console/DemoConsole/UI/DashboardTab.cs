@@ -29,24 +29,34 @@ namespace DemoConsole.UI;
 /// </summary>
 internal sealed class DashboardTab : UserControl
 {
-    /// <summary>Day / week / month / quarter, in the order the plan lists them.</summary>
-    public static readonly (string Key, string Label)[] Periods =
+    /// <summary>
+    /// The period choices, in the order the plan lists them.
+    ///
+    /// ``Key`` is sent as ``bucket``, so it must be one the API accepts (``hour``,
+    /// ``day``, ``week``, ``month``). A quarter is a **range**, not a bucket: the
+    /// design maps it to a weekly axis over a year (§6.5), so its key is ``week`` and
+    /// only ``Days`` differs. Sending ``quarter`` would be rejected with 422.
+    /// </summary>
+    public static readonly (string Key, string Label, int Days)[] Periods =
     {
-        ("day", "Ngày"),
-        ("week", "Tuần"),
-        ("month", "Tháng"),
-        ("quarter", "Quý"),
+        ("day", "Ngày", 7),
+        ("week", "Tuần", 28),
+        ("month", "Tháng", 180),
+        ("week", "Quý", 365),
     };
 
-    /// <summary>How many days each period looks back from today, inclusive of today.</summary>
+    /// <summary>How many days the selected period looks back, inclusive of today.</summary>
     public static int DaysFor(string period) => period switch
     {
         "day" => 7,
         "week" => 28,
         "month" => 180,
-        "quarter" => 365,
         _ => 7,
     };
+
+    /// <summary>How many days each choice looks back, indexed like <see cref="Periods"/>.</summary>
+    public static int DaysForIndex(int index) =>
+        index >= 0 && index < Periods.Length ? Periods[index].Days : Periods[0].Days;
 
     /// <summary>
     /// The category labels of the design (§6.6). Kept here rather than read from the
@@ -96,13 +106,17 @@ internal sealed class DashboardTab : UserControl
         _period.DropDownStyle = ComboBoxStyle.DropDownList;
         _period.Font = Theme.Bold(fontSize);
         _period.Width = (int)(fontSize * 8);
-        foreach (var (_, label) in Periods)
+        foreach (var (_, label, _) in Periods)
         {
             _period.Items.Add(label);
         }
 
         // Day is the demo's answer; it is the period the plan promises.
         _period.SelectedIndex = 0;
+        // Changing the period changes the interval, so it must refresh the three
+        // charts just as changing the scope does. Without this the presenter picks
+        // "Quý", sees nothing move, and concludes the filter is broken.
+        _period.SelectedIndexChanged += (_, _) => OnPeriodChanged();
 
         _refresh = Theme.ActionButton("Làm mới", fontSize + 1);
         _refresh.Click += async (_, _) => await RaiseRefreshAsync();
@@ -253,7 +267,7 @@ internal sealed class DashboardTab : UserControl
     {
         var now = _utcNow();
         var localToday = BusinessClock.Today(now);
-        var fromLocal = localToday.AddDays(-(DaysFor(Period) - 1)).ToDateTime(TimeOnly.MinValue);
+        var fromLocal = localToday.AddDays(-(DaysForIndex(_period.SelectedIndex) - 1)).ToDateTime(TimeOnly.MinValue);
         var fromUtc = fromLocal.Subtract(BusinessClock.Offset);
         return (DateTime.SpecifyKind(fromUtc, DateTimeKind.Utc), now);
     }
@@ -463,6 +477,14 @@ internal sealed class DashboardTab : UserControl
             _selectedStoreId = _stores[_scope.SelectedIndex - 1].StoreId;
         }
 
+        if (!_loading)
+        {
+            _ = RaiseRefreshAsync();
+        }
+    }
+
+    private void OnPeriodChanged()
+    {
         if (!_loading)
         {
             _ = RaiseRefreshAsync();

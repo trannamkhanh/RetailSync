@@ -247,19 +247,40 @@ public sealed class DashboardTests
     [InlineData("day", 7)]
     [InlineData("week", 28)]
     [InlineData("month", 180)]
-    [InlineData("quarter", 365)]
     public void Each_period_looks_back_the_documented_number_of_days(string period, int days)
     {
         Assert.Equal(days, DashboardTab.DaysFor(period));
     }
 
     [Fact]
-    public void The_four_periods_are_the_ones_the_plan_lists()
+    public void The_four_choices_are_the_ones_the_plan_lists()
     {
-        Assert.Equal(new[] { "day", "week", "month", "quarter" },
+        // "Quý" is a range, not a bucket: it sends bucket=week over 365 days (design
+        // 6.5). Sending "quarter" would be rejected by the API with 422.
+        Assert.Equal(new[] { "day", "week", "month", "week" },
             DashboardTab.Periods.Select(period => period.Key).ToArray());
         Assert.Equal(new[] { "Ngày", "Tuần", "Tháng", "Quý" },
             DashboardTab.Periods.Select(period => period.Label).ToArray());
+        Assert.Equal(new[] { 7, 28, 180, 365 },
+            DashboardTab.Periods.Select(period => period.Days).ToArray());
+    }
+
+    [Fact]
+    public void Every_period_sends_a_bucket_the_api_accepts()
+    {
+        // The API accepts exactly these four (repositories/dashboard.py _BUCKET_LOCAL).
+        var accepted = new[] { "hour", "day", "week", "month" };
+
+        Assert.All(DashboardTab.Periods, period => Assert.Contains(period.Key, accepted));
+    }
+
+    [Fact]
+    public void The_quarter_choice_looks_back_a_year()
+    {
+        Assert.Equal(365, DashboardTab.DaysForIndex(3));
+        Assert.Equal(7, DashboardTab.DaysForIndex(0));
+        // An out-of-range index falls back to the first choice rather than throwing.
+        Assert.Equal(7, DashboardTab.DaysForIndex(99));
     }
 
     [Fact]

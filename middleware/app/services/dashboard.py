@@ -1,4 +1,4 @@
-﻿"""Dashboard decisions: scope, comparison set, query validation, zero fill (PB-49, B3).
+"""Dashboard decisions: scope, comparison set, query validation, zero fill (PB-49, B3).
 
 Everything here is a decision, not a query. The repository answers with rows; this
 module decides what the caller may see, what a valid interval is, which buckets
@@ -38,6 +38,10 @@ from app.repositories.dashboard import BucketRow, QualityCounts, RevenueRow
 # buckets. Ten years covers the demo's 90 days and a real deployment's history.
 MAX_RANGE_DAYS = 3650
 
+# An hourly bucket multiplies the point count by 24, so its own cap is much
+# smaller: 90 days is 2,160 buckets, which still draws and still answers quickly.
+MAX_HOUR_RANGE_DAYS = 90
+
 CENT = Decimal("0.01")
 
 
@@ -68,18 +72,29 @@ class DashboardQuery:
 
 
 def _to_utc(field: str, value: datetime) -> datetime:
-    """A value without an offset is already UTC; an offset is converted."""
+    """A value without an offset is already UTC; an offset is converted.
+
+    ``0001-01-01T00:00:00+07:00`` and ``9999-12-31T23:59:59-07:00`` are legal
+    instants whose UTC conversion leaves the representable range, so ``astimezone``
+    raises. A caller-supplied ``from``/``to`` that cannot be converted is a bad
+    request, not a server fault, so it answers 422 instead of escaping as 503.
+    """
     if value.tzinfo is None:
         return value
-    return value.astimezone(timezone.utc).replace(tzinfo=None)
+    try:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    except (OverflowError, ValueError):
+        raise _invalid(
+            field, "is too close to the datetime limits to convert to UTC.") from None
 
 
 def parse_interval(start: datetime, end: datetime) -> tuple[datetime, datetime]:
     """Validate the half-open interval ``[start, end)`` and return it in UTC.
 
     Raises:
-        ApiError(422, "VALIDATION_ERROR"): ``end`` is not after ``start``, or the
-            span is longer than :data:`MAX_RANGE_DAYS`.
+        ApiError(422, "VALIDATION_ERROR"): either bound cannot be converted to UTC,
+            ``end`` is not after ``start``, or the span is longer than
+            :data:`MAX_RANGE_DAYS` (or, for ``bucket="hour"``, the hourly cap).
     """
     start, end = _to_utc("from", start), _to_utc("to", end)
     if end <= start:
@@ -156,13 +171,21 @@ def resolve_compare(session: Session, principal,
     only narrow that set: naming a store outside the scope is 403 for a Manager,
     and a store that does not exist is 422 for anyone.
 
+    The order matters. For a Manager, ``outside`` is checked **before** ``unknown``,
+    so a probe answers 403 whether or not the store exists; checking existence first
+    would answer 422 for an unknown store and 403 for a known one, which tells the
+    caller that the store exists. Admin and Auditor see every store, so for them
+    ``outside`` is always empty and ``unknown`` is the only possible answer.
+
     Args:
         session: SQLAlchemy session; a read, so nothing is committed.
         principal: The authenticated caller.
         compare_store_ids: The requested stores, or ``None`` for the whole scope.
 
     Returns:
-        The store ids to compare, in the caller's order.
+        The store ids to compare, in the caller's order, without duplicates. A
+        repeated id would otherwise draw the same column twice and make the shares
+        add up to more than 1.
 
     Raises:
         ApiError(403, "FORBIDDEN"): a store outside the caller's scope.
@@ -172,14 +195,18 @@ def resolve_compare(session: Session, principal,
     if not compare_store_ids:
         return tuple(sorted(allowed))
 
-    unknown = sorted(set(compare_store_ids) - repository.known_store_ids(session, compare_store_ids))
-    if unknown:
-        raise ApiError(422, "INVALID_STORE", f"Store '{unknown[0]}' does not exist.")
+    # Order preserved, duplicates dropped: the caller's order is the column order.
+    requested = tuple(dict.fromkeys(compare_store_ids))
+
     if principal.role not in ("Admin", "Auditor"):
-        outside = sorted(set(compare_store_ids) - allowed)
+        outside = sorted(set(requested) - allowed)
         if outside:
             raise _forbidden(f"This account may not compare store '{outside[0]}'.")
-    return tuple(compare_store_ids)
+
+    unknown = sorted(set(requested) - repository.known_store_ids(session, list(requested)))
+    if unknown:
+        raise ApiError(422, "INVALID_STORE", f"Store '{unknown[0]}' does not exist.")
+    return requested
 
 
 def stores_for(session: Session, principal) -> list[tuple[str, str, str, bool]]:
@@ -196,13 +223,28 @@ def stores_for(session: Session, principal) -> list[tuple[str, str, str, bool]]:
 # --- the bucket axis ------------------------------------------------------
 
 
+def _shift(moment: datetime, hours: int) -> datetime:
+    """``moment`` shifted by ``hours``, clamped instead of raising at the limits.
+
+    A request may reach back to year 1, and shifting the first representable instant
+    by the business offset leaves the representable range, so ``timedelta`` raises
+    ``OverflowError``. The repository's SQL has the same guard, and the two must agree
+    on the bucket axis, so both clamp to the nearest representable instant.
+    """
+    try:
+        return moment + timedelta(hours=hours)
+    except OverflowError:
+        return datetime.max.replace(microsecond=0) if hours > 0 else datetime.min
+
+
 def _align(moment: datetime, bucket: str, offset_hours: int) -> datetime:
     """The start of the bucket that contains ``moment``, in UTC.
 
     The arithmetic mirrors the repository's SQL: shift into local time, truncate,
-    shift back. Weeks start on Monday because 1900-01-01, the SQL epoch, was one.
+    shift back. Weeks start on Monday because 0001-01-01, the datetime2 anchor, was
+    one — the same instant the SQL uses, so both agree on a week boundary.
     """
-    local = moment + timedelta(hours=offset_hours)
+    local = _shift(moment, offset_hours)
     if bucket == "hour":
         local = local.replace(minute=0, second=0, microsecond=0)
     elif bucket == "day":
@@ -214,25 +256,32 @@ def _align(moment: datetime, bucket: str, offset_hours: int) -> datetime:
         local = local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     else:
         raise ValueError(f"unsupported dashboard bucket: {bucket!r}")
-    return local - timedelta(hours=offset_hours)
+    return _shift(local, -offset_hours)
 
 
 def _advance(moment: datetime, bucket: str, offset_hours: int = 0) -> datetime:
     """The start of the bucket after the one starting at ``moment``.
 
     Only months need the offset: a month boundary sits at local midnight, and the
-    UTC instant of that midnight moves with the business offset.
+    UTC instant of that midnight moves with the business offset. Every step clamps,
+    for the same reason as :func:`_shift`: the last bucket may reach year 9999, where
+    adding a day would raise instead of ending the axis.
     """
     if bucket == "hour":
-        return moment + timedelta(hours=1)
+        return _shift(moment, 1)
     if bucket == "day":
-        return moment + timedelta(days=1)
+        return _shift(moment, 24)
     if bucket == "week":
-        return moment + timedelta(days=7)
+        return _shift(moment, 24 * 7)
     if bucket == "month":
-        local = moment + timedelta(hours=offset_hours)
+        local = _shift(moment, offset_hours)
         year, month = local.year + (local.month == 12), local.month % 12 + 1
-        return local.replace(year=year, month=month, day=1) - timedelta(hours=offset_hours)
+        try:
+            following = local.replace(year=year, month=month, day=1)
+        except ValueError:
+            # December 9999 has nowhere to advance to; the axis ends at the ceiling.
+            return datetime.max.replace(microsecond=0)
+        return _shift(following, -offset_hours)
     raise ValueError(f"unsupported dashboard bucket: {bucket!r}")
 
 
@@ -251,6 +300,21 @@ def bucket_starts(start: datetime, end: datetime, bucket: str,
         window.append((current, min(following, end)))
         current = following
     return window
+
+
+def _check_hourly_span(start: datetime, end: datetime, bucket: str) -> None:
+    """Reject an ``hour`` request whose bucket count would exceed the cap.
+
+    ``MAX_RANGE_DAYS`` bounds the *date* range, which is fine for a day bucket but
+    lets ``bucket="hour"`` over 3,650 days ask for 87,600 buckets in one synchronous
+    request. The hourly bucket therefore carries its own, tighter cap.
+    """
+    if bucket != "hour":
+        return
+    cap = timedelta(days=MAX_HOUR_RANGE_DAYS)
+    if end - start > cap:
+        raise _invalid(
+            "from", f"spans more than {MAX_HOUR_RANGE_DAYS} days for bucket='hour'.")
 
 
 def zero_fill(start: datetime, end: datetime, bucket: str, offset_hours: int,
@@ -292,6 +356,7 @@ def build_query(session: Session, principal, *, store_id: str | None,
     start, end = parse_interval(start, end)
     if bucket not in repository.BUCKETS:
         raise _invalid("bucket", f"must be one of {', '.join(repository.BUCKETS)}.")
+    _check_hourly_span(start, end, bucket)
     return DashboardQuery(
         store_id=resolve_scope(session, principal, store_id),
         compare_store_ids=resolve_compare(session, principal, compare_store_ids),
@@ -395,6 +460,19 @@ def _total(rows) -> Decimal:
     return sum((row.revenue for row in rows), Decimal("0.00")).quantize(CENT)
 
 
+def _filtered_transactions(quality, include_suspect: bool) -> int:
+    """The transaction count that matches the money beside it.
+
+    ``quality`` always counts the whole interval, which is what the badge shows. The
+    KPI beside the pie has to match the filtered money, so with
+    ``include_suspect=False`` it drops the two suspect groups but keeps ``unknown``:
+    a row without ``occurred_at`` has no suspect label and its revenue is included.
+    """
+    if include_suspect:
+        return quality.transactions
+    return quality.transactions - quality.suspect_future - quality.suspect_old
+
+
 def revenue_series(session: Session, query: DashboardQuery) -> RevenueSeries:
     """The line chart of the query's view scope and interval."""
     rows = repository.revenue_by_bucket(
@@ -402,8 +480,10 @@ def revenue_series(session: Session, query: DashboardQuery) -> RevenueSeries:
         query.skew_seconds, query.backfill_days, query.offset_hours, query.bucket,
         query.include_suspect,
     )
-    filled = zero_fill(query.start, query.end, query.bucket, query.offset_hours, rows)
+    # The axis is built once and reused: zero_fill only needs the row per bucket,
+    # and recomputing the windows doubled the work on a long hourly range.
     windows = bucket_starts(query.start, query.end, query.bucket, query.offset_hours)
+    filled = zero_fill(query.start, query.end, query.bucket, query.offset_hours, rows)
     points = [
         RevenuePoint(start=start, end=end, revenue=row.revenue, transactions=row.transactions)
         for (start, end), row in zip(windows, filled)
@@ -418,7 +498,10 @@ def revenue_series(session: Session, query: DashboardQuery) -> RevenueSeries:
         time_policy=(query.skew_seconds, query.backfill_days),
         data_from=data_from,
         data_to=data_to,
-        has_data=quality.transactions > 0,
+        # has_data describes the money in this answer, so it follows include_suspect:
+        # an interval whose every transaction is suspect draws nothing when the filter
+        # is on, even though `quality` still counts those transactions for the badge.
+        has_data=sum(row.transactions for row in filled) > 0,
         total_revenue=_total(filled),
         transactions=sum(row.transactions for row in filled),
         quality=quality,
@@ -441,7 +524,12 @@ def category_breakdown(session: Session, query: DashboardQuery) -> CategoryBreak
         scope_store_id=query.store_id,
         time_policy=(query.skew_seconds, query.backfill_days),
         total_revenue=total,
-        transactions=sum(row.transactions for row in rows),
+        # The transaction count comes from the quality read, not from the category
+        # rows: COUNT(DISTINCT txn_id) is per category, so one basket holding items
+        # from two categories is counted twice and the figure would disagree with
+        # /dashboard/revenue over the same interval. `quality` also applies the
+        # include_suspect filter, so the count matches the money beside it.
+        transactions=_filtered_transactions(quality, query.include_suspect),
         quality=quality,
         categories=[
             CategoryShare(category=row.key, revenue=row.revenue, share=_share(row.revenue, total))
@@ -481,8 +569,13 @@ def store_comparison(session: Session, query: DashboardQuery) -> StoreComparison
         time_policy=(query.skew_seconds, query.backfill_days),
         data_from=data_from,
         data_to=data_to,
-        has_data=quality.transactions > 0,
+        # has_data describes the money in this answer, so it follows include_suspect:
+        # a filtered request whose every row is suspect has no data to draw even
+        # though the unfiltered interval does.
+        has_data=_filtered_transactions(quality, query.include_suspect) > 0,
         total_revenue=total,
+        # A transaction belongs to exactly one store, so summing the per-store counts
+        # is correct here; unlike categories, no row can be counted twice.
         transactions=sum(row.transactions for row in rows),
         quality=quality,
         stores=columns,
