@@ -56,6 +56,11 @@ def _validate_threshold(rule_type: str, threshold: Decimal) -> None:
         raise _invalid_threshold("MIN_SHELF_LIFE must be a whole number of days.")
 
 
+def is_general_category(category: str | None) -> bool:
+    """DS-07: a NULL or blank category means an all-category rule."""
+    return not (category or "").strip()
+
+
 def _tightens(rule_type: str, category_threshold: Decimal, all_threshold: Decimal) -> bool:
     if rule_type == "MAX_DISCOUNT":
         return category_threshold <= all_threshold
@@ -73,15 +78,15 @@ def _check_tightening(rules: list[GuardrailRule], rule: GuardrailRule,
     others = [other for other in rules
               if other.rule_type == rule.rule_type and other.rule_id != rule.rule_id
               and other.is_active]
-    if rule.category is None:
+    if is_general_category(rule.category):
         for other in others:
-            if other.category is not None and not _tightens(rule.rule_type, other.threshold,
-                                                            threshold):
+            if not is_general_category(other.category) and not _tightens(
+                    rule.rule_type, other.threshold, threshold):
                 raise _invalid_threshold(_tightening_reason(rule.rule_type))
     else:
         for other in others:
-            if other.category is None and not _tightens(rule.rule_type, threshold,
-                                                        other.threshold):
+            if is_general_category(other.category) and not _tightens(
+                    rule.rule_type, threshold, other.threshold):
                 raise _invalid_threshold(_tightening_reason(rule.rule_type))
 
 

@@ -411,3 +411,91 @@ def test_pb27_small_positive_discount_remains_adjusted(db_session):
 
     assert guardrails.apply_guardrails(db_session, recommendation) == "PENDING"
     assert fresh(db_session, recommendation).discount_pct == Decimal("0.01")
+
+
+# Audit #16 & shared load_rules helper.
+
+
+@pytest.mark.parametrize("rule_category", ["dairy", "DAIRY", "dAiRy"])
+def test_audit16_category_rule_matches_any_case(db_session, rule_category):
+    category_rule = add_rule(db_session, "MAX_DISCOUNT", 30, category=rule_category)
+    add_rule(db_session, "MAX_DISCOUNT", 50)
+    recommendation = build(db_session, discount=Decimal("40.00"), category="Dairy")
+
+    assert guardrails.apply_guardrails(db_session, recommendation) == "PENDING"
+
+    assert fresh(db_session, recommendation).discount_pct == Decimal("30.00")
+    assert [(rule_id, outcome, adjusted) for _, rule_id, outcome, _, adjusted
+            in stored_results(db_session, recommendation)] == [
+        (category_rule.rule_id, "ADJUSTED", Decimal("30.00"))]
+
+
+def test_audit16_empty_string_category_applies_as_general_rule(db_session):
+    general_rule = add_rule(db_session, "MAX_DISCOUNT", 25, category="")
+    recommendation = build(db_session, discount=Decimal("40.00"), category="Dairy")
+
+    assert guardrails.apply_guardrails(db_session, recommendation) == "PENDING"
+
+    assert fresh(db_session, recommendation).discount_pct == Decimal("25.00")
+    assert [(rule_id, outcome, adjusted) for _, rule_id, outcome, _, adjusted
+            in stored_results(db_session, recommendation)] == [
+        (general_rule.rule_id, "ADJUSTED", Decimal("25.00"))]
+
+
+def test_audit16_category_rule_wins_tie_over_empty_string_general_rule(db_session):
+    add_rule(db_session, "MAX_DISCOUNT", 30, category="")
+    category_rule = add_rule(db_session, "MAX_DISCOUNT", 30, category="dairy")
+    recommendation = build(db_session, discount=Decimal("40.00"), category="Dairy")
+
+    assert guardrails.apply_guardrails(db_session, recommendation) == "PENDING"
+
+    assert fresh(db_session, recommendation).discount_pct == Decimal("30.00")
+    assert [rule_id for _, rule_id, _, _, _ in stored_results(db_session, recommendation)] == [
+        category_rule.rule_id]
+
+
+def test_audit16_load_rules_returns_active_and_wraps_read_failure(db_session, monkeypatch):
+    active = add_rule(db_session, "MAX_DISCOUNT", 40)
+    add_rule(db_session, "MAX_DISCOUNT", 10, is_active=False)
+
+    loaded = guardrails.load_rules(db_session)
+    assert [rule.rule_id for rule in loaded] == [active.rule_id]
+
+    def unavailable(session):
+        raise RuntimeError("guardrail_rule is not reachable")
+
+    monkeypatch.setattr(guardrail_rules, "active_rules", unavailable)
+    with pytest.raises(guardrails.GuardrailRulesUnavailable):
+        guardrails.load_rules(db_session)
+
+
+def test_audit16_apply_guardrails_uses_preloaded_rules_without_db_read(db_session, monkeypatch):
+    add_default_rules(db_session)
+    preloaded = guardrails.load_rules(db_session)
+    recommendation = build(db_session, discount=Decimal("60.00"))
+
+    def unavailable(session):
+        raise RuntimeError("must not query rules when preloaded")
+
+    commit = Mock()
+    monkeypatch.setattr(guardrail_rules, "active_rules", unavailable)
+    monkeypatch.setattr(db_session, "commit", commit)
+
+    assert guardrails.apply_guardrails(db_session, recommendation, rules=preloaded) == "PENDING"
+    commit.assert_not_called()
+    assert fresh(db_session, recommendation).discount_pct == Decimal("50.00")
+    assert result_count(db_session, recommendation.rec_id) == 3
+
+
+def test_audit16_apply_guardrails_with_empty_preloaded_rules_skips_db_read(db_session, monkeypatch):
+    add_default_rules(db_session)
+    recommendation = build(db_session, discount=Decimal("60.00"))
+
+    def unavailable(session):
+        raise RuntimeError("must not query rules when empty list is explicitly passed")
+
+    monkeypatch.setattr(guardrail_rules, "active_rules", unavailable)
+
+    assert guardrails.apply_guardrails(db_session, recommendation, rules=[]) == "PENDING"
+    assert fresh(db_session, recommendation).discount_pct == Decimal("60.00")
+    assert result_count(db_session, recommendation.rec_id) == 0

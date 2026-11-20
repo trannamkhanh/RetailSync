@@ -439,3 +439,30 @@ def test_pb26_negative_zero_is_stored_as_zero(client, admin_headers, db_session)
     assert response.json()["threshold"] == 0.0
     assert stored(db_session, rule.rule_id).threshold == Decimal("0")
 
+
+# Audit #16: empty-string category acts as general rule in tightening & listing.
+
+
+def test_audit16_tightening_treats_empty_string_category_as_general_rule(
+        client, admin_headers, db_session):
+    all_rule = all_category_rule(db_session, "MAX_DISCOUNT")
+    # Deactivate the seeded NULL rule so only the "" general rule enforces the cap.
+    assert update(client, admin_headers, all_rule.rule_id,
+                  threshold=float(all_rule.threshold), is_active=False).status_code == 200
+    empty_general = create_rule(db_session, "MAX_DISCOUNT", 40, category="")
+    dairy_rule = create_rule(db_session, "MAX_DISCOUNT", 30, category="dairy")
+
+    # Category rule may not loosen above the "" general rule.
+    body = assert_rejected(
+        update(client, admin_headers, dairy_rule.rule_id, threshold=45, is_active=True),
+        422, "VALIDATION_ERROR")
+    assert "threshold" in body["message"]
+    assert stored(db_session, dairy_rule.rule_id).threshold == Decimal("30")
+
+    # "" general rule may not tighten below an active category rule.
+    body = assert_rejected(
+        update(client, admin_headers, empty_general.rule_id, threshold=20, is_active=True),
+        422, "VALIDATION_ERROR")
+    assert "threshold" in body["message"]
+    assert stored(db_session, empty_general.rule_id).threshold == Decimal("40")
+

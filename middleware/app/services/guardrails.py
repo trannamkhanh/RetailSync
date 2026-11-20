@@ -45,19 +45,31 @@ class _Target:
     days_left: int | None
 
 
-def apply_guardrails(session: Session, recommendation: Recommendation) -> str:
+def load_rules(session: Session) -> list[GuardrailRule]:
+    """Read the active rules, turning any failure into GuardrailRulesUnavailable."""
+    try:
+        return guardrail_rules.active_rules(session)
+    except Exception as error:  # noqa: BLE001 - any failure must write nothing
+        raise GuardrailRulesUnavailable(
+            "The guardrail rules could not be loaded.") from error
+
+
+def apply_guardrails(session: Session, recommendation: Recommendation,
+                     rules: list[GuardrailRule] | None = None) -> str:
     """Check one recommendation against DS-07 and store one result per rule.
 
     Returns the new status, PENDING or BLOCKED, and never commits. A rule that
     blocks stops the remaining checks. A recommendation with no rule to check,
     such as a REDISTRIBUTION without a batch, becomes PENDING with no result.
+    Pass preloaded ``rules`` from ``load_rules(session)`` to validate without
+    re-reading the database.
     """
-    rules = _load_rules(session)
+    active = load_rules(session) if rules is None else rules
     target = _target(session, recommendation)
     if recommendation.rec_id is None:
         session.flush()
     status = PENDING
-    for rule in _rules_to_check(recommendation, rules, target):
+    for rule in _rules_to_check(recommendation, active, target):
         outcome, original, adjusted, message = _check(rule, recommendation, target)
         _store(session, recommendation, rule, outcome, original, adjusted, message)
         if outcome == BLOCKED:
@@ -66,15 +78,6 @@ def apply_guardrails(session: Session, recommendation: Recommendation) -> str:
     recommendation.status = status
     session.flush()
     return status
-
-
-def _load_rules(session: Session) -> list[GuardrailRule]:
-    """Read the active rules, turning any failure into GuardrailRulesUnavailable."""
-    try:
-        return guardrail_rules.active_rules(session)
-    except Exception as error:  # noqa: BLE001 - any failure must write nothing
-        raise GuardrailRulesUnavailable(
-            "The guardrail rules could not be loaded.") from error
 
 
 def _target(session: Session, recommendation: Recommendation) -> _Target:
@@ -106,18 +109,25 @@ def _rules_to_check(recommendation: Recommendation, rules: list[GuardrailRule],
     return checked
 
 
+def _matches_category(rule_category: str | None, category: str) -> bool:
+    if guardrail_rules.is_general_category(rule_category):
+        return True
+    assert rule_category is not None
+    return rule_category.casefold() == category.casefold()
+
+
 def _strictest(rules: list[GuardrailRule], rule_type: str,
                category: str) -> GuardrailRule | None:
     """The lowest MAX_DISCOUNT, the highest MIN_PRICE or MIN_SHELF_LIFE (DS-07)."""
     matching = [rule for rule in rules
                 if rule.rule_type == rule_type
-                and (rule.category is None or rule.category == category)]
+                and _matches_category(rule.category, category)]
     if not matching:
         return None
 
     def rank(rule: GuardrailRule) -> tuple:
         # The category rule wins a tie, because it is the more specific one.
-        specific = 0 if rule.category is not None else 1
+        specific = 1 if guardrail_rules.is_general_category(rule.category) else 0
         if rule_type == "MAX_DISCOUNT":
             return rule.threshold, specific, rule.rule_id
         return -rule.threshold, specific, rule.rule_id
