@@ -40,6 +40,7 @@ Data reduction and success rate of these runs: [Sync_Metrics.md](Sync_Metrics.md
 ## 2. HQ outage
 
 - **Result:** **PASS** -- HQ `OFFLINE` from `03:10:18Z` to `03:13:21Z`: 15/15 events answered 200; 9 batches stayed PENDING; the oldest had 3 attempts with `503 HQ_OFFLINE` and backoff 5, 10, 20 s, the 8 newer ones waited untouched behind it (global send gate, DS-05 section 6). HQ back at `03:13:21Z`; all 9 ACKED by `03:14:01Z`, received oldest first; `RECONCILIATION PASS`.
+- **Note:** scenario 2 adds 16 linked transactions (21,604 -> 21,620) while scenarios 3 to 5 add 15 each. The 16th is the probe sale `LIVE-PROBE-37c15c4b` (POS-DN3-01, `03:10:07Z`), sent once through the gateway to check the driver's client certificate before the scenario started; it joined `SB-STORE-DN3-20261120031057`.
 - **Observed:**
   ```text
   SB-STORE-DN1-20261120031057  PENDING txns=2 attempts=3 retry_at=03:13:18 503 HQ_OFFLINE: HQ is offline for this demo.
