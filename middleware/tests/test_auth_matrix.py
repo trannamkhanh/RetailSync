@@ -69,6 +69,10 @@ NEAR_EXPIRY_ALERTS = ("GET", "/api/v1/near-expiry-alerts")
 RECOMMENDATIONS = ("GET", "/api/v1/recommendations")
 RECOMMENDATION = ("GET", "/api/v1/recommendations/{rec_id}")
 DECISION = ("POST", "/api/v1/recommendations/{rec_id}/decision")
+DASHBOARD_STORES = ("GET", "/api/v1/dashboard/stores")
+DASHBOARD_REVENUE = ("GET", "/api/v1/dashboard/revenue")
+DASHBOARD_BY_CATEGORY = ("GET", "/api/v1/dashboard/revenue-by-category")
+DASHBOARD_BY_STORE = ("GET", "/api/v1/dashboard/revenue-by-store")
 
 # Expected status for every protected route on main, by caller.
 #                  POS  Staff  Manager  HQ   Admin  Auditor  no token
@@ -91,8 +95,16 @@ MATRIX = {
     RECOMMENDATIONS: (403, 200,  403,     403, 403,   403,     401),
     RECOMMENDATION:  (403, 200,  403,     403, 403,   403,     401),
     DECISION:        (403, 200,  403,     403, 403,   403,     401),
+    DASHBOARD_STORES:      (403, 403, 200, 403, 200, 200,   401),
+    DASHBOARD_REVENUE:     (403, 403, 200, 403, 200, 200,   401),
+    DASHBOARD_BY_CATEGORY: (403, 403, 200, 403, 200, 200,   401),
+    DASHBOARD_BY_STORE:    (403, 403, 200, 403, 200, 200,   401),
 }
 CALLERS = [*ROLES, None]
+
+# A fixed, valid interval for every Dashboard request, so a 401 or 403 in the
+# matrix can only come from authorization.
+DASHBOARD_WINDOW = {"from": "2026-11-01T00:00:00Z", "to": "2026-12-01T00:00:00Z"}
 
 # A route whose authorized answer is not a 2xx. /hq/snapshot refuses every
 # snapshot by design (PB-13), so HQ is allowed although it gets 422.
@@ -205,6 +217,16 @@ REQUESTS: dict[tuple[str, str], Callable[[TestClient, dict], object]] = {
     DECISION: lambda client, headers: client.post(
         DECISION[1].format(rec_id=RECOMMENDATION_IDS["rec"]), headers=headers,
         json={"decision": "ACCEPT"}),
+    DASHBOARD_STORES: lambda client, headers: client.get(
+        DASHBOARD_STORES[1], headers=headers),
+    # The interval is fixed and valid for every caller, so only the role or the
+    # scope can decide the status.
+    DASHBOARD_REVENUE: lambda client, headers: client.get(
+        DASHBOARD_REVENUE[1], params=DASHBOARD_WINDOW, headers=headers),
+    DASHBOARD_BY_CATEGORY: lambda client, headers: client.get(
+        DASHBOARD_BY_CATEGORY[1], params=DASHBOARD_WINDOW, headers=headers),
+    DASHBOARD_BY_STORE: lambda client, headers: client.get(
+        DASHBOARD_BY_STORE[1], params=DASHBOARD_WINDOW, headers=headers),
 }
 
 
@@ -330,6 +352,10 @@ def test_matrix_allows_exactly_the_ds04_roles():
         RECOMMENDATIONS: {"Staff"},
         RECOMMENDATION: {"Staff"},
         DECISION: {"Staff"},
+        DASHBOARD_STORES: {"Admin", "Auditor", "Manager"},
+        DASHBOARD_REVENUE: {"Admin", "Auditor", "Manager"},
+        DASHBOARD_BY_CATEGORY: {"Admin", "Auditor", "Manager"},
+        DASHBOARD_BY_STORE: {"Admin", "Auditor", "Manager"},
     }
 
 

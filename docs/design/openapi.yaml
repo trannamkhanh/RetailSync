@@ -1,4 +1,4 @@
-openapi: 3.1.0
+﻿openapi: 3.1.0
 info:
   title: RetailSync Middleware API (DS-04)
   version: 1.0.0-draft
@@ -16,6 +16,14 @@ info:
     - Roles: POS, Staff, Manager, HQ, Admin, Auditor. Each operation names its roles in `x-roles`.
     - A valid token with a role that is not listed gets 403.
     - Staff and Manager tokens are tied to one store; requests for another store get 403.
+    - A timestamp without an offset is UTC (never local time). An offset is converted to UTC
+      before the value is compared or stored. Stored times have no offset and are UTC.
+    - `pos_transaction` keeps two moments: `created_at` (when the Middleware received the
+      event) and `occurred_at` (when the POS declared it happened, never overwritten by a
+      resend). The Dashboard reads `effective_at = COALESCE(occurred_at, created_at)`, so a
+      transaction stored before `occurred_at` existed falls back to its received time. Time
+      ranges are half-open `[from, to)`. Dashboard buckets are aligned to the store's
+      business day (UTC+7 by default); `/audit-logs` keeps the received time.
 servers:
   - url: https://middleware.retailsync.local/api/v1
     description: Regional Middleware (reachable only over the private WAN)
@@ -28,6 +36,7 @@ tags:
   - name: Audit
   - name: Sync
   - name: HQ demo
+  - name: Dashboard
 security:
   - bearerAuth: []
 paths:
@@ -914,6 +923,297 @@ paths:
         '200':
           description: Mode set
 
+  /dashboard/stores:
+    get:
+      tags: [Dashboard]
+      summary: Stores the caller may read
+      description: |
+        PB-49 (Dashboard revenue, plan v6). The store list of the caller's scope, for
+        the view selector and the comparison selector. Only the caller's role limits
+        the answer: no `store_id` is accepted and no `store_id` parameter is
+        validated here, so an unknown or out-of-scope store cannot be probed.
+
+        Admin and Auditor see every store in this Middleware. A Manager sees the one
+        store of `staff_user`, taken from the database first and then from the token
+        claim; a Manager with neither gets 403.
+
+        Unlike the other store listings, this one keeps a store whose `is_active` is
+        `0`: an Admin still needs the revenue history of a closed store. That is a
+        deliberate exception and does not change the other endpoints.
+      operationId: listDashboardStores
+      x-roles: [Admin, Auditor, Manager]
+      responses:
+        '200':
+          description: Stores in the caller's scope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStoreList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /dashboard/revenue:
+    get:
+      tags: [Dashboard]
+      summary: Revenue over time in one scope
+      description: |
+        PB-49 (Dashboard revenue, plan v6). Net revenue per bucket, with the total,
+        the transaction count, the time-quality counts and the scope that answered.
+
+        Time is the half-open interval **`[from, to)`**: a transaction whose
+        `effective_at` equals `to` is not counted, and one equal to `from` is. This
+        matches `/audit-logs` on purpose; only the resolution differs.
+
+        `effective_at` is `COALESCE(occurred_at, created_at)`, so a transaction
+        stored before `occurred_at` existed falls back to the moment the Middleware
+        received it and is approximate.
+
+        Revenue is `SUM(CASE WHEN txn_type = 'SALE' THEN qty * unit_price ELSE
+        -qty * unit_price END)` over `transaction_item` with **no** `status`
+        filter: a CANCELLATION copies the items of the sale it cancels, so sale and
+        cancellation cancel each other out. Filtering `status` here would double
+        count.
+
+        `store_id` absent means the whole system (Admin/Auditor) or the caller's
+        whole scope (Manager). `include_suspect` defaults to `true`; when it is
+        `false` the money and the buckets leave out `SUSPECT_FUTURE` and
+        `SUSPECT_OLD`, while `quality` still counts the whole selected interval.
+
+        Money is a JSON number with two decimals.
+      operationId: getDashboardRevenue
+      x-roles: [Admin, Auditor, Manager]
+      parameters:
+        - name: store_id
+          in: query
+          required: false
+          description: |
+            The view scope. Absent means the whole system for Admin and Auditor, or
+            the caller's whole scope for a Manager.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 10
+            pattern: '^[A-Za-z0-9_-]+$'
+        - name: from
+          in: query
+          required: true
+          description: |
+            Start of the half-open interval `[from, to)`. A value without an offset
+            is UTC.
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: true
+          description: |
+            End of the half-open interval `[from, to)`; excluded. A value without an
+            offset is UTC.
+          schema:
+            type: string
+            format: date-time
+        - name: bucket
+          in: query
+          required: false
+          description: |
+            Size of the time buckets. `hour` buckets are aligned to the business
+            date of the store, `day`, `week` (ISO) and `month` are aligned to their
+            own calendar. Default `day`.
+          schema:
+            type: string
+            enum: [hour, day, week, month]
+            default: day
+        - name: include_suspect
+          in: query
+          required: false
+          description: |
+            `true` (default) counts every transaction; `false` leaves
+            `SUSPECT_FUTURE` and `SUSPECT_OLD` out of the money and the points.
+            `quality` counts the whole interval either way.
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: Revenue points, total and quality of the selected interval
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardRevenue'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: |
+            `from` later than `to`, an unparsable time, or a `store_id` that does
+            not exist. Code `INVALID_STORE` for an unknown store, `VALIDATION_ERROR`
+            for a bad field.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /dashboard/revenue-by-category:
+    get:
+      tags: [Dashboard]
+      summary: Revenue split by product category in one scope
+      description: |
+        PB-49 (Dashboard revenue, plan v6). The pie chart: each category's share of
+        the net revenue of the view scope, in the half-open interval `[from, to)`.
+
+        A category may be negative, when its returns exceed its sales in the
+        interval; it is returned as it is and the caller draws it separately. The
+        total is the same revenue the other charts report.
+
+        Categories are the `product.category` values of the catalogue; the UI adds
+        the Vietnamese label. An empty or missing category is grouped under `Khác`.
+
+        `store_id` absent means the whole system (Admin/Auditor) or the caller's
+        whole scope (Manager). `include_suspect` behaves as on `/dashboard/revenue`.
+      operationId: getDashboardRevenueByCategory
+      x-roles: [Admin, Auditor, Manager]
+      parameters:
+        - name: store_id
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 10
+            pattern: '^[A-Za-z0-9_-]+$'
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: include_suspect
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: Categories, shares, total and quality
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardCategoryRevenue'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: |
+            `from` later than `to`, or an unknown `store_id`. Code `INVALID_STORE`
+            or `VALIDATION_ERROR`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /dashboard/revenue-by-store:
+    get:
+      tags: [Dashboard]
+      summary: Revenue per store for the comparison chart
+      description: |
+        PB-49 (Dashboard revenue, plan v6). The bar chart: net revenue per store
+        in the half-open interval `[from, to)`, for the stores in the comparison
+        set.
+
+        The comparison set is independent of the view scope: the line and pie
+        charts read `store_id`, while this one reads `compare_store_ids`. A caller
+        may therefore read one store's revenue and still compare a wider set,
+        within the caller's own authority.
+
+        `compare_store_ids` repeats its key (`?compare_store_ids=A&compare_store_ids=B`)
+        and is never comma separated. Absent or empty means every store in the
+        caller's scope. The set can only narrow that scope, never widen it: a
+        Manager who names another store gets 403, and an Admin or Auditor who names
+        a store that does not exist gets 422 `INVALID_STORE`.
+
+        The set is filtered to the authorized stores before it is queried, so a
+        comparison answer never reveals a store outside the caller's scope.
+
+        Money is a JSON number with two decimals.
+      operationId: getDashboardRevenueByStore
+      x-roles: [Admin, Auditor, Manager]
+      parameters:
+        - name: compare_store_ids
+          in: query
+          required: false
+          description: |
+            Stores to compare, repeated. Absent or empty means every store in the
+            caller's scope.
+          schema:
+            type: array
+            items:
+              type: string
+              minLength: 1
+              maxLength: 10
+              pattern: '^[A-Za-z0-9_-]+$'
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: include_suspect
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: One column per store, its share, and the quality
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStoreRevenueResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: |
+            The caller is not allowed to compare that store, or the caller has no
+            store at all. Code `FORBIDDEN`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: |
+            `from` later than `to`, or a `compare_store_ids` value that does not
+            exist. Code `INVALID_STORE` or `VALIDATION_ERROR`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1369,3 +1669,257 @@ components:
           type: string
         message:
           type: string
+
+    # --- Dashboard (PB-49, plan v6) ---------------------------------------
+
+    DashboardStore:
+      type: object
+      required: [store_id, name, region_id, is_active]
+      properties:
+        store_id:
+          type: string
+          minLength: 1
+          maxLength: 10
+        name:
+          type: string
+        region_id:
+          type: string
+          minLength: 1
+          maxLength: 10
+        is_active:
+          type: boolean
+          description: |
+            `false` for a closed store. `/dashboard/stores` keeps it, so an Admin
+            can still read its history; this is the deliberate exception to the
+            other store listings.
+
+    DashboardStoreList:
+      type: object
+      required: [stores]
+      properties:
+        stores:
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardStore'
+
+    DashboardScope:
+      type: object
+      description: Which scope answered, so the caller can tell the two apart.
+      required: [store_id, is_system_wide]
+      properties:
+        store_id:
+          type: [string, 'null']
+          description: The view scope, or `null` for the whole system.
+        is_system_wide:
+          type: boolean
+          description: |
+            `true` when the answer covers every store in the caller's scope, not a
+            single `store_id`.
+
+    DashboardTimePolicy:
+      type: object
+      description: |
+        The two thresholds that decide the labels of `quality`, as the server
+        applies them. The console shows these, it never recomputes the labels.
+      required: [max_future_skew_seconds, max_backfill_days]
+      properties:
+        max_future_skew_seconds:
+          type: integer
+          minimum: 0
+          description: Beyond this, a declared moment is `SUSPECT_FUTURE`.
+        max_backfill_days:
+          type: integer
+          minimum: 1
+          description: Beyond this, a declared moment is `SUSPECT_OLD`.
+
+    DashboardTimeQuality:
+      type: object
+      description: |
+        Transaction counts of the selected interval, by the declared moment's
+        trustworthiness. `unknown` counts the rows stored before `occurred_at`
+        existed; the money still uses their `created_at`.
+      required: [on_time, backfill, suspect_future, suspect_old, unknown]
+      properties:
+        on_time:
+          type: integer
+          minimum: 0
+        backfill:
+          type: integer
+          minimum: 0
+        suspect_future:
+          type: integer
+          minimum: 0
+        suspect_old:
+          type: integer
+          minimum: 0
+        unknown:
+          type: integer
+          minimum: 0
+
+    DashboardBucket:
+      type: object
+      description: One bucket of the line chart, in the half-open interval `[from, to)`.
+      required: [from, to, revenue, transactions]
+      properties:
+        from:
+          type: string
+          format: date-time
+          description: Bucket start, in UTC.
+        to:
+          type: string
+          format: date-time
+          description: |
+            Bucket end, in UTC and excluded. Buckets are generated over the
+            selected interval, so an empty bucket is still returned with 0.
+        revenue:
+          type: number
+          description: Net revenue, a JSON number with two decimals.
+        transactions:
+          type: integer
+          minimum: 0
+
+    DashboardRevenue:
+      type: object
+      description: The line chart, the KPI and the badge of the selected interval.
+      required: [scope, time_policy, data_from, data_to, has_data, total_revenue,
+                 transactions, quality, buckets]
+      properties:
+        scope:
+          $ref: '#/components/schemas/DashboardScope'
+        time_policy:
+          $ref: '#/components/schemas/DashboardTimePolicy'
+        data_from:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            Earliest `effective_at` with data in the interval, or `null` when there
+            is none. The console clamps a wider request to this and says so.
+        data_to:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            Latest `effective_at` with data in the interval, or `null` when there
+            is none.
+        has_data:
+          type: boolean
+          description: >
+            `false` when no transaction matches, so the console can show the empty
+            state and the 0 KPIs.
+        total_revenue:
+          type: number
+          description: |
+            Net revenue of the interval, a JSON number with two decimals. It is the
+            sum of the buckets and may be negative.
+        transactions:
+          type: integer
+          minimum: 0
+          description: Transactions counted, before any `include_suspect` filter.
+        quality:
+          $ref: '#/components/schemas/DashboardTimeQuality'
+        buckets:
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardBucket'
+
+    DashboardCategory:
+      type: object
+      description: |
+        One slice of the pie chart. A negative `revenue` is returned as it is; the
+        caller notes it and draws only the positive part.
+      required: [category, revenue, share]
+      properties:
+        category:
+          type: string
+          description: |
+            `product.category`, or `Khác` when the product has none. The UI adds the
+            Vietnamese label.
+        revenue:
+          type: number
+          description: Net revenue, a JSON number with two decimals.
+        share:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Share of the total revenue, from 0 to 1.
+
+    DashboardCategoryRevenue:
+      type: object
+      description: The pie chart, with the total and the time quality.
+      required: [scope, time_policy, total_revenue, transactions, quality, categories]
+      properties:
+        scope:
+          $ref: '#/components/schemas/DashboardScope'
+        time_policy:
+          $ref: '#/components/schemas/DashboardTimePolicy'
+        total_revenue:
+          type: number
+          description: |
+            Net revenue of the interval, equal to the sum of the category revenues.
+            May be negative.
+        transactions:
+          type: integer
+          minimum: 0
+        quality:
+          $ref: '#/components/schemas/DashboardTimeQuality'
+        categories:
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardCategory'
+
+    DashboardStoreRevenue:
+      type: object
+      description: One column of the comparison chart, sorted by revenue descending.
+      required: [store_id, name, region_id, revenue, share]
+      properties:
+        store_id:
+          type: string
+          minLength: 1
+          maxLength: 10
+        name:
+          type: string
+        region_id:
+          type: string
+        revenue:
+          type: number
+          description: Net revenue, a JSON number with two decimals.
+        share:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Share of the compared set's total revenue, from 0 to 1.
+
+    DashboardStoreRevenueResponse:
+      type: object
+      description: The bar chart, with the total and the time quality.
+      required: [scope, time_policy, data_from, data_to, has_data, total_revenue,
+                 transactions, quality, stores]
+      properties:
+        scope:
+          $ref: '#/components/schemas/DashboardScope'
+        time_policy:
+          $ref: '#/components/schemas/DashboardTimePolicy'
+        data_from:
+          type: [string, 'null']
+          format: date-time
+        data_to:
+          type: [string, 'null']
+          format: date-time
+        has_data:
+          type: boolean
+        total_revenue:
+          type: number
+          description: |
+            Sum of the compared stores, equal to the total the other charts report
+            for the same interval.
+        transactions:
+          type: integer
+          minimum: 0
+        quality:
+          $ref: '#/components/schemas/DashboardTimeQuality'
+        stores:
+          type: array
+          description: |
+            One entry per store in the comparison set, a store with no revenue
+            included, sorted by revenue descending and then by store id.
+          items:
+            $ref: '#/components/schemas/DashboardStoreRevenue'
