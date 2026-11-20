@@ -153,7 +153,7 @@ After building `middleware` and migrating the target database (Section 5), run f
 ```powershell
 docker compose build middleware
 docker compose run --rm --no-deps --volume "${PWD}:/repo:ro" --workdir /repo middleware python scripts/register_pos_certificates.py
-docker compose run --rm --volume "${PWD}:/repo" --workdir /repo middleware python scripts/issue_demo_tokens.py
+docker compose run --rm --no-deps --volume "${PWD}:/repo" --workdir /repo middleware python scripts/issue_demo_tokens.py
 ```
 
 - `scripts/register_pos_certificates.py` writes each terminal's DER SHA-256 fingerprint into `pos_terminal.cert_fingerprint` in `DB_NAME` (from `.env`).
@@ -487,10 +487,10 @@ docker compose run --rm -e DB_NAME=RTS_DB_TEST -e HQ_DB_NAME=RTS_HQ_TEST migrate
 
 ### 10.1. Middleware Tests (Container — Authoritative)
 
-Pass both `TEST_DB_NAME=RTS_DB_TEST` and `DB_NAME=RTS_DB_NOWRITE` (a non-existent DB name) so any stray `SessionLocal()` call fails immediately instead of writing to `RTS_DB`. Mount the entire repository root because tests read `database/seed/` and `scripts/`:
+Pass `--no-deps` (so `middleware`'s `depends_on: migrate` does not run `migrate` against `.env`'s default `DB_NAME`) together with `TEST_DB_NAME=RTS_DB_TEST` and `DB_NAME=RTS_DB_NOWRITE` (a non-existent DB name) so any stray `SessionLocal()` call fails immediately instead of writing to `RTS_DB`. Mount the entire repository root because tests read `database/seed/` and `scripts/`:
 
 ```powershell
-docker compose run --rm --volume "${PWD}:/repo" --workdir /repo/middleware --env PYTHONDONTWRITEBYTECODE=1 --env TEST_DB_NAME=RTS_DB_TEST --env DB_NAME=RTS_DB_NOWRITE middleware sh -c 'pip install -q -r requirements-dev.txt && python -m pytest -p no:cacheprovider -q'
+docker compose run --rm --no-deps --volume "${PWD}:/repo" --workdir /repo/middleware --env PYTHONDONTWRITEBYTECODE=1 --env TEST_DB_NAME=RTS_DB_TEST --env DB_NAME=RTS_DB_NOWRITE middleware sh -c 'pip install -q -r requirements-dev.txt && python -m pytest -p no:cacheprovider -q'
 ```
 
 Expected: all tests **passed**, **0 skipped**.
@@ -506,10 +506,10 @@ Health-only check without SQL Server: `python -m pytest tests/test_health.py`.
 
 ### 10.2. HQ Demo Tests (Container)
 
-Runs exclusively against `RTS_HQ_TEST`:
+Runs exclusively against `RTS_HQ_TEST` (pass `--no-deps` so `migrate` is not triggered against `.env`'s default `DB_NAME`):
 
 ```powershell
-docker compose run --rm -e HQ_DB_NAME=RTS_HQ_TEST --volume "${PWD}/hq-demo:/app" --workdir /app hq-demo sh -c 'pip install -q -r requirements-dev.txt && python -m pytest -p no:cacheprovider -q'
+docker compose run --rm --no-deps -e HQ_DB_NAME=RTS_HQ_TEST --volume "${PWD}/hq-demo:/app" --workdir /app hq-demo sh -c 'pip install -q -r requirements-dev.txt && python -m pytest -p no:cacheprovider -q'
 ```
 
 ### 10.3. .NET Client Tests (Windows)
@@ -523,10 +523,10 @@ dotnet test clients/demo-console/DemoConsole.sln
 
 ```powershell
 # POS event simulator (network-free)
-docker compose run --rm --volume "${PWD}:/repo" --workdir /repo/tools/pos-simulator --env PYTHONPATH=/repo/middleware:/repo/tools/pos-simulator --env PYTHONDONTWRITEBYTECODE=1 middleware sh -c 'pip install -q -r requirements.txt -r /repo/middleware/requirements-dev.txt && python -m pytest -p no:cacheprovider -q'
+docker compose run --rm --no-deps --volume "${PWD}:/repo" --workdir /repo/tools/pos-simulator --env PYTHONPATH=/repo/middleware:/repo/tools/pos-simulator --env PYTHONDONTWRITEBYTECODE=1 middleware sh -c 'pip install -q -r requirements.txt -r /repo/middleware/requirements-dev.txt && python -m pytest -p no:cacheprovider -q'
 
 # History generator (against RTS_DB_TEST)
-docker compose run --rm --volume "${PWD}:/repo" --workdir /repo/tools/history-generator --env PYTHONPATH=/repo/middleware:/repo/tools/history-generator --env PYTHONDONTWRITEBYTECODE=1 middleware sh -c 'pip install -q -r /repo/middleware/requirements-dev.txt && python -m pytest -p no:cacheprovider -p tests.conftest -q tests'
+docker compose run --rm --no-deps --volume "${PWD}:/repo" --workdir /repo/tools/history-generator --env PYTHONPATH=/repo/middleware:/repo/tools/history-generator --env PYTHONDONTWRITEBYTECODE=1 middleware sh -c 'pip install -q -r /repo/middleware/requirements-dev.txt && python -m pytest -p no:cacheprovider -p tests.conftest -q tests'
 ```
 
 ---

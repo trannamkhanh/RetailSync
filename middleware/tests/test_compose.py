@@ -24,7 +24,8 @@ def test_audit02_compose_mounts_only_needed_certificate_files():
 
     for name, service in services.items():
         for vol in service.get("volumes", []):
-            assert not vol.startswith("./.certs:/certs"), (
+            source = vol.split(":", 1)[0].rstrip("/")
+            assert source != "./.certs", (
                 f"Service '{name}' mounts the entire .certs directory: {vol}"
             )
             assert "ca.key" not in vol, f"Service '{name}' must not mount ca.key: {vol}"
