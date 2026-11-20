@@ -232,7 +232,8 @@ the same form.
 
 `clients/demo-console/` is the presenter's window on machine S: live stock and
 batches, transactions and audit, sync batches and HQ totals, near-expiry alerts and
-forecasts, and a revenue tab (PB-49), with buttons for sync, HQ modes, the snapshot
+forecasts, and a revenue tab (PB-49) whose line, pie and bar charts are drawn from
+three of the dashboard routes below, with buttons for sync, HQ modes, the snapshot
 and job runs. It reads `.env`, `.certs/` and `.tokens/` at run time, runs only
 SELECT statements and refuses `RTS_DB` and `RTS_DB_TEST`. See
 `clients/demo-console/README.md`.

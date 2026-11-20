@@ -45,20 +45,36 @@ binaries and MSBuild skips recompiling it.
 | Giao dịch và audit | Latest 30 transactions (history `HIST-` left out), latest 30 audit rows | SQL `pos_transaction`; `GET /audit-logs` with `auditor` |
 | Đồng bộ và HQ | `sync_batch` rows, HQ batches and totals | SQL `sync_batch`; `GET /demo/batches` on the HQ demo |
 | Job | Open near-expiry alerts, latest forecast per store and SKU | SQL `near_expiry_alert`, `forecast` |
-| Doanh thu (PB-49) | Revenue line per day, net total, transaction count, time-quality badge | `GET /dashboard/revenue` and `GET /dashboard/stores` with `admin` |
+| Doanh thu (PB-49) | Line per day, category pie, store comparison bars, net total, transaction count, time-quality badge | `GET /dashboard/revenue`, `/dashboard/revenue-by-category`, `/dashboard/revenue-by-store` and `/dashboard/stores` with `admin` |
 
-The **Doanh thu** tab is the only tab that refuses SQL: the revenue rule lives on
-the server, so the presenter shows the API answer and never recomputes it. It has
-its own 30-second timer (`DashboardRefreshSeconds`), because the other four tabs
-refresh every 3 seconds and a range aggregate that often would be a heavy query for
-a chart that only needs to move once a period. The filters are the scope (whole
-system, or one store) and the period (Ngày, Tuần, Tháng, Quý). The tab always uses
-the Admin token, so it shows the Admin view and has no role picker.
+The **Doanh thu** tab draws the three charts of `Dashboard_Survey_and_Plan.md` §6.5-6.7:
 
-The badge names the two suspect groups and the pre-migration rows, so an
-approximate total is never shown as if it were exact. `BACKFILL` counts as trusted;
-`SUSPECT_FUTURE`, `SUSPECT_OLD` and `unknown` do not, and the API returns their
-counts even when the money came from `include_suspect=false`.
+| Chart | Data | Scope |
+|---|---|---|
+| Đường: Tổng doanh thu theo thời gian | Net revenue per bucket | The view scope |
+| Tròn: Tỷ lệ theo danh mục | Share per product category | The view scope |
+| Cột: So sánh cửa hàng | One column per store | The comparison set, independent of the view scope |
+
+The pie follows the design's label mapping (`Dairy` → *Sản phẩm từ sữa*, `Bakery` →
+*Bánh nướng*, `Dry goods` → *Thực phẩm khô*); an unmapped category keeps its own name.
+A category whose net revenue is negative cannot be a share of a whole, so it is left
+out of the pie and named in a note under it instead of being silently dropped.
+
+Both the pie and the bar stay in the tab while only the line was in the implementation
+plan's D3 scope; the two endpoints were already part of D2, so only the UI was missing.
+
+The tab is the only one that refuses SQL: the revenue rule lives on the server, so the
+presenter shows the API answer and never recomputes it. It has its own 30-second timer
+(`DashboardRefreshSeconds`), because the other four tabs refresh every 3 seconds and
+three range aggregates that often would be a heavy query for charts that only need to
+move once a period. The view filter is the scope (whole system, or one store); the bar
+always compares the Admin's whole scope, which is the documented default selection.
+There is no role picker, so the tab is always the Admin view.
+
+The badge names the two suspect groups and the pre-migration rows, so an approximate
+total is never shown as if it were exact. `BACKFILL` counts as trusted;
+`SUSPECT_FUTURE`, `SUSPECT_OLD` and `unknown` do not, and the API returns their counts
+even when the money came from `include_suspect=false`.
 
 Buttons: **Chạy đồng bộ** (`POST /sync/run`, admin), one button per HQ mode
 (`PUT /demo/mode`), **Gửi snapshot** (`POST /hq/snapshot`, hq_operator), **Chạy
