@@ -232,9 +232,47 @@ the same form.
 
 `clients/demo-console/` is the presenter's window on machine S: live stock and
 batches, transactions and audit, sync batches and HQ totals, near-expiry alerts and
-forecasts, with buttons for sync, HQ modes, the snapshot and job runs. It reads
-`.env`, `.certs/` and `.tokens/` at run time, runs only SELECT statements and
-refuses `RTS_DB` and `RTS_DB_TEST`. See `clients/demo-console/README.md`.
+forecasts, and a revenue tab (PB-49), with buttons for sync, HQ modes, the snapshot
+and job runs. It reads `.env`, `.certs/` and `.tokens/` at run time, runs only
+SELECT statements and refuses `RTS_DB` and `RTS_DB_TEST`. See
+`clients/demo-console/README.md`.
+
+### Revenue dashboard API (PB-49)
+
+Four read-only routes, all guarded by `require_role("Admin", "Auditor",
+"Manager")`. They are the product surface; the console tab is only a client of them.
+
+| Route | Answer |
+|---|---|
+| `GET /dashboard/revenue` | Net revenue per bucket (`day`, `week`, `month`, `quarter`), the total, the transaction count and the time-quality counts |
+| `GET /dashboard/revenue-by-category` | Net revenue and share per product category |
+| `GET /dashboard/revenue-by-store` | Net revenue and share per store of the comparison set |
+| `GET /dashboard/stores` | The stores of the caller's scope, with `is_active` |
+
+Revenue is `qty * unit_price` for a SALE minus the same for a RETURN or
+CANCELLATION, with no `status` filter: a cancellation copies the sale's items and
+the pair sums to zero. The interval is half-open, `[from, to)`, like `/audit-logs`.
+
+The moment read is `effective_at = COALESCE(occurred_at, created_at)`, a persisted
+computed column added by migration 004. `occurred_at` is the POS-declared `timestamp`
+(naive means UTC); `created_at` stays the moment the Middleware received the event.
+Rows stored before migration 004 keep `occurred_at` NULL and fall back to
+`created_at`, and the API reports them as `unknown` rather than dropping them.
+
+The quality counts (`ON_TIME`, `BACKFILL`, `SUSPECT_FUTURE`, `SUSPECT_OLD`,
+`unknown`) are read over the whole interval even when `include_suspect=false`, so a
+caller can always see how many transactions the money left out. Thresholds come from
+`POS_MAX_FUTURE_SKEW_SECONDS` (default 300) and `POS_MAX_BACKFILL_DAYS` (default 30).
+
+The view scope (`store_id`) decides the line and pie charts; the comparison scope
+(`compare_store_ids`) decides the bar chart. A Manager may read only its own store
+and may compare only stores it owns, because the comparison set is intersected with
+the allowed set, never unioned with it. An unknown store answers 422 `INVALID_STORE`.
+
+```powershell
+$h = @{ Authorization = "Bearer $env:ADMIN_TOKEN" }
+Invoke-RestMethod "https://localhost:8443/api/v1/dashboard/revenue?from=2026-08-22T00:00:00Z&to=2026-11-20T00:00:00Z&bucket=day" -Headers $h -SkipCertificateCheck
+```
 
 `scripts/demo/reset_demo_db.ps1` rebuilds `RTS_DB_DEMO` and `RTS_HQ` with 90 days
 of history and batches near expiry. The one-action scripts `sync_run.ps1`,
@@ -307,7 +345,8 @@ docker compose run --rm migrate
 
 The first run on a new database reports `Applying 001_core.sql`,
 `Applying 002_batches_alerts_forecast.sql`, `Applying 003_recommendations.sql`,
-then `Database is up to date`. The second run reports only the final message.
+`Applying 004_pos_transaction_occurred_at.sql`, then `Database is up to date`. The
+second run reports only the final message.
 The runner also executes the idempotent store/POS seed on each run.
 
 Verify the database without printing credentials:

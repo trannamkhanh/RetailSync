@@ -43,6 +43,7 @@ internal sealed class MainForm : Form
     private FeatureState _snapshotFeature = FeatureState.Unknown;
     private FeatureState _nearExpiryFeature = FeatureState.Unknown;
     private FeatureState _forecastFeature = FeatureState.Unknown;
+    private FeatureState _dashboardFeature = FeatureState.Unknown;
     private string _hqMode = "chưa đặt từ bảng điều khiển (HQ demo khởi động ở ONLINE)";
 
     // Tab 1
@@ -79,6 +80,13 @@ internal sealed class MainForm : Form
     private readonly DataGridView _alertGrid;
     private readonly DataGridView _forecastGrid;
     private readonly Label _forecastEmpty;
+
+    // Tab 5 (PB-49): revenue dashboard, with its own slower timer.
+    private readonly Label _dashboardStatus;
+    private readonly DashboardTab _dashboard;
+    private readonly System.Windows.Forms.Timer _dashboardTimer = new();
+    private readonly Func<DateTime> _utcNow = () => DateTime.UtcNow;
+    private bool _dashboardRefreshing;
 
     // Window
     private readonly Label _resultLine;
@@ -293,6 +301,15 @@ internal sealed class MainForm : Form
         jobs.Controls.Add(_forecastGrid, 0, 5);
         tabs.TabPages.Add(Page("Job", _jobStatus, jobs));
 
+        // --- Tab 5: revenue dashboard (PB-49) -------------------------------
+        // Its own timer: see DashboardRefreshSeconds. It is deliberately absent from
+        // the 3-second RefreshAllAsync list, which would fire a range aggregate on
+        // every tick of the other four tabs.
+        _dashboardStatus = StatusLine();
+        _dashboard = new DashboardTab(_config.MiddlewareBaseUrl, _utcNow, _font);
+        _dashboard.RefreshRequested += RefreshDashboardAsync;
+        tabs.TabPages.Add(Page("Doanh thu", _dashboardStatus, _dashboard));
+
         Controls.Add(tabs);
         Controls.Add(_resultLine);
         Controls.Add(_headerLine);
@@ -300,14 +317,19 @@ internal sealed class MainForm : Form
         UpdateFeatureControls();
         _timer.Interval = _config.RefreshSeconds * 1000;
         _timer.Tick += async (_, _) => await RefreshAllAsync();
+        _dashboardTimer.Interval = Math.Max(1, _config.DashboardRefreshSeconds) * 1000;
+        _dashboardTimer.Tick += async (_, _) => await RefreshDashboardAsync();
         Shown += async (_, _) =>
         {
             await RefreshAllAsync();
             _timer.Start();
+            await RefreshDashboardAsync();
+            _dashboardTimer.Start();
         };
         FormClosed += (_, _) =>
         {
             _timer.Stop();
+            _dashboardTimer.Stop();
             _api.Dispose();
         };
     }
@@ -346,9 +368,103 @@ internal sealed class MainForm : Form
         }
     }
 
-    /// <summary>Runs one tab's refresh and writes its last refresh time and last error.</summary>
-    private static async Task Guard(Label status, Func<Task<string?>> refresh)
+    /// <summary>
+    /// The Dashboard's own refresh, on its own timer. It keeps the last good chart
+    /// when a call fails, so a transient error does not blank the demo screen.
+    /// </summary>
+    private async Task RefreshDashboardAsync()
     {
+        if (_dashboardRefreshing)
+        {
+            return;
+        }
+
+        _dashboardRefreshing = true;
+        _dashboard.SetBusy(true);
+        try
+        {
+            if (_dashboardFeature != FeatureState.NotDeployed)
+            {
+                _dashboardFeature = Merge(_dashboardFeature, await ProbeDashboardAsync());
+            }
+
+            if (_dashboardFeature == FeatureState.NotDeployed)
+            {
+                _dashboard.SetAvailable(false, FeatureAvailability.Reason("Doanh thu", _dashboardFeature));
+                _dashboardStatus.Text = FeatureAvailability.Reason("Doanh thu", _dashboardFeature);
+                _dashboardStatus.ForeColor = Theme.Warn;
+                return;
+            }
+
+            if (_dashboard.ScopeChoices == 0)
+            {
+                var stores = await _api.GetDashboardStoresAsync();
+                if (stores.IsSuccess)
+                {
+                    try
+                    {
+                        _dashboard.SetStores(ApiParsers.DashboardStores(stores.Body));
+                    }
+                    catch (FormatException error)
+                    {
+                        _dashboardStatus.Text = $"Danh sách cửa hàng: không đọc được câu trả lời: {error.Message}";
+                        _dashboardStatus.ForeColor = Theme.Warn;
+                    }
+                }
+            }
+
+            var (fromUtc, toUtc) = _dashboard.Window();
+            var answer = await _api.GetDashboardRevenueAsync(fromUtc, toUtc, _dashboard.SelectedStoreId,
+                _dashboard.Period);
+            // Only a 404 means the route is missing; any other failure keeps the tab.
+            _dashboardFeature = FeatureAvailability.FromAction(answer, _dashboardFeature);
+
+            var time = LocalTime(DateTime.UtcNow);
+            if (answer.IsSuccess)
+            {
+                try
+                {
+                    _dashboard.Show(ApiParsers.DashboardRevenue(answer.Body));
+                    _dashboardStatus.Text = $"Làm mới lúc {time}. Không có lỗi.";
+                    _dashboardStatus.ForeColor = Theme.Ok;
+                }
+                catch (FormatException error)
+                {
+                    _dashboard.ShowError(answer);
+                    _dashboardStatus.Text = $"Làm mới lúc {time}. Không đọc được câu trả lời: {error.Message}";
+                    _dashboardStatus.ForeColor = Theme.Error;
+                }
+            }
+            else
+            {
+                _dashboard.ShowError(answer);
+                _dashboardStatus.Text = $"Làm mới lúc {time}. Lỗi gần nhất: {answer.Summary}";
+                _dashboardStatus.ForeColor = Theme.Error;
+            }
+        }
+        catch (Exception exception)
+        {
+            _dashboardStatus.Text = $"Lỗi gần nhất: {exception.Message}";
+            _dashboardStatus.ForeColor = Theme.Error;
+        }
+        finally
+        {
+            _dashboard.SetBusy(false);
+            _dashboardRefreshing = false;
+            UpdateFeatureControls();
+        }
+    }
+
+    /// <summary>GET a valid Dashboard route: 404 when the four routes are not deployed.</summary>
+    private async Task<FeatureState> ProbeDashboardAsync()
+    {
+        var now = DateTime.UtcNow;
+        var probe = await _api.GetDashboardRevenueAsync(now.AddDays(-1), now, null, "day");
+        return FeatureAvailability.FromProbe(probe);
+    }
+
+    /// <summary>Runs one tab's refresh and writes its last refresh time and last error.</summary>
+    private static async Task Guard(Label status, Func<Task<string?>> refresh)    {
         string? error;
         try
         {
@@ -661,6 +777,9 @@ internal sealed class MainForm : Form
             _forecastFeature == FeatureState.NotDeployed ? "Dự báo: chưa có job forecast (404, chờ PB-22/23); mở lại bảng điều khiển sau khi merge." : null,
         }.Where(text => text is not null);
         _jobFeatureLine.Text = string.Join("   ", jobReasons);
+
+        _dashboard?.SetAvailable(_dashboardFeature != FeatureState.NotDeployed,
+            FeatureAvailability.Reason("Doanh thu", FeatureState.NotDeployed));
     }
 
     // --- Actions --------------------------------------------------------------
