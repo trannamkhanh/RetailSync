@@ -17,6 +17,8 @@ public sealed class DemoApiClient : IDisposable
     public static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(5);
     public static readonly TimeSpan ActionTimeout = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan JobTimeout = TimeSpan.FromMinutes(5);
+    /// <summary>The Dashboard aggregates a range, so it is slower than a list read.</summary>
+    public static readonly TimeSpan DashboardTimeout = TimeSpan.FromSeconds(10);
 
     private readonly HttpClient _http;
     private readonly string _middleware;
@@ -53,6 +55,38 @@ public sealed class DemoApiClient : IDisposable
 
     public Task<ApiResult> GetHqBatchesAsync() =>
         SendAsync(HttpMethod.Get, $"{_hq}/demo/batches", null, null, ReadTimeout);
+
+    // --- Dashboard (PB-49): Admin only, read-only ---------------------------
+
+    /// <summary>GET /dashboard/revenue over the half-open interval [fromUtc, toUtc).</summary>
+    public Task<ApiResult> GetDashboardRevenueAsync(DateTime fromUtc, DateTime toUtc, string? storeId,
+                                                    string bucket) =>
+        SendAsync(HttpMethod.Get,
+            $"{_middleware}/dashboard/revenue{DashboardWindow(fromUtc, toUtc, storeId, bucket)}",
+            "admin", null, DashboardTimeout);
+
+    /// <summary>GET /dashboard/stores: the store filter's choices.</summary>
+    public Task<ApiResult> GetDashboardStoresAsync() =>
+        SendAsync(HttpMethod.Get, $"{_middleware}/dashboard/stores", "admin", null, ReadTimeout);
+
+    /// <summary>
+    /// The query string for the revenue route. Both instants are sent as UTC with a
+    /// ``Z``, because an unqualified value would be read as UTC anyway and a local
+    /// one would then be silently shifted.
+    /// </summary>
+    public static string DashboardWindow(DateTime fromUtc, DateTime toUtc, string? storeId, string bucket)
+    {
+        var query = $"from={Uri.EscapeDataString(Iso(fromUtc))}&to={Uri.EscapeDataString(Iso(toUtc))}" +
+                    $"&bucket={Uri.EscapeDataString(bucket)}";
+        return string.IsNullOrEmpty(storeId)
+            ? query
+            : $"{query}&store_id={Uri.EscapeDataString(storeId)}";
+    }
+
+    /// <summary>``yyyy-MM-ddTHH:mm:ssZ`` in UTC, the form the contract documents.</summary>
+    public static string Iso(DateTime utc) =>
+        DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToString("yyyy-MM-ddTHH:mm:ssZ",
+            System.Globalization.CultureInfo.InvariantCulture);
 
     // --- Probes for the 404 rule (no side effect) ----------------------------
 

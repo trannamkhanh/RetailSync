@@ -299,6 +299,35 @@ Lưu ý cho bước 1 và 2:
   bước 2 dùng tăng ngưỡng.
 - Bước 3 chạy trên máy A, cần middleware nhận kết nối từ IP máy S (mục 3) và PB-35 đã merge.
 
+### Màn 7: Doanh thu (tab Doanh thu, PB-49)
+
+| Bước | Ai | Thao tác | Thấy gì | Script dự phòng |
+|---|---|---|---|---|
+| 1 | Kiệt | Mở tab **Doanh thu**, phạm vi **Toàn hệ thống**, mốc **Ngày** | Biểu đồ đường doanh thu theo ngày, KPI "Doanh thu thuần" và số giao dịch, badge chất lượng thời gian xanh (đủ tin cậy) hoặc cam khi có giao dịch chưa tin cậy | `curl` (bên dưới) |
+| 2 | Kiệt | Đổi phạm vi sang một cửa hàng | Cùng biểu đồ, chỉ còn cửa hàng đó; KPI giảm tương ứng | `GET /dashboard/revenue?store_id=STORE-DN1` |
+| 3 | Kiệt | Đổi mốc sang **Tuần** | Biểu đồ ít điểm hơn, tổng không đổi (cùng khoảng thời gian) | `bucket=week` |
+| 4 | Kiệt | Nhấn **Làm mới** | Dòng trạng thái "Làm mới lúc HH:mm:ss. Không có lỗi." | `GET /dashboard/revenue` |
+
+Lưu ý cho màn 7:
+
+- Tab này tự làm mới mỗi **30 giây**, không phải 3 giây như bốn tab kia. Bấm **Làm mới**
+  nếu muốn số liệu ngay sau khi bán.
+- Số liệu 90 ngày là **lịch sử mô phỏng** do `tools/history-generator` sinh ra, không phải
+  giao dịch thật của buổi demo; nói rõ điều này khi trình bày.
+- Badge chất lượng thời gian đọc `occurred_at` so với `created_at`: `ON_TIME` lệch không quá
+  300 giây, `BACKFILL` nhận bù trong 30 ngày, `SUSPECT_FUTURE`/`SUSPECT_OLD` là hai nhóm
+  nghi ngờ, `unknown` là giao dịch lưu trước migration 004. `BACKFILL` vẫn tin cậy; ba nhóm
+  còn lại thì không, và badge nói rõ bao nhiêu phần trăm.
+- Chỉ Admin: tab dùng token `admin`, không có bộ chọn vai trò.
+- Lệnh dự phòng khi bảng điều khiển lỗi:
+
+```powershell
+$body = Invoke-RestMethod "https://localhost:8443/api/v1/dashboard/revenue?from=2026-08-22T00:00:00Z&to=2026-11-20T00:00:00Z&bucket=day" -Headers @{ Authorization = "Bearer $env:ADMIN_TOKEN" } -SkipCertificateCheck
+$body.total_revenue
+$body.quality
+```
+
+
 ## 5. Dự phòng (Demo_Plan mục 5)
 
 | Sự cố | Làm gì | Ai |
