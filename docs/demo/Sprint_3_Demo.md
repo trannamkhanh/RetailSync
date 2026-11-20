@@ -160,6 +160,25 @@ Lưu ý (sửa trong PR PB-45-6): Demo POS khởi động được chỉ với c
 Máy A chạy thêm script tra cứu liên cửa hàng (màn 6 bước 3), dùng token `staff_dn1` vừa
 chép.
 
+### Staff App trên máy A (PB-46, PB-47)
+
+Staff App (`clients/staff-app/`) là cửa sổ của nhân viên cửa hàng: tra cứu mã vạch và cửa hàng
+gần, cảnh báo cận hạn, đề xuất với Accept/Reject. Nó chỉ gọi API qua HTTPS 8443 bằng token
+`staff_dn1` đã chép ở bước 2, không đọc SQL.
+
+1. Khi còn Internet, publish ra một thư mục ngoài repo:
+
+```powershell
+dotnet publish clients/staff-app/StaffApp/StaffApp.csproj -c Release -o C:\RetailSync\StaffApp
+```
+
+2. Chép `.certs\ca.crt` (từ `out\A`) vào `C:\RetailSync\StaffApp\ca.crt`.
+3. Tạo `C:\RetailSync\StaffApp\appsettings.Local.json`: `BaseUrl` là
+   `https://<IP của S>:8443/api/v1`, `TokenFile` là đường dẫn tới `.tokens\demo_tokens.json` của bản
+   clone, `TokenName` là `staff_dn1` (mẫu trong `clients/staff-app/README.md`).
+4. Chạy `C:\RetailSync\StaffApp\StaffApp.exe`. Tiêu đề hiện `STORE-DN1 | Staff: staff_dn1`.
+   Token hết hạn hoặc bị cấp lại sau reset thì app báo "Token invalid or expired": chép lại token mới.
+
 ## 3. Mạng riêng (Khánh, PB-45-6)
 
 Hotspot/router riêng, không ra Internet. Máy S đặt IP tĩnh (ví dụ `192.168.1.10`) và chọn profile mạng
