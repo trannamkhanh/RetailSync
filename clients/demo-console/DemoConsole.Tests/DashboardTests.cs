@@ -194,7 +194,19 @@ public sealed class DashboardTests
 
         var query = DemoApiClient.DashboardWindow(from, to, null, "day");
 
-        Assert.Equal("from=2026-11-01T00%3A00%3A00Z&to=2026-11-08T00%3A00%3A00Z&bucket=day", query);
+        // The leading '?' is part of the query string: without it the parameters fuse
+        // with the path segment and the middleware answers 404.
+        Assert.Equal("?from=2026-11-01T00%3A00%3A00Z&to=2026-11-08T00%3A00%3A00Z&bucket=day", query);
+        Assert.StartsWith("?", query);
+    }
+
+    [Fact]
+    public void A_store_scope_still_starts_with_the_question_mark()
+    {
+        var from = new DateTime(2026, 11, 1, 0, 0, 0, DateTimeKind.Utc);
+        var to = new DateTime(2026, 11, 8, 0, 0, 0, DateTimeKind.Utc);
+
+        Assert.StartsWith("?", DemoApiClient.DashboardWindow(from, to, "STORE-DN1", "day"));
     }
 
     [Fact]

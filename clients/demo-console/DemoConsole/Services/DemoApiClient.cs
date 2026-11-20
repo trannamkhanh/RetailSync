@@ -70,13 +70,13 @@ public sealed class DemoApiClient : IDisposable
         SendAsync(HttpMethod.Get, $"{_middleware}/dashboard/stores", "admin", null, ReadTimeout);
 
     /// <summary>
-    /// The query string for the revenue route. Both instants are sent as UTC with a
-    /// ``Z``, because an unqualified value would be read as UTC anyway and a local
-    /// one would then be silently shifted.
+    /// The query string for the revenue route, including its leading ``?`` so the
+    /// caller can concatenate it onto the path. Without the ``?`` the parameters run
+    /// into the last path segment and the route answers 404.
     /// </summary>
     public static string DashboardWindow(DateTime fromUtc, DateTime toUtc, string? storeId, string bucket)
     {
-        var query = $"from={Uri.EscapeDataString(Iso(fromUtc))}&to={Uri.EscapeDataString(Iso(toUtc))}" +
+        var query = $"?from={Uri.EscapeDataString(Iso(fromUtc))}&to={Uri.EscapeDataString(Iso(toUtc))}" +
                     $"&bucket={Uri.EscapeDataString(bucket)}";
         return string.IsNullOrEmpty(storeId)
             ? query
