@@ -48,6 +48,9 @@ public sealed class MainForm : Form
     private readonly Button _accept = new() { Text = "Accept", AutoSize = true, Enabled = false };
     private readonly Button _reject = new() { Text = "Reject", AutoSize = true, Enabled = false };
     private RecommendationDetail? _detail;
+    private readonly LatestRequest _detailRequests = new();
+    // True while the grid is rebuilt: Rows.Add selects row 0 and fires SelectionChanged.
+    private bool _binding;
 
     private bool _alertsLoaded;
     private bool _recommendationsLoaded;
@@ -136,7 +139,13 @@ public sealed class MainForm : Form
         refresh.Click += async (_, _) => await RunAsync(LoadRecommendationsAsync);
         var left = Column(refresh, _recommendationsEmpty, _recommendations);
         left.RowStyles[2] = new RowStyle(SizeType.Percent, 100);
-        _recommendations.SelectionChanged += async (_, _) => await RunAsync(ShowSelectedAsync);
+        _recommendations.SelectionChanged += async (_, _) =>
+        {
+            if (!_binding)
+            {
+                await RunAsync(ShowSelectedAsync);
+            }
+        };
 
         _detailTitle.Font = new Font(Font.FontFamily, Font.Size + 1, FontStyle.Bold);
         var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
@@ -227,6 +236,9 @@ public sealed class MainForm : Form
 
     private async Task OnTabChangedAsync(int index)
     {
+        // Retry belongs to the screen that failed; a new tab starts without it.
+        _retry.Visible = false;
+        _lastAction = null;
         if (index == 1 && !_alertsLoaded)
         {
             await RunAsync(LoadAlertsAsync);
@@ -335,14 +347,23 @@ public sealed class MainForm : Form
 
     private void BindRecommendations()
     {
-        _recommendations.Rows.Clear();
-        foreach (var line in _board.Rows)
+        _binding = true;
+        try
         {
-            var index = _recommendations.Rows.Add(line.ActionType, line.Sku, line.Level);
-            _recommendations.Rows[index].Tag = line.RecId;
+            _recommendations.Rows.Clear();
+            foreach (var line in _board.Rows)
+            {
+                var index = _recommendations.Rows.Add(line.ActionType, line.Sku, line.Level);
+                _recommendations.Rows[index].Tag = line.RecId;
+            }
+
+            _recommendations.ClearSelection();
+        }
+        finally
+        {
+            _binding = false;
         }
 
-        _recommendations.ClearSelection();
         _recommendationsEmpty.Text = _board.Rows.Count == 0 ? UserMessages.NoRecommendations : string.Empty;
         ClearDetail();
     }
@@ -361,8 +382,14 @@ public sealed class MainForm : Form
         }
 
         ClearDetail();
+        var ticket = _detailRequests.Next();
         SetStatus($"Loading recommendation {recId}...", error: false);
         var result = await _api.GetRecommendationAsync(recId);
+        if (!_detailRequests.IsCurrent(ticket))
+        {
+            return;  // the user selected another row, or the list was rebuilt
+        }
+
         if (!result.IsSuccess)
         {
             var message = UserMessages.For(result, ApiArea.Detail);
@@ -442,6 +469,7 @@ public sealed class MainForm : Form
 
     private void ClearDetail()
     {
+        _detailRequests.Invalidate();
         _detail = null;
         _detailTitle.Text = "Select a recommendation";
         _detailExpiry.Text = string.Empty;
