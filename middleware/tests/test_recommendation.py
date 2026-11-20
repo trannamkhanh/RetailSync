@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core import clock
-from app.domain.models import Forecast, GuardrailResult, NearExpiryAlert, Product, ProductBatch, Recommendation, StaffDecision, StaffUser, Store
+from app.domain.models import Forecast, GuardrailResult, GuardrailRule, NearExpiryAlert, Product, ProductBatch, Recommendation, StaffDecision, StaffUser, Store
 from app.jobs import recommendation as job
 from app.repositories.forecast import utc_start
 from app.services import guardrail_rules
@@ -92,11 +92,11 @@ def test_pb25_store_failure_rolls_back_and_other_store_still_saves(
     monkeypatch.setattr(guardrail_rules, "active_rules", lambda session: [])
     apply = job.apply_guardrails
 
-    def fail_one_store(session, recommendation):
+    def fail_one_store(session, recommendation, **kwargs):
         if recommendation.store_id == failing_store:
             session.flush()
             raise RuntimeError("forced store failure")
-        return apply(session, recommendation)
+        return apply(session, recommendation, **kwargs)
 
     monkeypatch.setattr(job, "apply_guardrails", fail_one_store)
     results = job.run_recommendations()
@@ -239,6 +239,11 @@ def test_pb25_final_state_suppresses_only_same_business_date(
     if state == "BLOCKED":
         original.status = state
         original.created_at = timestamp
+        rule = GuardrailRule(rule_type="MIN_SHELF_LIFE", threshold=2, category=None, is_active=True)
+        db_session.add(rule)
+        db_session.flush()
+        db_session.add(GuardrailResult(rec_id=original.rec_id, rule_id=rule.rule_id,
+                                       outcome="BLOCKED", checked_at=timestamp))
         db_session.commit()
     else:
         decide(db_session, original, "ACCEPT" if state == "ACCEPTED" else "REJECT", timestamp)
