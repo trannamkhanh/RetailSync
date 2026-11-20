@@ -12,8 +12,7 @@ Regional middleware between POS terminals and HQ: realtime multi-store inventory
 | `docs/Deployment_Guide.md` | Full deployment, LAN setup, backup/restore, test suites, and troubleshooting guide (PB-42-1) |
 | `clients/demo-pos/` | WinForms demo POS with monitor panels (PB-45 part 1) |
 | `clients/demo-console/` | WinForms demo console for the presenter on machine S (PB-42-6) |
-
-Planned: `hq-demo/` (PB-18) and `staff-app/` (WinForms client, PB-46, PB-47).
+| `clients/staff-app/` | WinForms Staff App: lookup, near-expiry alerts, recommendations (PB-46, PB-47); see its README |
 
 ## Run
 
