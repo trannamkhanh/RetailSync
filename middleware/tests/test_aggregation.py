@@ -8,6 +8,7 @@ deleted afterwards; the savepoint tests leave nothing behind either.
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import json
 from uuid import uuid4
 
 import pytest
@@ -25,7 +26,7 @@ from app.domain.models import (
 )
 from app.jobs import aggregation as job
 from app.repositories import aggregation as repository
-from app.services.aggregation import aggregate_store
+from app.services.aggregation import aggregate_store, event_bytes, pos_event
 
 
 def _uid(length: int = 6) -> str:
@@ -265,7 +266,7 @@ def test_sync14_6_period_covers_the_batch(db_session):
     assert batch.period_start == first
     assert batch.period_end == second
     assert batch.payload_bytes is None
-    assert batch.raw_bytes is None
+    assert batch.raw_bytes > 0  # filled since PB-40 (TST40-3)
 
 
 def test_sync14_7_a_failure_rolls_back_and_the_next_run_includes_it(monkeypatch):
@@ -412,3 +413,60 @@ def test_pb14_lock_timeout_is_restored_after_aggregation(db_session):
     aggregate_store(db_session, store_id, datetime.now(timezone.utc))
 
     assert db_session.execute(text("SELECT @@LOCK_TIMEOUT")).scalar() == -1
+
+
+# raw_bytes (PB-40, TST40-3)
+
+
+def _known_transaction(txn_type: str, txn_id: str, minute: int, quantity: int,
+                       ref_txn_id: str | None = None) -> tuple[PosTransaction, list[TransactionItem]]:
+    transaction = PosTransaction(txn_id=txn_id, store_id="TEST-S1", pos_id="TEST-P1", txn_type=txn_type,
+                                 ref_txn_id=ref_txn_id, status="OK", payload_hash="0" * 64,
+                                 created_at=datetime(2026, 11, 20, 3, minute, 0, 654321))
+    return transaction, [TransactionItem(txn_id=txn_id, sku="SKU-1", qty=quantity, unit_price=Decimal("10.5"))]
+
+
+def test_tst40_3_raw_size_is_the_compact_pos_event_json_in_utf8_bytes():
+    sale = _known_transaction("SALE", "TEST-T1", 15, 2)
+    returned = _known_transaction("RETURN", "TEST-T2", 16, 1, ref_txn_id="TEST-T1")
+    cancelled = _known_transaction("CANCELLATION", "TEST-T3", 17, 2, ref_txn_id="TEST-T1")
+
+    assert json.dumps(pos_event(*sale), separators=(",", ":")) == (
+        '{"event_type":"SALE","transaction_id":"TEST-T1","store_id":"TEST-S1","pos_id":"TEST-P1",'
+        '"timestamp":"2026-11-20T03:15:00Z","items":[{"sku":"SKU-1","quantity":2,"unit_price":"10.50"}]}')
+    assert [event_bytes(pos_event(*txn)) for txn in (sale, returned, cancelled)] == [183, 221, 178]
+    assert pos_event(*returned)["original_transaction_id"] == "TEST-T1"
+    assert pos_event(*cancelled)["items"] == []
+
+
+def test_tst40_3_a_batch_stores_the_raw_size_of_its_transactions(db_session):
+    skus = [f"TEST-SKU-{_uid(5)}", f"TEST-SKU-{_uid(5)}"]
+    store_id, pos_id = _create_store(db_session, skus)
+    created = datetime(2026, 11, 20, 3, 15, 0)
+    sale = _add_transaction(db_session, store_id, pos_id, "SALE",
+                            [(skus[0], 2, Decimal("10.00")), (skus[1], 1, Decimal("7.25"))], created_at=created)
+    refund = _add_transaction(db_session, store_id, pos_id, "RETURN", [(skus[0], 1, Decimal("10.00"))],
+                              created_at=created, ref_txn_id=sale)
+    other = _add_transaction(db_session, store_id, pos_id, "SALE", [(skus[1], 3, Decimal("7.25"))],
+                             created_at=created)
+    cancel = _add_transaction(db_session, store_id, pos_id, "CANCELLATION", [(skus[1], 3, Decimal("7.25"))],
+                              created_at=created, ref_txn_id=other)
+
+    batch_id = aggregate_store(db_session, store_id, datetime.now(timezone.utc))
+
+    def event(kind: str, txn_id: str, items: list, ref: str | None = None) -> dict:
+        body = {"event_type": kind, "transaction_id": txn_id}
+        if ref is not None:
+            body["original_transaction_id"] = ref
+        return {**body, "store_id": store_id, "pos_id": pos_id, "timestamp": "2026-11-20T03:15:00Z",
+                "items": [{"sku": sku, "quantity": qty, "unit_price": price} for sku, qty, price in items]}
+
+    expected = [
+        event("SALE", sale, [(skus[0], 2, "10.00"), (skus[1], 1, "7.25")]),
+        event("RETURN", refund, [(skus[0], 1, "10.00")], ref=sale),
+        event("SALE", other, [(skus[1], 3, "7.25")]),
+        event("CANCELLATION", cancel, [], ref=other),
+    ]
+    batch = db_session.get(SyncBatch, batch_id)
+    assert batch.raw_bytes == sum(len(json.dumps(body, separators=(",", ":")).encode("utf-8")) for body in expected)
+    assert batch.raw_bytes > 0

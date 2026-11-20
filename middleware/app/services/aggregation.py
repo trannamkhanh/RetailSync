@@ -2,15 +2,32 @@
 
 The caller owns the transaction and commits; the job in ``app/jobs/aggregation``
 calls this once per store.
+
+``raw_bytes`` (PB-40, TST40-3) is what the batch's transactions would cost if
+they were sent to HQ one by one: the sum, over every transaction of the batch
+(SALE, RETURN and CANCELLATION), of the UTF-8 byte length of
+``json.dumps(event, separators=(",", ":"))``, where ``event`` is the DS-04 POS
+event rebuilt from the stored transaction: ``event_type``, ``transaction_id``,
+``store_id``, ``pos_id``, ``timestamp`` (ISO 8601 UTC, seconds, ``Z``),
+``items`` with ``sku``, ``quantity`` and ``unit_price``, plus
+``original_transaction_id`` for RETURN and CANCELLATION only. ``unit_price`` is
+normalised to a two-decimal string, as the POS simulator sends it; DS-04 types
+it as a number and the demo POS sends a number, which is 2 bytes shorter per
+item. A CANCELLATION carries no items on the wire (its stored items are copied
+from the sale). It is measured like ``payload_bytes``, the UTF-8 length of the
+body sent to HQ.
 """
 
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from decimal import Decimal
+import json
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.domain.models import SalesSummaryLine, SyncBatch
+from app.domain.models import PosTransaction, SalesSummaryLine, SyncBatch, TransactionItem
 from app.repositories import aggregation as repository
 from app.services.event_audit import lock_wait_limited
 
@@ -24,6 +41,40 @@ def _utc(moment: datetime) -> datetime:
 def batch_id_for(store_id: str, moment: datetime) -> str:
     """DS-05 section 2: SB-<store_id>-<yyyyMMddHHmmss UTC>, at most 28 characters."""
     return f"SB-{store_id}-{_utc(moment):%Y%m%d%H%M%S}"
+
+
+def pos_event(transaction: PosTransaction, items: Iterable[TransactionItem]) -> dict:
+    """The DS-04 POS event rebuilt from a stored transaction, ``unit_price`` as a two-decimal string."""
+    event: dict = {"event_type": transaction.txn_type, "transaction_id": transaction.txn_id}
+    if transaction.txn_type != "SALE":
+        event["original_transaction_id"] = transaction.ref_txn_id
+    event.update({
+        "store_id": transaction.store_id,
+        "pos_id": transaction.pos_id,
+        "timestamp": f"{_utc(transaction.created_at):%Y-%m-%dT%H:%M:%SZ}",
+        "items": [] if transaction.txn_type == "CANCELLATION" else [
+            {"sku": item.sku, "quantity": item.qty, "unit_price": f"{Decimal(item.unit_price):.2f}"}
+            for item in items
+        ],
+    })
+    return event
+
+
+def event_bytes(event: dict) -> int:
+    return len(json.dumps(event, separators=(",", ":")).encode("utf-8"))
+
+
+def raw_bytes_of(session: Session, sync_batch_id: str) -> int:
+    """Sum of ``event_bytes`` over the batch's transactions (see the module docstring)."""
+    transactions = session.scalars(
+        select(PosTransaction).where(PosTransaction.sync_batch_id == sync_batch_id)
+        .order_by(PosTransaction.txn_id)).all()
+    items: dict[str, list[TransactionItem]] = {}
+    for item in session.scalars(
+            select(TransactionItem).join(PosTransaction, PosTransaction.txn_id == TransactionItem.txn_id)
+            .where(PosTransaction.sync_batch_id == sync_batch_id).order_by(TransactionItem.item_id)):
+        items.setdefault(item.txn_id, []).append(item)
+    return sum(event_bytes(pos_event(txn, items.get(txn.txn_id, []))) for txn in transactions)
 
 
 def aggregate_store(session: Session, store_id: str, now: datetime) -> str | None:
@@ -66,6 +117,7 @@ def aggregate_store(session: Session, store_id: str, now: datetime) -> str | Non
             ))
 
         batch.txn_count = len(claimed)
+        batch.raw_bytes = raw_bytes_of(session, sync_batch_id)
         batch.period_start = min(created_at for _, created_at in claimed)
         batch.period_end = max(created_at for _, created_at in claimed)
         session.flush()

@@ -89,7 +89,7 @@ A FAILED batch is kept for investigation. Its transactions stay linked to it, so
 ## 6. Sending and retry
 
 - One sender runs at a time, in the same process as the API. `POST /sync/run` joins or skips a cycle that is already running.
-- Eligible batches: PENDING with `next_retry_at` empty or due, oldest `created_at` first across all stores.
+- Eligible batches: only the oldest PENDING batch across all stores (by `created_at`) may be sent next; it is sent when its `next_retry_at` is empty or due, and while it is not due no newer batch is sent (global send gate, decided 12 Nov 2026).
 - Stop the cycle on the first timeout, connection error or 5xx. HQ is treated as down, and order is preserved.
 - A FAILED batch does not block the next one.
 - Call timeout: 3 seconds.
