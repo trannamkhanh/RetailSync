@@ -59,3 +59,30 @@ def test_pb22_1_history_is_repeatable_without_touching_stock(db_session):
     db_session.expire_all()
     assert db_session.get(Inventory, (store, sku)).quantity == 7
     assert db_session.get(ProductBatch, batch).quantity == 7
+
+
+def test_generated_history_carries_occurred_at(db_session):
+    """A generated line is a sale that happened, not a backfill (plan M7)."""
+    suffix = uid(5)
+    store, sku, pos = f"TEST-{suffix}", f"TEST-SKU-{suffix}", f"TEST-POS-{suffix}"
+    db_session.add_all([
+        Store(store_id=store, name="History", latitude=0, longitude=0, region_id="TEST"),
+        Product(sku=sku, barcode=sku, name="History product", category="TEST", unit_price=10),
+    ])
+    db_session.flush()
+    db_session.add(PosTerminal(pos_id=pos, store_id=store, status="ACTIVE"))
+    add_stock(db_session, store, sku, 7)
+    as_of = date(2026, 11, 14)
+
+    load_history(db_session, 90, 42, as_of, store_ids={store})
+
+    rows = db_session.execute(
+        select(PosTransaction.occurred_at, PosTransaction.created_at)
+        .where(PosTransaction.store_id == store)
+    ).all()
+    assert rows and all(occurred is not None for occurred, _ in rows)
+    # A generated row is received at once, so it is ON_TIME and not BACKFILL, and
+    # created_at is unchanged, so the demo data keeps its shape.
+    assert all(occurred == created for occurred, created in rows)
+    # The declared moment is never in the future.
+    assert all(occurred.date() < as_of for occurred, _ in rows)

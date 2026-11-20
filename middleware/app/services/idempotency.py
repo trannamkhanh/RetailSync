@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy.exc import IntegrityError
@@ -35,17 +36,36 @@ def _duplicate(existing_hash: str, payload_hash: str) -> bool:
     return False
 
 
+def _to_utc_naive(value: datetime | None) -> datetime | None:
+    """A naive timestamp is already UTC; an offset is converted before storing.
+
+    ``pos_transaction`` keeps ``datetime2`` without an offset, as every other
+    table does, and the convention (DS-04) is that a value without one is UTC.
+    """
+    if value is None or value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
 def claim_transaction(
     session: Session, txn_id: str, store_id: str, pos_id: str, txn_type: str,
-    ref_txn_id: str | None, payload_hash: str,
+    ref_txn_id: str | None, payload_hash: str, occurred_at: datetime | None = None,
 ) -> bool:
+    """Claim ``txn_id`` and store ``occurred_at`` on the first one only.
+
+    ``occurred_at`` is the moment the POS declares, never the moment of arrival,
+    and it is never overwritten: a duplicate returns before anything is written,
+    so a resend with a different timestamp keeps the first value.
+    """
     existing = repository.find_payload_hash(session, txn_id)
     if existing is not None:
         return _duplicate(existing, payload_hash)
+    occurred = _to_utc_naive(occurred_at)
     try:
         with session.begin_nested():
             repository.insert_transaction(
                 session, txn_id, store_id, pos_id, txn_type, ref_txn_id, payload_hash,
+                occurred,
             )
     except IntegrityError:
         existing = repository.find_payload_hash(session, txn_id)
@@ -53,6 +73,11 @@ def claim_transaction(
             raise
         return _duplicate(existing, payload_hash)
     return True
+
+
+def stored_occurred_at(session: Session, txn_id: str) -> datetime | None:
+    """The ``occurred_at`` of the stored transaction, or ``None`` when it has none."""
+    return repository.find_occurred_at(session, txn_id)
 
 
 def stock_of_transaction(session: Session, store_id: str, txn_id: str) -> dict[str, int]:

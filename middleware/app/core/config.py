@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     hq_timeout_seconds: float = Field(default=3, gt=0)
     # The alert window of a product category that has no near_expiry_config row.
     near_expiry_default_days: int = Field(default=3, ge=0, le=3650)
+    # Dashboard time quality (DS-04, plan section 4.3): how far a POS-declared
+    # occurred_at may sit from created_at before it is still ON_TIME, and how old
+    # a backfilled transaction may be before it is SUSPECT_OLD.
+    pos_max_future_skew_seconds: int = Field(default=300, ge=0)
+    pos_max_backfill_days: int = Field(default=30, ge=1, le=3650)
 
 
 settings = Settings()

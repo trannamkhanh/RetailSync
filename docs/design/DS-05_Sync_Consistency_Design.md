@@ -60,6 +60,30 @@ Calculation per SKU:
 
 A sale and its cancellation may fall in different batches. This is correct because HQ adds deltas.
 
+### 4.1 Batch membership is by sync state, not by a time window
+
+A batch is the set of transactions that have no `sync_batch_id` when the job claims
+them. It is **not** a day, an hour, or any other period: the job never filters or
+groups by `created_at` or `occurred_at`. Two consequences follow, and both are
+intentional:
+
+- `period_start` and `period_end` are the minimum and maximum `created_at` of the
+  claimed transactions, which is the moment the Middleware **received** them.
+- `sync_batch_id` carries the moment the aggregation ran, in UTC.
+
+The Dashboard (DS-04, `/dashboard/*`) deliberately uses a different moment:
+`effective_at = COALESCE(occurred_at, created_at)`, the moment the sale **happened**
+as the POS declared it. A sale that happened on 10 October at 20:00 but was sent on
+12 October at 09:00 is Dashboard revenue on 10 October and belongs to the batch
+claimed on 12 October.
+
+Therefore a single batch's `net_revenue` will not equal the Dashboard revenue of any
+one day. Only the total over the whole period matches: summing every batch's
+`net_revenue` equals the Dashboard total for the same `from`/`to` when every
+transaction is in a batch. Reconciliation is done on that total, never batch by
+batch. Aligning the two exactly would be a contract change on one side or the other
+and is outside this design.
+
 ## 5. Batch state machine
 
 ```mermaid

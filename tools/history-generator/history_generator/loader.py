@@ -66,6 +66,11 @@ def _transactions(products: list[Product], terminals: list[str], store: str, sto
                     "txn_id": txn, "store_id": store, "pos_id": pos, "txn_type": kind,
                     "ref_txn_id": reference, "status": "OK", "sync_batch_id": f"SB-HIST-{store}",
                     "payload_hash": content_hash(kind, store, pos, reference, [(sku, qty, product.unit_price)]),
+                    # The simulated moment the sale happened, and the moment the
+                    # Middleware would have received it. A generated line is
+                    # received at once, so it is ON_TIME and not BACKFILL, and
+                    # created_at keeps the value it had before migration 004.
+                    "occurred_at": created,
                     "created_at": created,
                 })
                 items.append({"txn_id": txn, "sku": sku, "qty": qty, "unit_price": product.unit_price})
@@ -84,6 +89,9 @@ def _replace_store_history(session: Session, store: str, sales: list[dict],
 
     if not sales:
         return
+    # The generated rows carry both moments, so the batch's received-time window
+    # stays the one DS-05 describes while the Dashboard can still read the
+    # simulated moment the sale happened.
     timestamps = [row["created_at"] for row in sales + returns]
     session.execute(insert(SyncBatch), [{
         "sync_batch_id": batch_id, "store_id": store, "status": "ACKED",
