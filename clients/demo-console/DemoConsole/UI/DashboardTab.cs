@@ -69,6 +69,7 @@ internal sealed class DashboardTab : UserControl
     private readonly Label _sourceLine;
     private readonly Label _emptyLine;
     private readonly Label _pieNote;
+    private readonly Label _pieLegend;
     private readonly CartesianChart _lineChart;
     private readonly PieChart _pieChart;
     private readonly CartesianChart _barChart;
@@ -121,6 +122,9 @@ internal sealed class DashboardTab : UserControl
         _pieNote = Theme.Line(fontSize);
         _pieNote.ForeColor = Theme.Warn;
         _pieNote.Dock = DockStyle.Top;
+        _pieLegend = Theme.Line(fontSize, bold: true);
+        _pieLegend.Dock = DockStyle.Top;
+        _pieLegend.Visible = false;
 
         // --- chart 1: revenue over time -----------------------------------
         _lineSeries = new LineSeries<double>
@@ -147,7 +151,7 @@ internal sealed class DashboardTab : UserControl
             Dock = DockStyle.Fill,
             Series = Array.Empty<ISeries>(),
             AnimationsSpeed = TimeSpan.Zero,
-            LegendPosition = LiveChartsCore.Measure.LegendPosition.Right,
+            LegendPosition = LiveChartsCore.Measure.LegendPosition.Hidden,
         };
 
         // --- chart 3: comparison set --------------------------------------
@@ -206,6 +210,7 @@ internal sealed class DashboardTab : UserControl
         var pieArea = new Panel { Dock = DockStyle.Fill };
         pieArea.Controls.Add(_pieChart);
         pieArea.Controls.Add(_pieNote);
+        pieArea.Controls.Add(_pieLegend);
         var barArea = new Panel { Dock = DockStyle.Fill };
         barArea.Controls.Add(_barChart);
         split.Controls.Add(Captioned("Tỷ lệ theo danh mục", pieArea, fontSize), 0, 0);
@@ -287,25 +292,44 @@ internal sealed class DashboardTab : UserControl
     public void ShowCategories(DashboardCategoryRevenue revenue)
     {
         var slices = revenue.PositiveSlices;
-        // One series per category, because the legend is built from the series names
-        // and each slice needs its own "label + share". A single series would give the
-        // pie its values but no per-slice label.
+        var total = slices.Sum(slice => slice.Revenue);
+
+        // LiveCharts2 keeps one colour per *series* and does not cycle a palette across
+        // the points of a single series, so one series holding every value would draw a
+        // one-colour disc. One series per category gives each slice its own colour and
+        // its own legend entry, and the pie still splits by value because every series
+        // contributes one sector.
         _pieChart.Series = slices
-            .Select(category => (ISeries)new PieSeries<double>
+            .Select(slice => (ISeries)new PieSeries<double>
             {
-                Values = new[] { (double)category.Revenue },
-                Name = $"{Label(category.Category)} {category.Share * 100:0.#}%",
+                Values = new[] { (double)slice.Revenue },
+                Name = $"{Label(slice.Category)} {Share(slice.Revenue, total)}%",
                 DataLabelsPaint = new SolidColorPaint(SKColors.Black),
                 DataLabelsSize = (int)_quality.Font.SizeInPoints + 1,
-                DataLabelsPosition = LiveChartsCore.Measure.PolarLabelsPosition.Outer,
-                ToolTipLabelFormatter = _ => $"{Label(category.Category)}: {Money(category.Revenue)}",
+                DataLabelsPosition = LiveChartsCore.Measure.PolarLabelsPosition.Middle,
+                DataLabelsFormatter = _ => Share(slice.Revenue, total) + "%",
             })
             .ToArray();
+        // The legend sits below the disc rather than beside it: on a projector a
+        // right-hand legend steals half the pane and leaves a circle too small to read.
+        _pieChart.LegendPosition = LiveChartsCore.Measure.LegendPosition.Hidden;
         _pieChart.Invalidate();
+        _pieChart.PerformLayout();
+
+        // The legend carries the category names, because a pie slice has no axis.
+        _pieLegend.Text = slices.Count == 0
+            ? string.Empty
+            : string.Join("    ", slices.Select(slice =>
+                $"■ {Label(slice.Category)} {Share(slice.Revenue, total)}%"));
+        _pieLegend.Visible = _pieLegend.Text.Length > 0;
 
         _pieNote.Text = NoteLine(revenue);
         _pieNote.Visible = _pieNote.Text.Length > 0;
     }
+
+    /// <summary>One decimal place, as the design shows it ("45,2%").</summary>
+    public static string Share(decimal part, decimal total) =>
+        total == 0 ? "0" : (part / total * 100).ToString("0.#", CultureInfo.InvariantCulture);
 
     /// <summary>Renders the comparison bars. Order is the server's (revenue descending).</summary>
     public void ShowStores(DashboardStoreRevenueResponse revenue)
