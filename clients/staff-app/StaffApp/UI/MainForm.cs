@@ -41,10 +41,10 @@ public sealed class MainForm : Form
     // Recommendations
     private readonly DataGridView _recommendations = Grid("Action", "Product", "Level");
     private readonly Label _recommendationsEmpty = new() { AutoSize = true, ForeColor = Color.DimGray };
-    private readonly Label _detailTitle = new() { AutoSize = true, MaximumSize = new Size(520, 0) };
+    private readonly Label _detailTitle = new() { AutoSize = true, MaximumSize = new Size(500, 0) };
     private readonly Label _detailExpiry = new() { AutoSize = true };
-    private readonly Label _detailReason = new() { AutoSize = true, MaximumSize = new Size(520, 0) };
-    private readonly ListBox _guardrails = new() { Height = 120, Width = 520, IntegralHeight = false };
+    private readonly Label _detailReason = new() { AutoSize = true, MaximumSize = new Size(500, 0) };
+    private readonly ListBox _guardrails = new() { Height = 120, Width = 500, IntegralHeight = false };
     private readonly Button _accept = new() { Text = "Accept", AutoSize = true, Enabled = false };
     private readonly Button _reject = new() { Text = "Reject", AutoSize = true, Enabled = false };
     private RecommendationDetail? _detail;
@@ -147,10 +147,14 @@ public sealed class MainForm : Form
         var right = Column(Heading("Details"), _detailTitle, _detailExpiry, Heading("Reason"), _detailReason,
             Heading("Guardrails"), _guardrails, buttons);
 
-        var split = new SplitContainer { Dock = DockStyle.Fill, SplitterDistance = 440 };
-        split.Panel1.Controls.Add(left);
-        split.Panel2.Controls.Add(right);
-        page.Controls.Add(split);
+        // Two columns: the list and the details, as in DS-08 screen 3.
+        var columns = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
+        columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 52));
+        columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 48));
+        right.Padding = new Padding(12, 0, 0, 0);
+        columns.Controls.Add(left, 0, 0);
+        columns.Controls.Add(right, 1, 0);
+        page.Controls.Add(columns);
         ClearDetail();
         return page;
     }
@@ -186,10 +190,15 @@ public sealed class MainForm : Form
             AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
             BackgroundColor = SystemColors.Window,
             MinimumSize = new Size(0, 120),
+            ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize,
+            EnableHeadersVisualStyles = false,
         };
+        grid.DataBindingComplete += (_, _) => grid.ClearSelection();
         foreach (var column in columns)
         {
-            grid.Columns.Add(column.Replace(" ", string.Empty), column);
+            var index = grid.Columns.Add(column.Replace(" ", string.Empty), column);
+            // Batch ids such as B-STORE-DN1-SKU-0001-2 need more room than the figures.
+            grid.Columns[index].FillWeight = column == "Batch" ? 220 : 100;
         }
 
         return grid;
@@ -258,6 +267,8 @@ public sealed class MainForm : Form
             _batches.Rows.Add(batch.BatchId, Date(batch.ExpiryDate), batch.Quantity);
         }
 
+        _batches.ClearSelection();
+
         var stock = await _api.GetCrossStoreStockAsync(barcode, _storeId);
         if (!stock.IsSuccess)
         {
@@ -273,6 +284,7 @@ public sealed class MainForm : Form
             _nearby.Rows.Add(store.Name, $"{store.DistanceKm.ToString("0.0", Numbers)} km", store.Qty);
         }
 
+        _nearby.ClearSelection();
         _nearbyNote.Text = stores.Count == 0 ? UserMessages.NoStores
             : stores.All(store => store.Qty == 0) ? UserMessages.NoStock : string.Empty;
         Done($"Found {product.Sku}.");
@@ -299,6 +311,7 @@ public sealed class MainForm : Form
                 : alert.Urgency == "Today or tomorrow" ? SoonColor : SystemColors.Window;
         }
 
+        _alerts.ClearSelection();
         _alertCount.Text = $"{alerts.Count} open alert{(alerts.Count == 1 ? string.Empty : "s")}";
         _alertsEmpty.Text = alerts.Count == 0 ? UserMessages.NoAlerts : string.Empty;
         Done("Near-expiry alerts loaded.");

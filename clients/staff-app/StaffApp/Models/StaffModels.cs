@@ -36,7 +36,7 @@ public record RecommendationLine(long RecId, string Sku, string ActionType, deci
     /// <summary>The Level column of DS-08 screen 3: a percentage for DISCOUNT, units otherwise.</summary>
     public string Level => ActionType == "DISCOUNT"
         ? DiscountPct is { } pct ? $"{pct:0.##}%" : "-"
-        : ProposedQty is { } qty ? $"{qty} units" : "-";
+        : ProposedQty is { } qty ? (qty == 1 ? "1 unit" : $"{qty} units") : "-";
 }
 
 /// <summary>GET /recommendations/{rec_id} (DS-04 RecommendationDetail).</summary>
