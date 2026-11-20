@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace StaffApp.Models;
 
 /// <summary>One HTTP answer. Status 0 means nothing answered (network error or timeout).</summary>
@@ -33,9 +35,10 @@ public sealed record AlertLine(long AlertId, string BatchId, string Sku, DateOnl
 public record RecommendationLine(long RecId, string Sku, string ActionType, decimal? DiscountPct, int? ProposedQty,
                                  string Status)
 {
-    /// <summary>The Level column of DS-08 screen 3: a percentage for DISCOUNT, units otherwise.</summary>
+    /// <summary>The Level column of DS-08 screen 3: a percentage for DISCOUNT, units otherwise.
+    /// Numbers use the invariant culture, so 12.5 never shows as "12,5" on a vi-VN machine.</summary>
     public string Level => ActionType == "DISCOUNT"
-        ? DiscountPct is { } pct ? $"{pct:0.##}%" : "-"
+        ? DiscountPct is { } pct ? pct.ToString("0.##", CultureInfo.InvariantCulture) + "%" : "-"
         : ProposedQty is { } qty ? (qty == 1 ? "1 unit" : $"{qty} units") : "-";
 }
 
@@ -69,7 +72,8 @@ public sealed record GuardrailLine(string RuleType, string Outcome, decimal? Ori
         get
         {
             var text = Outcome == "ADJUSTED"
-                ? $"{RuleType}: adjusted {OriginalValue:0.##} -> {AdjustedValue:0.##}"
+                ? string.Create(CultureInfo.InvariantCulture,
+                    $"{RuleType}: adjusted {OriginalValue:0.##} -> {AdjustedValue:0.##}")
                 : $"{RuleType}: {Outcome.ToLowerInvariant()}";
             return string.IsNullOrWhiteSpace(Message) ? text : $"{text} ({Message})";
         }

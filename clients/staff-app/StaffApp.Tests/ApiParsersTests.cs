@@ -1,3 +1,5 @@
+using System.Globalization;
+using StaffApp.Models;
 using StaffApp.Services;
 using Xunit;
 
@@ -63,6 +65,25 @@ public class ApiParsersTests
 
         Assert.Equal(new[] { "50%", "8 units", "10 units", "12.5%" }, rows.Select(row => row.Level));
         Assert.All(rows, row => Assert.Equal("PENDING", row.Status));
+    }
+
+    [Fact]
+    public void Pb47_levels_and_guardrail_values_ignore_the_machine_culture()
+    {
+        var previous = CultureInfo.CurrentCulture;
+        CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("vi-VN");
+        try
+        {
+            var line = new RecommendationLine(14, "SKU-0009", "DISCOUNT", 12.5m, null, "PENDING");
+            var guardrail = new GuardrailLine("MAX_DISCOUNT", "ADJUSTED", 60.25m, 50m, null);
+
+            Assert.Equal("12.5%", line.Level);
+            Assert.Equal("MAX_DISCOUNT: adjusted 60.25 -> 50", guardrail.Text);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previous;
+        }
     }
 
     [Fact]
