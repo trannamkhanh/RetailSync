@@ -51,7 +51,7 @@ public class ApiParsersTests
     }
 
     [Fact]
-    public void Stf47_1_recommendations_accept_a_decimal_as_a_number_or_a_string()
+    public void Pb47_recommendations_accept_a_decimal_as_a_number_or_a_string()
     {
         var rows = ApiParsers.Recommendations("""
             {"items":[
