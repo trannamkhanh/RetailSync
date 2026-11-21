@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from decimal import Decimal
+from fractions import Fraction
 from math import ceil
 
 
@@ -14,11 +15,11 @@ class Proposal:
 
 
 def near_expiry_proposal(
-    batch_id: str, days: int, remaining: int, daily_demand: Decimal = Decimal(0),
+    batch_id: str, days: int, remaining: int, daily_demand: Decimal | Fraction = Decimal(0),
 ) -> Proposal | None:
     if days < 0 or remaining <= 0:
         return None
-    at_risk = max(0, ceil(remaining - daily_demand * (days + 1)))
+    at_risk = max(0, ceil(remaining - Fraction(daily_demand) * (days + 1)))
     if at_risk == 0:
         return None
     reason = f"Batch {batch_id} expires in {days} day(s); {at_risk} of {remaining} units may not sell in time."

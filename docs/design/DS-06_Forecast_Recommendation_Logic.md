@@ -68,7 +68,7 @@ Report both per model and per category. The SRS sets no accuracy target; the req
 
 ## 6. Recommendation rules
 
-Run for each store. Evaluate rules in order; the first match creates the recommendation for that batch or SKU. Skip a batch or SKU that already has a PENDING or GENERATED recommendation. Also skip it if a BLOCKED recommendation was created on the current business date or an ACCEPTED or REJECTED recommendation was decided on that date. Use `staff_decision.decided_at` for decisions and convert UTC timestamps to business time (UTC+7 by default). On the next business date these date-based exclusions expire, so a rejected recommendation can be replaced by a higher tier as expiry approaches.
+Run for each store. Evaluate rules in order; the first match creates the recommendation for that batch or SKU. Skip a batch or SKU that already has a valid PENDING or GENERATED recommendation. Also skip it if a BLOCKED recommendation has a guardrail result checked on the current business date or an ACCEPTED or REJECTED recommendation was decided on that date. Use `guardrail_result.checked_at` for blocked recommendations and `staff_decision.decided_at` for decisions, converting UTC timestamps to business time (UTC+7 by default). On the next business date these date-based exclusions expire, so a rejected recommendation can be replaced by a higher tier as expiry approaches. Invalid PENDING and GENERATED recommendations expire through a conditional status update that preserves any staff decision committed concurrently.
 
 `daily_demand = predicted_demand / horizon_days`
 
@@ -88,6 +88,8 @@ For each OPEN alert:
 | N5 | `days_to_expiry ≥ 4` | DISCOUNT | 15% |
 
 ### Surplus without a near-expiry alert
+
+Only OPEN NEAR_EXPIRY alerts on batches with positive quantity and an expiry date on or after today's business date suppress surplus proposals. An OPEN EXPIRED alert does not suppress a surplus proposal for sellable stock of that SKU.
 
 | Rule | Condition | Action | Level |
 |---|---|---|---|
