@@ -171,6 +171,13 @@ def lock_batches(session: Session, store_id: str, sku: str, *,
     and any subset of the same order locks in the same relative order, so two
     writers of the same store and SKU cannot deadlock on these rows.
 
+    The index hint is load-bearing, as in ``repositories/original_sale.py``: on a
+    small table the optimiser may otherwise pick the clustered index and scan,
+    taking update locks on rows of other stores and SKUs before it filters them,
+    so the lock order would no longer be FEFO and two stores could wait on each
+    other. ``ix_product_batch_fefo`` is ``(store_id, sku, expiry_date)``, which
+    seeks the locked range instead.
+
     ``today`` is cast to ``date`` instead of the indexed column being converted
     (issue #25); the two call shapes are separate statements so the plan can
     seek the visible range instead of scanning.
@@ -182,7 +189,7 @@ def lock_batches(session: Session, store_id: str, sku: str, *,
         text(
             f"""
             SELECT batch_id, sku, store_id, expiry_date, quantity
-            FROM dbo.product_batch WITH (UPDLOCK, ROWLOCK)
+            FROM dbo.product_batch WITH (UPDLOCK, ROWLOCK, INDEX(ix_product_batch_fefo))
             WHERE store_id = CAST(:store_id AS varchar(10))
               AND sku = CAST(:sku AS varchar(20))
               {sellable_filter}
