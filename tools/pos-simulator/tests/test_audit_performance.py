@@ -5,7 +5,7 @@ import sys
 import yaml
 
 
-def test_audit15_performance_config_always_uses_container_paths(tmp_path, monkeypatch):
+def test_audit_minor_performance_config_always_uses_container_paths(tmp_path, monkeypatch):
     spec = spec_from_file_location("audit_perf", Path(__file__).resolve().parents[1] / "prepare_performance.py")
     script = module_from_spec(spec)
     spec.loader.exec_module(script)
@@ -17,4 +17,3 @@ def test_audit15_performance_config_always_uses_container_paths(tmp_path, monkey
     assert config["ca_file"] == "/repo/.certs/ca.crt"
     assert config["terminal_cert_dir"] == "/repo/.certs/pos"
     assert config["tokens_file"] == "/repo/.tokens/demo_tokens.json"
-

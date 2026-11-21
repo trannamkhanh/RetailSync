@@ -307,13 +307,15 @@ def run() -> int:
                   f"{status} {code_of(body)} {message_of(body)[:60]}")
             status, body = call("PUT", f"{MIDDLEWARE}/admin/guardrail-rules/{rule_id}",
                                 {"threshold": 40, "is_active": True}, token=TOKENS["admin"])
-            check(12, "MAX_DISCOUNT 40", status == 200 and body.get("threshold") == 40.0,
-                  f"{status} threshold {body.get('threshold')}")
+            check(12, "MAX_DISCOUNT 40",
+                  status == 200 and isinstance(body, dict) and body.get("threshold") == 40.0,
+                  f"{status} threshold {body.get('threshold') if isinstance(body, dict) else body}")
         finally:
             status, body = call("PUT", f"{MIDDLEWARE}/admin/guardrail-rules/{rule_id}",
                                 {"threshold": 50, "is_active": True}, token=TOKENS["admin"])
-            check(12, "back to 50", status == 200 and body.get("threshold") == 50.0,
-                  f"{status} threshold {body.get('threshold')}")
+            check(12, "back to 50",
+                  status == 200 and isinstance(body, dict) and body.get("threshold") == 50.0,
+                  f"{status} threshold {body.get('threshold') if isinstance(body, dict) else body}")
 
     # 13. Mutual TLS on the POS gateway (PB-48).
     no_cert = event("SALE", f"TXN-SMK-{RUN}-NC", [(STOCK, 1, 32000.00)])

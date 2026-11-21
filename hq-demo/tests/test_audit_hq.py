@@ -10,14 +10,14 @@ from app.service import _add_totals, _duplicate
 from test_sync18 import _batch
 
 
-def test_audit15_json_precision_is_validated_before_rounding(client, auth):
+def test_audit_minor_json_precision_is_validated_before_rounding(client, auth):
     import json
     raw = json.dumps(_batch("TEST-JSON")).replace("100.5", "0.10000000000000001")
     response = client.post("/api/v1/sync", content=raw, headers={**auth, "Content-Type": "application/json"})
     assert response.status_code == 422
 
 
-def test_audit15_parallel_duplicate_reads_do_not_lose_increments(test_engine):
+def test_audit_minor_parallel_duplicate_reads_do_not_lose_increments(test_engine):
     batch = f"TEST-AUDIT-{uuid4().hex[:12]}"
     with Session(test_engine) as session, session.begin():
         session.add(HqSyncBatch(sync_batch_id=batch, store_id="TEST-AUD", txn_count=1, payload_hash="a" * 64))
@@ -36,7 +36,7 @@ def test_audit15_parallel_duplicate_reads_do_not_lose_increments(test_engine):
             session.execute(delete(HqSyncBatch).where(HqSyncBatch.sync_batch_id == batch))
 
 
-def test_audit15_hq_total_updates_follow_sku_order():
+def test_audit_minor_hq_total_updates_follow_sku_order():
     observed = []
 
     class Updated:
