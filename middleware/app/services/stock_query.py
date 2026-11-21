@@ -19,6 +19,11 @@ def stock_lines(session: Session, store_id: str, sku: str | None = None) -> list
     exactly one line comes back: quantity 0 for a catalogue product that has no
     stock row in this store.
 
+    The single-SKU case reads that SKU only: the catalogue row, its quantity and
+    its batches, each with the SKU predicate in SQL. Before audit #5 it read every
+    batch of the store and filtered in Python, so one barcode lookup paid for the
+    whole store's batch table.
+
     ``quantity`` stays ``inventory.quantity``, which also counts stock whose
     batches have expired; ``batches`` carries the per-batch detail.
 
@@ -33,8 +38,8 @@ def stock_lines(session: Session, store_id: str, sku: str | None = None) -> list
     Raises:
         ApiError(404, "NOT_FOUND"): the requested SKU is not in the catalogue.
     """
-    batches = repository.list_store_batches(session, store_id)
     if sku is None:
+        batches = repository.list_store_batches(session, store_id)
         return [
             (line_sku, quantity, batches.get(line_sku, []))
             for line_sku, quantity in repository.list_store_stock(session, store_id)
@@ -45,5 +50,5 @@ def stock_lines(session: Session, store_id: str, sku: str | None = None) -> list
     return [(
         catalogue_sku,
         get_stock(session, store_id, catalogue_sku),
-        batches.get(catalogue_sku, []),
+        repository.list_sku_batches(session, store_id, catalogue_sku),
     )]

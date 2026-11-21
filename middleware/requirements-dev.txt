@@ -1,3 +1,6 @@
 -r requirements.txt
 pytest==8.3.4
 httpx==0.28.1
+# scripts/metrics/cross_test_totals.py reads the test case workbook, and
+# tests/test_audit05_cross_test_totals.py builds one; without it that test skips.
+openpyxl==3.1.5

@@ -13,7 +13,7 @@ from app.repositories.pos_events import add_transaction_items, find_existing_sku
 from app.services.event_validation import validate_event_source
 from app.services.idempotency import claim_transaction, content_hash, stock_of_transaction
 from app.services.inventory import restore_items
-from app.services.original_sale import lock_original_sale, require_original_sale
+from app.services.original_sale import lock_original_sale
 
 if TYPE_CHECKING:
     from app.api.schemas.pos import PosEvent
@@ -49,14 +49,20 @@ def process_return(session: Session, event: PosEvent, principal: Principal) -> d
     if original_id is None:
         raise ApiError(422, "INVALID_EVENT",
                        "Invalid field 'original_transaction_id': is required for RETURN")
-    require_original_sale(session, event.store_id, original_id)
 
     # The RETURN row inserted by claim_transaction has a foreign key to the
     # sale. SQL Server takes a shared lock for that check; two claims that both
     # insert before taking the sale's update lock would deadlock. Take the
-    # update lock first, then claim; lock_original_sale below re-reads the
-    # locked row and returns the quantities used for the business rules.
-    lock_original_sale(session, event.store_id, original_id)
+    # update lock first, then claim.
+    #
+    # One locked read answers both questions the old code asked separately
+    # (audit #5): an unknown sale is 404 ORIGINAL_SALE_NOT_FOUND before the FK
+    # row is inserted, which is where DS-04 puts that check, and the row comes
+    # back with its sold and returned quantities. The update lock is held until
+    # this transaction ends, so the answers cannot change under it and the
+    # second lock_original_sale the old code took after the claim was reading
+    # the row it already held.
+    sale = lock_original_sale(session, event.store_id, original_id)
 
     payload_hash = content_hash(
         event.event_type,
@@ -77,7 +83,6 @@ def process_return(session: Session, event: PosEvent, principal: Principal) -> d
     if not claimed:
         return _duplicate_result(session, event.store_id, event.transaction_id)
 
-    sale = lock_original_sale(session, event.store_id, original_id)
     if sale.status == "CANCELLED":
         raise ApiError(409, "SALE_ALREADY_CANCELLED",
                        f"Sale '{original_id}' has already been cancelled.")

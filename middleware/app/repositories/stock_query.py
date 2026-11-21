@@ -41,6 +41,23 @@ def list_store_batches(session: Session, store_id: str) -> dict[str, list[tuple[
     return batches
 
 
+def list_sku_batches(session: Session, store_id: str,
+                     sku: str) -> list[tuple[str, date, int]]:
+    """Batches with stock left for one SKU of one store, ordered by expiry date.
+
+    The SKU predicate is in the SQL, so a single-SKU lookup reads that SKU's
+    batches only instead of every batch of the store (audit #5).
+    """
+    rows = session.execute(
+        select(ProductBatch.batch_id, ProductBatch.expiry_date, ProductBatch.quantity)
+        .where(ProductBatch.store_id == store_id, ProductBatch.sku == sku,
+               ProductBatch.quantity > 0)
+        .order_by(ProductBatch.expiry_date, ProductBatch.batch_id)
+    ).all()
+    return [(str(batch_id), expiry_date, int(quantity))
+            for batch_id, expiry_date, quantity in rows]
+
+
 def find_catalogue_sku(session: Session, sku: str) -> str | None:
     """The SKU as stored in the catalogue, or ``None`` when it is not there.
 

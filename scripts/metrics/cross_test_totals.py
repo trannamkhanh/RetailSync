@@ -4,8 +4,13 @@ Reads every ``PB-*`` sheet of ``GROUP_08_Test case.xlsx``, takes the Status and
 Re-test Status counts (TOTAL, PASS, FAIL, Not Implemented, SKIPPED) that the
 four cross-testers fill in, maps each sheet to its sprint through the sprint
 backlog of ``C1SE_24_RetailSync_Sprint_Backlog_v1.4.xlsx``, and prints the
-totals per sprint and per backlog item for the report. Sheets with a FAIL
-count are listed, because every failed case needs a GitHub issue.
+totals per sprint and per backlog item for the report. Since audit #5 the
+Re-test Status row is printed and counted too: a case that failed and was then
+fixed shows a FAIL under Status and a PASS under Re-test Status, and a report
+that only counted Status would still call it a failure.
+
+Sheets with a FAIL count in Status or in Re-test Status are listed, because
+every failed case needs a GitHub issue.
 
 Run it with any Python that has openpyxl (``pip install openpyxl``), from the
 repository root:
@@ -27,6 +32,8 @@ COLUMNS = ("total", "pass", "fail", "not_implemented", "skipped")
 SHEET_ID = re.compile(r"^(PB-\d+)")
 BACKLOG_ID = re.compile(r"^(PB-\d+)")
 COUNT_ROW_OFFSET = 1
+STATUS = "Status"
+RETEST = "Re-test Status"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -85,7 +92,7 @@ def collect(cases_path: Path, sprints: dict[str, str]) -> list[dict]:
             hit = SHEET_ID.match(sheet.title)
             if not hit:
                 continue
-            status = _status_row(sheet, "Status")
+            status = _status_row(sheet, STATUS)
             if status is None:
                 continue
             sheets.append({
@@ -94,31 +101,64 @@ def collect(cases_path: Path, sprints: dict[str, str]) -> list[dict]:
                 "sprint": sprints.get(hit.group(1), "unknown"),
                 "tester": _tester(sheet),
                 "status": status,
-                "retest": _status_row(sheet, "Re-test Status"),
+                "retest": _status_row(sheet, RETEST),
             })
     finally:
         workbook.close()
     return sheets
 
 
+def _sum(rows: list[dict | None]) -> dict[str, int]:
+    total = dict.fromkeys(COLUMNS, 0)
+    for row in rows:
+        for name in COLUMNS:
+            total[name] += (row or {}).get(name, 0)
+    return total
+
+
+def _line(label: str, counts: dict[str, int]) -> str:
+    line = (f"{counts['pass']} pass, {counts['fail']} fail, "
+            f"{counts['not_implemented']} not implemented, {counts['skipped']} skipped "
+            f"of {counts['total']}")
+    return f"{label}: {line}" if label else line
+
+
+def _retest_line(label: str, counts: dict[str, int]) -> str:
+    return f"{label}Re-test Status: {_line('', counts)}"
+
+
 def print_report(sheets: list[dict]) -> None:
     per_sprint: dict[str, dict[str, int]] = {}
+    per_sprint_retest: dict[str, dict[str, int]] = {}
     for item in sorted(sheets, key=lambda entry: (entry["sprint"], entry["backlog"])):
-        status = item["status"]
-        print(f"{item['backlog']} ({item['sprint']}, tester {item['tester'] or '?'}): "
-              f"{status['pass']} pass, {status['fail']} fail, "
-              f"{status['not_implemented']} not implemented, {status['skipped']} skipped "
-              f"of {status['total']}")
+        label = f"{item['backlog']} ({item['sprint']}, tester {item['tester'] or '?'})"
+        print(_line(label, item["status"]))
+        if item["retest"] is not None:
+            print(_retest_line("    ", item["retest"]))
         bucket = per_sprint.setdefault(item["sprint"], dict.fromkeys(COLUMNS, 0))
         for name in COLUMNS:
-            bucket[name] += status[name]
+            bucket[name] += item["status"][name]
+        if item["retest"] is not None:
+            retest_bucket = per_sprint_retest.setdefault(
+                item["sprint"], dict.fromkeys(COLUMNS, 0))
+            for name in COLUMNS:
+                retest_bucket[name] += item["retest"][name]
     print()
     for sprint in sorted(per_sprint):
-        counts = per_sprint[sprint]
-        print(f"{sprint}: {counts['pass']} pass, {counts['fail']} fail, "
-              f"{counts['not_implemented']} not implemented, {counts['skipped']} skipped "
-              f"of {counts['total']}")
-    failed = [item["sheet"] for item in sheets if item["status"]["fail"]]
+        print(_line(sprint, per_sprint[sprint]))
+        if sprint in per_sprint_retest:
+            print(_retest_line("  ", per_sprint_retest[sprint]))
+
+    with_retest = [item for item in sheets if item["retest"] is not None]
+    print()
+    if with_retest:
+        print(_line(f"Re-test Status across {len(with_retest)} sheet(s)",
+                    _sum([item["retest"] for item in with_retest])))
+    else:
+        print("No sheet has a Re-test Status row yet.")
+
+    failed = [item["sheet"] for item in sheets
+              if item["status"]["fail"] or (item["retest"] or {}).get("fail", 0)]
     print()
     if failed:
         print("Sheets with failed cases (a GitHub issue each):")

@@ -14,7 +14,7 @@ from app.core.client_cert import require_gateway, require_terminal_certificate
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.errors import ApiError
-from app.core.security import Principal, require_role
+from app.core.security import Principal, bearer_claims, require_role
 from app.services.event_audit import audit_duplicate_event, audit_rejected_event, bound_lock_waits
 from app.services.pos_events import process_event
 
@@ -64,15 +64,23 @@ def _log_lock_timeout(stage: str) -> None:
                    settings.pos_lock_timeout_ms, LOCK_TIMEOUT_ERROR, stage)
 
 
-def bounded_lock_waits(session: Session = Depends(get_db)) -> Generator[Callable[[], None], None, None]:
+def bounded_lock_waits(claims: dict[str, Any] = Depends(bearer_claims),
+                       session: Session = Depends(get_db)) -> Generator[Callable[[], None], None, None]:
     """Bound each lock wait from the start of the request (PB-04-5).
 
     Declared before ``require_role`` on the route, so the account lookup there
     runs under ``POS_LOCK_TIMEOUT_MS`` too; FastAPI gives both the same session.
+
+    The bearer token is checked first, so a request with a missing or invalid
+    token never takes a connection or runs the ``SET LOCK_TIMEOUT`` statements
+    (audit #5); the per-request dependency cache means the token is decoded once.
+    ``claims`` is only here to order that check, not read.
+
     Yields the restore function: the route calls it before it commits or rolls
     back. On a 401, 403 or error raised before that, it runs here instead,
     while ``get_db`` still holds the connection.
     """
+    _ = claims
     restore = bound_lock_waits(session, settings.pos_lock_timeout_ms)
     try:
         yield restore
