@@ -292,11 +292,21 @@ def bucket_starts(start: datetime, end: datetime, bucket: str,
     The first bucket is the one containing ``start`` and the last is clamped to
     ``end``, so the axis covers the requested interval exactly; an empty bucket is
     still returned, with no revenue.
+
+    The loop stops when a step fails to move forward as well as when it reaches
+    ``end``. At the very top of the type ``_advance`` clamps, so the next bucket is
+    the same instant it started from; testing only ``current < end`` then looped
+    forever (one call pinned a CPU for minutes), because every iteration appended an
+    identical window. The guard makes the axis end at the ceiling instead.
     """
     current = _align(start, bucket, offset_hours)
     window: list[tuple[datetime, datetime]] = []
     while current < end:
         following = _advance(current, bucket, offset_hours)
+        if following <= current:
+            # The type cannot express the next bucket; close the axis at the end.
+            window.append((current, end))
+            break
         window.append((current, min(following, end)))
         current = following
     return window
