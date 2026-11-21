@@ -80,8 +80,12 @@ def _authorize(claims: dict[str, Any], session: Session, allowed: frozenset[str]
     role = API_ROLE_BY_DB_ROLE.get(user.role)
     if not user.is_active or role != claims["role"] or role not in allowed:
         raise _forbidden()
-    # The POS service account spans terminals, so only its token carries a store.
-    return Principal(user.username, role, user.store_id or claims.get("store_id"), claims.get("pos_id"))
+    # The POS service account spans terminals, so only its token carries a store
+    # and a terminal. Every other role is scoped to its account: an old token
+    # may not keep a store the account has been removed from or moved out of.
+    if role == "POS":
+        return Principal(user.username, role, claims.get("store_id"), claims.get("pos_id"))
+    return Principal(user.username, role, user.store_id, None)
 
 
 def require_role(*roles: str) -> Callable[..., Principal]:
