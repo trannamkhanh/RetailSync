@@ -114,4 +114,11 @@ def scheduler_off_by_default(monkeypatch) -> None:
 @pytest.fixture(autouse=True)
 def job_locks_test_database(monkeypatch) -> None:
     from app.jobs import locks
-    monkeypatch.setattr(locks, "database_url", lambda: database_url(settings.test_db_name))
+
+    def test_url():
+        if (not settings.test_db_name.upper().endswith("_TEST")
+                or settings.test_db_name.casefold() == settings.db_name.casefold()):
+            raise RuntimeError("TEST_DB_NAME must end with _TEST and differ from DB_NAME.")
+        return database_url(settings.test_db_name)
+
+    monkeypatch.setattr(locks, "database_url", test_url)

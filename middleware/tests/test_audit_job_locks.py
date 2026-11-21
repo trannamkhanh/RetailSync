@@ -65,6 +65,77 @@ def test_audit14_different_jobs_run_in_parallel(monkeypatch, test_engine):
         assert [future.result(timeout=10) for future in futures] == [200, 200]
 
 
+@pytest.mark.parametrize("held_name", ["aggregation", "sync-send"])
+def test_audit14_sync_run_skips_job_locked_by_another_worker(
+    monkeypatch, test_engine, db_session, client, held_name,
+):
+    from pydantic import SecretStr
+    from app.api import sync
+    from app.core.config import settings
+    from app.core.security import create_token
+    from app.domain.models import StaffUser
+    from app.jobs import locks
+    from app.jobs.sync_send import SendResult
+
+    monkeypatch.setattr(settings, "jwt_secret", SecretStr("test-only-audit-secret-with-enough-length"))
+    username = "TEST-audit-" + uuid4().hex[:10]
+    db_session.add(StaffUser(username=username, full_name="Audit admin", role="ADMIN"))
+    db_session.commit()
+    calls = []
+
+    def aggregate():
+        calls.append("aggregation")
+        return ["TEST-batch"]
+
+    def send():
+        calls.append("sync-send")
+        return SendResult(acked=["TEST-batch"])
+
+    monkeypatch.setattr(sync, "registered_jobs", lambda: (
+        Job("aggregation", aggregate), Job("sync-send", send),
+    ))
+    monkeypatch.setattr(sync.sync_batches, "count_pending", lambda session: 0)
+    entered, release = Event(), Event()
+
+    def hold():
+        with locks.job_lock(held_name) as acquired:
+            assert acquired
+            entered.set()
+            assert release.wait(10)
+
+    with ThreadPoolExecutor(1) as worker:
+        held = worker.submit(hold)
+        try:
+            assert entered.wait(5)
+            response = client.post("/api/v1/sync/run", headers={
+                "Authorization": "Bearer " + create_token(username, "Admin"),
+            })
+            assert response.status_code == 202, response.text
+            assert response.json() == {
+                "batches_created": int(held_name != "aggregation"),
+                "batches_sent": int(held_name != "sync-send"),
+                "batches_pending": 0,
+            }
+            assert calls == ["sync-send" if held_name == "aggregation" else "aggregation"]
+        finally:
+            release.set()
+        held.result(timeout=5)
+
+
+@pytest.mark.parametrize(("test_name", "source_name"), [
+    ("RTS_DB", None), ("RTS_DB_DEMO", None), ("RTS_DB_TEST", "RTS_DB_TEST"),
+])
+def test_audit14_lock_fixture_rejects_unsafe_database(monkeypatch, test_name, source_name):
+    from app.core.config import settings
+    from app.jobs import locks
+    monkeypatch.setattr(settings, "test_db_name", test_name)
+    if source_name is not None:
+        monkeypatch.setattr(settings, "db_name", source_name)
+    with pytest.raises(RuntimeError, match="must end with _TEST and differ"):
+        with locks.job_lock("unsafe-database"):
+            pytest.fail("Unsafe database must be rejected before opening a connection")
+
+
 def test_audit14_sql_lock_released_after_job_exception(monkeypatch, test_engine):
     from app.jobs import locks
     monkeypatch.setattr(locks, "database_url", lambda: test_engine.url)
