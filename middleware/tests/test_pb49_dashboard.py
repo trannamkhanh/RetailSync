@@ -778,3 +778,27 @@ def test_pb49_the_api_answers_at_the_ceiling_for_every_bucket(client, db_session
     }, headers=headers(world, "Admin"))
 
     assert response.status_code == 200, response.text
+
+def test_pb49_the_bucket_axis_terminates_at_the_ceiling() -> None:
+    """A non-advancing step must not loop forever.
+
+    At the top of the type `_advance` clamps to the same instant it started from, so
+    `while current < end` never ended: one request pinned a CPU for minutes and the
+    suite never finished. The axis now closes as soon as a step fails to advance.
+    """
+    windows = bucket_starts(datetime(9999, 12, 30), datetime(9999, 12, 31, 23, 59, 59),
+                            "day", 7)
+
+    assert 1 <= len(windows) <= 5
+    assert windows[-1][1] == datetime(9999, 12, 31, 23, 59, 59)
+
+
+@pytest.mark.parametrize("bucket", ["hour", "day", "week", "month"])
+def test_pb49_every_bucket_terminates_in_both_directions(bucket) -> None:
+    """Guard the loop for all four buckets, at both ends of the type."""
+    top = bucket_starts(datetime(9999, 12, 28), datetime(9999, 12, 31, 23, 59, 59),
+                        bucket, 7)
+    bottom = bucket_starts(datetime(1, 1, 1), datetime(1, 1, 4), bucket, 7)
+
+    assert top and bottom
+    assert all(window[1] > window[0] for window in top + bottom)
