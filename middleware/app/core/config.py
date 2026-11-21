@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     hq_url: str = "http://localhost:9000/api/v1"
     sync_interval: int = 3600
     sync_retry_base_seconds: int = 60
+    # DS-05 section 6: sync-send runs every min(sync_interval, this), so retries go out on time.
+    sync_send_poll_seconds: int = Field(default=30, ge=5, le=3600)
     db_host: str = "127.0.0.1"
     sqlserver_port: int = 14333
     db_name: str = "RTS_DB"

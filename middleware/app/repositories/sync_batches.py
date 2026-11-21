@@ -5,9 +5,10 @@ so the keys stay seekable. ``next_retry_at`` is the time after which a batch may
 be sent again: for a PENDING batch the retry time, for a SENT batch the moment it
 counts as stale (DS-05 section 5).
 
-Order (decided 12 Nov 2026): only the oldest PENDING batch of all stores may be
-sent next. While its retry is not due, no newer batch is sent, so batches always
-reach HQ oldest first, also after an outage.
+Order (decided 12 Nov 2026, DS-05 section 6): only the oldest unfinished (PENDING
+or SENT) batch of all stores may be sent next. While it is SENT or its retry is
+not due, no newer batch is sent, so batches always reach HQ oldest first, also
+after an outage or a crash.
 """
 
 from datetime import datetime
@@ -51,18 +52,20 @@ def release_stale_sent(session: Session, now: datetime) -> int:
 
 
 def next_due_batch(session: Session, now: datetime) -> str | None:
-    """The oldest PENDING batch of any store, or None while its retry is not due."""
+    """The oldest unfinished batch of any store when it is PENDING and due, else None."""
     oldest = session.execute(
         text(
             """
-            SELECT TOP 1 sync_batch_id, next_retry_at
+            SELECT TOP 1 sync_batch_id, status, next_retry_at
             FROM dbo.sync_batch
-            WHERE status = 'PENDING'
+            WHERE status IN ('PENDING', 'SENT')
             ORDER BY created_at, sync_batch_id
             """
         )
     ).first()
-    if oldest is None or (oldest.next_retry_at is not None and oldest.next_retry_at > now):
+    if oldest is None or oldest.status == "SENT":
+        return None
+    if oldest.next_retry_at is not None and oldest.next_retry_at > now:
         return None
     return oldest.sync_batch_id
 

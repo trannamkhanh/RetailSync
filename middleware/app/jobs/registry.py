@@ -1,6 +1,6 @@
 """Jobs run by the shared scheduler (PB-15-1). Register each job with one line:
 
-    register_job("sync-send", run_send_cycle, every_seconds=settings.sync_interval)
+    register_job("aggregation", run_aggregation, every_seconds=settings.sync_interval)
     register_job("near-expiry", run_near_expiry_check, daily_at=time(2, 0))
 
 ``every_seconds`` is an interval; ``daily_at`` is business local time. Each
@@ -30,4 +30,6 @@ register_job("aggregation", run_aggregation, every_seconds=settings.sync_interva
 register_job("near-expiry", run_near_expiry_check, daily_at=time(0, 30))
 register_job("forecast", run_forecast, daily_at=time(1, 0))
 register_job("recommendation", run_recommendations, daily_at=time(2, 0))
-register_job("sync-send", run_send_cycle, every_seconds=settings.sync_interval)
+# DS-05 section 6: poll often enough that a retry goes out soon after it is due.
+register_job("sync-send", run_send_cycle,
+             every_seconds=min(settings.sync_interval, settings.sync_send_poll_seconds))
