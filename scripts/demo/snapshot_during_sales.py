@@ -34,6 +34,16 @@ def token() -> str:
     return tokens["hq_operator"]
 
 
+def response_body(raw: bytes) -> dict:
+    try:
+        parsed = json.loads(raw or b"{}")
+        if isinstance(parsed, dict):
+            return parsed
+    except ValueError:
+        pass
+    return {"code": "NON_JSON_RESPONSE", "message": raw.decode(errors="replace")[:200]}
+
+
 def post(url: str, body: bytes, bearer: str, context: ssl.SSLContext) -> tuple[int, dict]:
     request = urllib.request.Request(
         url, data=body, method="POST",
@@ -41,9 +51,9 @@ def post(url: str, body: bytes, bearer: str, context: ssl.SSLContext) -> tuple[i
     )
     try:
         with urllib.request.urlopen(request, context=context, timeout=5) as response:
-            return response.status, json.loads(response.read() or b"{}")
+            return response.status, response_body(response.read())
     except urllib.error.HTTPError as error:
-        return error.code, json.loads(error.read() or b"{}")
+        return error.code, response_body(error.read())
 
 
 def main() -> int:

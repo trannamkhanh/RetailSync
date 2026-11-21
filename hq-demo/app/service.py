@@ -16,8 +16,10 @@ def _duplicate(session: Session, row: HqSyncBatch, payload_hash: str) -> bool:
         raise NackError(409, "CONFLICT",
                         f"Batch {row.sync_batch_id} already recorded with different content.",
                         row.sync_batch_id)
-    row.duplicate_count += 1
-    session.flush()
+    session.execute(update(HqSyncBatch).where(HqSyncBatch.sync_batch_id == row.sync_batch_id)
+                    .values(duplicate_count=HqSyncBatch.duplicate_count + 1)
+                    .execution_options(synchronize_session=False))
+    session.expire(row, ["duplicate_count"])
     return True
 
 
@@ -32,7 +34,7 @@ def _add(session: Session, store_id: str, sku: str, sold_qty: int, returned_qty:
 
 
 def _add_totals(session: Session, store_id: str, lines: list[SalesLine]) -> None:
-    for line in lines:
+    for line in sorted(lines, key=lambda item: item.sku):
         result = session.execute(
             update(HqSalesTotal)
             .where(HqSalesTotal.store_id == store_id, HqSalesTotal.sku == line.sku)

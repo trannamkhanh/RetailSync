@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 import json
+from decimal import Decimal
 import logging
 from threading import Thread
 
@@ -82,7 +83,7 @@ async def receive_batch(request: Request, _: None = Depends(require_middleware),
                         session: Session = Depends(get_db)):
     raw = await request.body()
     try:
-        payload = json.loads(raw)
+        payload = json.loads(raw, parse_float=Decimal)
     except ValueError:
         return nack(422, "INVALID_BATCH", "Body must be a JSON object.")
     if not isinstance(payload, dict):

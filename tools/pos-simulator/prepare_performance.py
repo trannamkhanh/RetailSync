@@ -33,9 +33,9 @@ def main() -> None:
             "conflict_rate": 0,
             "timeout_retry_rate": 0,
         },
-        ca_file=str(root / "../../.certs/ca.crt"),
-        terminal_cert_dir=str(root / "../../.certs/pos"),
-        tokens_file=str(root / "../../.tokens/demo_tokens.json"),
+        ca_file="/repo/.certs/ca.crt",
+        terminal_cert_dir="/repo/.certs/pos",
+        tokens_file="/repo/.tokens/demo_tokens.json",
         summary_file=f"{args.scenario}-summary.json",
     )
     args.output.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
