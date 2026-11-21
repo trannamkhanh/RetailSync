@@ -186,7 +186,8 @@ def test_stf32_2_the_detail_carries_reason_action_expiry_and_guardrails(
     assert body["rec_id"] == rec.rec_id
     assert body["sku"] == rec.sku
     assert body["action_type"] == "DISCOUNT"
-    assert body["discount_pct"] == "50.00"
+    # DS-04 says number: the audit fix of #7 serialises the Decimal to a JSON number.
+    assert body["discount_pct"] == 50.0
     assert body["status"] == "PENDING"
     assert body["reason"] == "Near expiry"
     assert body["expiry_date"] == (TODAY + timedelta(days=5)).isoformat()
@@ -315,7 +316,7 @@ def test_pb32_a_surplus_discount_without_a_batch_is_listed_and_readable(
     body = get_recommendations(client, world).json()
 
     assert [item["rec_id"] for item in body["items"]] == [rec.rec_id]
-    assert body["items"][0]["discount_pct"] == "10.00"
+    assert body["items"][0]["discount_pct"] == 10.0
 
     detail = client.get(f"{LIST_URL}/{rec.rec_id}", headers=world.headers())
     assert detail.status_code == 200, detail.text

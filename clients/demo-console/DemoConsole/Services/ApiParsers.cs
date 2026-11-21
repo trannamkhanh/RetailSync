@@ -97,7 +97,7 @@ public static class ApiParsers
                 RequiredString(item, "sku"),
                 RequiredInt(item, "sold_qty"),
                 RequiredInt(item, "returned_qty"),
-                RequiredProperty(item, "net_revenue").GetDecimal()))
+                RequiredDecimal(item, "net_revenue")))
             .ToList();
         return new HqView(batches, totals);
     }
@@ -193,6 +193,30 @@ public static class ApiParsers
         return value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var number)
             ? number
             : throw new FormatException($"Field '{name}' is not a whole number.");
+    }
+
+    /// <summary>
+    /// A decimal field, as a JSON number or as a numeric string (audit #7).
+    /// <c>GetDecimal()</c> throws <see cref="InvalidOperationException"/> for a
+    /// string, which escaped every caller as a crash instead of an error line, so
+    /// both forms are read here with the invariant culture and anything else is a
+    /// <see cref="FormatException"/> that names the field.
+    /// </summary>
+    private static decimal RequiredDecimal(JsonElement element, string name)
+    {
+        var value = RequiredProperty(element, name);
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var number))
+        {
+            return number;
+        }
+
+        if (value.ValueKind == JsonValueKind.String && decimal.TryParse(value.GetString(),
+                NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed))
+        {
+            return parsed;
+        }
+
+        throw new FormatException($"Field '{name}' is not a number.");
     }
 
     private static DateTime RequiredUtc(JsonElement element, string name)

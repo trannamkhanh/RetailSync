@@ -4,13 +4,18 @@ The schemas mirror ``docs/design/openapi.yaml``: ``RecommendationSummary`` for
 the list, ``RecommendationDetail`` for one recommendation with its guardrail
 results, and the decision request/response for
 ``POST /recommendations/{rec_id}/decision``.
+
+The money fields are ``Decimal`` in the database, but DS-04 declares them
+``number``, so each is serialised to a JSON number. Pydantic v2 would otherwise
+write ``"30.00"``, which the Staff App and the DemoConsole used to parse as a
+string; ``api/schemas/products.py`` does the same for ``unit_price``.
 """
 
 from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 
 class GuardrailResultRead(BaseModel):
@@ -21,6 +26,10 @@ class GuardrailResultRead(BaseModel):
     original_value: Decimal | None = None
     adjusted_value: Decimal | None = None
     message: str | None = None
+
+    @field_serializer("original_value", "adjusted_value", when_used="json")
+    def serialize_value(self, value: Decimal | None) -> float | None:
+        return None if value is None else float(value)
 
 
 class RecommendationSummary(BaseModel):
@@ -33,6 +42,10 @@ class RecommendationSummary(BaseModel):
     proposed_qty: int | None = Field(
         default=None, description="Only for CLEARANCE and REDISTRIBUTION")
     status: Literal["PENDING"]
+
+    @field_serializer("discount_pct", when_used="json")
+    def serialize_discount(self, value: Decimal | None) -> float | None:
+        return None if value is None else float(value)
 
 
 class RecommendationList(BaseModel):
