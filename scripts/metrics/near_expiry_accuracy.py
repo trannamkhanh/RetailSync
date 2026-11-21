@@ -234,10 +234,16 @@ def load_dataset(session: Session, today: date) -> list[BatchCase]:
     Every batch keeps a quantity above zero, so the job sees it; a batch whose
     quantity reached zero is left out by design (PB-21). The thresholds of the
     script's own categories are written so the bands sit around known windows.
+
+    Only ``THRESHOLDS`` is written as ``near_expiry_config`` rows. The DEFAULT
+    category deliberately gets none, so its batches exercise the fallback to
+    ``NEAR_EXPIRY_DEFAULT_DAYS`` -- the branch audit #11b found untested. The
+    dataset still contains the DEFAULT category, because ``build_dataset`` takes
+    it from the merged dictionary ``covered`` below.
     """
-    thresholds = dict(THRESHOLDS)
-    thresholds[f"{CATEGORY_PREFIX}DEFAULT"] = settings.near_expiry_default_days
-    cases = build_dataset(thresholds)
+    covered = dict(THRESHOLDS)
+    covered[f"{CATEGORY_PREFIX}DEFAULT"] = settings.near_expiry_default_days
+    cases = build_dataset(covered)
     session.add(Store(store_id=STORE_ID, name="Near-expiry accuracy store",
                       latitude=Decimal("16.067800"), longitude=Decimal("108.220800"),
                       region_id="TEST"))
@@ -254,7 +260,7 @@ def load_dataset(session: Session, today: date) -> list[BatchCase]:
                                  expiry_date=today + timedelta(days=case.days_left),
                                  quantity=5))
         session.add(Inventory(store_id=STORE_ID, sku=case.sku, quantity=5))
-    for category, threshold in thresholds.items():
+    for category, threshold in THRESHOLDS.items():
         session.add(NearExpiryConfig(category=category, threshold_days=threshold))
     session.flush()
     return cases
