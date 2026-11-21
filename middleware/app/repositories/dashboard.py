@@ -104,26 +104,47 @@ EMPTY_CATEGORY = "Khác"
 # boundary.
 _ANCHOR = "CAST('0001-01-01' AS datetime2)"
 
-_BUCKET_LOCAL = {
-    "hour": f"DATEADD(HOUR, DATEDIFF(HOUR, {_ANCHOR}, DATEADD(HOUR, :offset, {{moment}})), {_ANCHOR})",
-    "day": f"DATEADD(DAY, DATEDIFF(DAY, {_ANCHOR}, DATEADD(HOUR, :offset, {{moment}})), {_ANCHOR})",
-    "week": f"DATEADD(DAY, (DATEDIFF(DAY, {_ANCHOR}, DATEADD(HOUR, :offset, {{moment}})) / 7) * 7, {_ANCHOR})",
-    "month": f"DATEADD(MONTH, DATEDIFF(MONTH, {_ANCHOR}, DATEADD(HOUR, :offset, {{moment}})), {_ANCHOR})",
-}
+# A datetime2 column cannot hold an instant closer than the business offset to
+# either end of the type: shifting such a moment into local time overflows, and so
+# does shifting the bucket back. Both directions are clamped to the representable
+# edge, which is the same thing the Python axis does, so the two still agree.
+_DATETIME2_MIN = "CAST('0001-01-01' AS datetime2)"
+_DATETIME2_MAX = "CAST('9999-12-31T23:59:59.9999999' AS datetime2)"
 
-# The bucket key back in UTC, so the answer is in the caller's interval.
-#
-# `_at_least_anchor` keeps the subtraction from underflowing: a bucket that starts at
-# the very first representable instant cannot move back by the business offset, and
-# SQL Server raises "Adding a value to a 'datetime2' column caused an overflow". The
-# first bucket is then anchored rather than shifted, which is the closest instant the
-# type can express; only a request reaching back to year 1 is affected.
-def _back_to_utc(bucket: str) -> str:
+
+def _to_local(moment: str) -> str:
+    """``moment`` shifted into the store's business time, clamped at the type edges.
+
+    ``DATEADD(HOUR, :offset, ...)`` raised "Adding a value to a 'datetime2' column
+    caused an overflow" for a stored ``occurred_at`` at or beyond
+    ``9999-12-31T17:00Z``, which turned a whole /dashboard/revenue request into a 503.
+    A CASE guard makes the shift total.
+    """
     return (
-        "CASE WHEN {bucket} < DATEADD(HOUR, :offset, {anchor}) "
-        "THEN {anchor} ELSE DATEADD(HOUR, -:offset, {bucket}) END"
-    ).format(bucket=bucket, anchor=_ANCHOR)
+        f"CASE WHEN {{moment}} > DATEADD(HOUR, -:offset, {_DATETIME2_MAX}) "
+        f"THEN {_DATETIME2_MAX} ELSE DATEADD(HOUR, :offset, {{moment}}) END"
+    ).format(moment=moment)
 
+
+def _back_to_utc(bucket: str) -> str:
+    """The bucket key back in UTC, so the answer is in the caller's interval.
+
+    The subtraction is clamped for the same reason as the addition: a bucket that
+    starts at the very first representable instant cannot move back by the business
+    offset. Only a request reaching the type limits is affected.
+    """
+    return (
+        f"CASE WHEN {bucket} < DATEADD(HOUR, :offset, {_DATETIME2_MIN}) "
+        f"THEN {_DATETIME2_MIN} ELSE DATEADD(HOUR, -:offset, {bucket}) END"
+    )
+
+
+_BUCKET_LOCAL = {
+    "hour": f"DATEADD(HOUR, DATEDIFF(HOUR, {_ANCHOR}, {_to_local('{moment}')}), {_ANCHOR})",
+    "day": f"DATEADD(DAY, DATEDIFF(DAY, {_ANCHOR}, {_to_local('{moment}')}), {_ANCHOR})",
+    "week": f"DATEADD(DAY, (DATEDIFF(DAY, {_ANCHOR}, {_to_local('{moment}')}) / 7) * 7, {_ANCHOR})",
+    "month": f"DATEADD(MONTH, DATEDIFF(MONTH, {_ANCHOR}, {_to_local('{moment}')}), {_ANCHOR})",
+}
 
 _BUCKET_START = _back_to_utc("{bucket}")
 

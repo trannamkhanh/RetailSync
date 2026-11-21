@@ -589,3 +589,19 @@ RetailSync/
 **Tá»•ng há»£p:** D1 = 1 file má»›i + 11 sá»­a; D2 = 4 má»›i + 3 sá»­a; D3 = 3 má»›i + 7 sá»­a.
 
 **KhÃ´ng Ä‘á»¥ng:** `security.py`, migration 001â€“003, `database/seed/*`, `clients/demo-pos/`, `hq-demo/`, `deploy/`, há»£p Ä‘á»“ng POS (`payload_hash`, `POST /pos/events`), `tests/test_concurrent_traffic.py` (chá»‰ cháº¡y).
+
+---
+
+## 15. Ph? l?c — `Dashboard_Baseline_Docs_Changes.md` không n?m trong PR
+
+Review c?a Ki?t ngày 19/11 dánh d?u `Dashboard_Baseline_Docs_Changes.md` là **b?n cu**
+(u?c lu?ng 209 gi?, epic E9, m?c 1.8, h?n 11/12). File dó vì th? **không du?c commit**
+cùng PR PB-49, dù b?n file k? ho?ch còn l?i thì có.
+
+Lý do: nó là b?n nháp cho tài li?u baseline **ngoài repo** (Google Sheet, SRS, Database
+Design), và không file nào trong repo trích d?n nó — nên thi?u nó không làm ch?t link
+nào. Committing m?t b?n mà review dã xác d?nh là sai s? bi?n m?t tài li?u nháp l?i th?i
+thành ngu?n tham chi?u trông có th?m quy?n.
+
+**C?n Ki?t quy?t:** ho?c b? h?n file này, ho?c cung c?p b?n dã s?a; khi dó thêm l?i
+b?ng m?t commit riêng. N?i dung cu v?n còn trên nhánh `origin/Quang` n?u c?n d?i chi?u.
