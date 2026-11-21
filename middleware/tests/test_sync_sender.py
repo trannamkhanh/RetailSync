@@ -114,6 +114,19 @@ def hq(monkeypatch, test_engine: Engine) -> FakeHq:
     return fake
 
 
+class HeldLock:
+    """A job lock that is always held, for scheduler tests without SQL Server locks."""
+
+    def acquire(self) -> bool:
+        return True
+
+    def holds(self) -> bool:
+        return True
+
+    def release(self) -> None:
+        pass
+
+
 class World:
     def __init__(self, engine: Engine) -> None:
         self.engine = engine
@@ -324,15 +337,43 @@ def test_sync16_8_stale_sent_returns_to_pending_and_is_resent(world, hq):
     assert world.row(fresh).status == "SENT"
 
 
-def test_pb15_batch_of_another_store_does_not_block(world, hq):
-    busy_store, other_store = world.store(), world.store()
-    in_flight = world.batch(busy_store, timedelta(hours=2), status="SENT", next_retry_at=NOW + timedelta(seconds=30))
-    waiting = world.batch(other_store, timedelta(hours=1))
+def test_audit06_oldest_sent_batch_holds_back_newer_pending(world, hq):
+    # Replaces test_pb15_batch_of_another_store_does_not_block: a SENT batch (in flight,
+    # or crashed less than 60 s ago) is still the oldest unfinished one (DS-05 section 6).
+    in_flight = world.batch(world.store(), timedelta(hours=2), status="SENT", next_retry_at=NOW + timedelta(seconds=30))
+    newer = world.batch(world.store(), timedelta(hours=1))
 
     run_send_cycle()
 
-    assert hq.ids({in_flight, waiting}) == [waiting]
-    assert world.row(waiting).status == "ACKED"
+    assert hq.ids({in_flight, newer}) == []
+    assert (world.row(in_flight).status, world.row(newer).status) == ("SENT", "PENDING")
+
+
+def test_audit06_after_the_stale_window_the_old_sent_batch_goes_first(world, hq):
+    in_flight = world.batch(world.store(), timedelta(hours=2), status="SENT", next_retry_at=NOW + timedelta(seconds=30))
+    newer = world.batch(world.store(), timedelta(hours=1))
+    run_send_cycle()
+    sync_send.clock.now = NOW + timedelta(seconds=31)
+
+    run_send_cycle()
+
+    assert hq.ids({in_flight, newer}) == [in_flight, newer]
+    assert {world.row(in_flight).status, world.row(newer).status} == {"ACKED"}
+
+
+def test_audit06_stale_sent_batch_is_released_when_the_scheduler_takes_the_lock(world, hq, monkeypatch):
+    stale = world.batch(world.store(), timedelta(hours=1), status="SENT", next_retry_at=NOW - timedelta(seconds=1))
+    monkeypatch.setattr(scheduler, "registered_jobs", lambda: [])
+    monkeypatch.setattr(scheduler, "JobLock", HeldLock)
+    monkeypatch.setattr(Scheduler, "start", lambda self: None)
+    started = scheduler.start_scheduler()
+    assert world.row(stale).status == "SENT"
+
+    assert started.tick() == []  # no job ran
+
+    row = world.row(stale)
+    assert (row.status, row.next_retry_at) == ("PENDING", None)
+    assert hq.received == []
 
 
 def test_pb15_failed_batch_is_never_picked(world, hq):
@@ -454,16 +495,44 @@ def test_sync15_1_the_job_runs_each_interval(world, hq):
     assert world.row(second).status == "ACKED"
 
 
-def test_sync15_1_sync_send_is_registered_every_sync_interval(monkeypatch):
+def _registry_jobs(monkeypatch) -> dict[str, Job]:
     monkeypatch.setattr(scheduler, "_jobs", {})
-    monkeypatch.setattr(settings, "sync_interval", 60)
     monkeypatch.delitem(sys.modules, "app.jobs.registry", raising=False)
-
     importlib.import_module("app.jobs.registry")
+    return {job.name: job for job in scheduler.registered_jobs()}
 
-    jobs = {job.name: job for job in scheduler.registered_jobs()}
+
+@pytest.mark.parametrize("interval, expected", [(3600, 30), (60, 30), (10, 10)])
+def test_audit05_sync_send_polls_every_sync_send_poll_seconds(monkeypatch, interval, expected):
+    # Replaces test_sync15_1_sync_send_is_registered_every_sync_interval. Default poll: 30 s.
+    monkeypatch.setattr(settings, "sync_interval", interval)
+
+    jobs = _registry_jobs(monkeypatch)
+
     assert jobs["sync-send"].run is run_send_cycle
-    assert (jobs["sync-send"].every_seconds, jobs["sync-send"].daily_at) == (60, None)
+    assert (jobs["sync-send"].every_seconds, jobs["sync-send"].daily_at) == (expected, None)
+    assert jobs["aggregation"].every_seconds == interval
+
+
+def test_audit05_retry_is_sent_on_the_next_poll_not_after_sync_interval(world, hq, monkeypatch):
+    monkeypatch.setattr(settings, "sync_interval", 3600)
+    monkeypatch.setattr(settings, "sync_retry_base_seconds", 60)
+    send = _registry_jobs(monkeypatch)["sync-send"]
+    batch_id = world.batch(world.store(), timedelta(hours=1))
+    hq.answer_next(batch_id, "OFFLINE")
+    run_send_cycle()
+    assert world.row(batch_id).next_retry_at == NOW + timedelta(seconds=60)
+
+    start = NOW.replace(tzinfo=timezone.utc)
+    now = [start]
+    sched = Scheduler([send], lock=HeldLock(), clock=lambda: now[0])
+    for second in range(1, 91):  # retry due after 60 s, then at most one 30 s poll
+        now[0] = start + timedelta(seconds=second)
+        sync_send.clock.now = now[0].replace(tzinfo=None)
+        sched.tick()
+
+    assert world.row(batch_id).status == "ACKED"
+    assert hq.ids({batch_id}) == [batch_id, batch_id]
 
 
 # NACK and backoff (PB-16-3, PB-16-4, SYNC16-3 to 16-7)
