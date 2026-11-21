@@ -315,8 +315,20 @@ def _restore_sku(session: Session, store_id: str, sku: str, quantity: int,
             newest = str(newest_first[0].batch_id)
             plan[newest] = plan.get(newest, 0) + remaining
 
+    # Order matters: the batch first, then the inventory row, then the movements.
+    # inventory_movement has a foreign key to dbo.inventory(store_id, sku), so a
+    # movement written before a missing inventory row is created fails with FK
+    # 547 and the whole reversal rolls back (audit #12). That state is reachable:
+    # a legacy sale recorded before the movement ledger existed leaves a batch
+    # and a sold-out SKU with no inventory row at all.
     for batch_id, put_back in plan.items():
         inventory_repository.add_batch_quantity(session, batch_id, put_back)
+
+    new_quantity = update_stock_with_guard(session, store_id, sku, quantity)
+    if new_quantity is None:
+        new_quantity = insert_stock_row(session, store_id, sku, quantity)
+
+    for batch_id, put_back in plan.items():
         add_movement(
             session,
             store_id=store_id,
@@ -326,8 +338,4 @@ def _restore_sku(session: Session, store_id: str, sku: str, quantity: int,
             txn_id=txn_id,
             batch_id=batch_id,
         )
-
-    new_quantity = update_stock_with_guard(session, store_id, sku, quantity)
-    if new_quantity is None:
-        new_quantity = insert_stock_row(session, store_id, sku, quantity)
     return new_quantity
