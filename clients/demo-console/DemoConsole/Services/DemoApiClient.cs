@@ -89,7 +89,11 @@ public sealed class DemoApiClient : IDisposable
 
     /// <summary>A small snapshot body: 999 units that must never reach the local stock.</summary>
     public static string SnapshotSample(DateTime utcNow) =>
-        "{\"store_id\":\"STORE-DN1\",\"taken_at\":\"" + utcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") +
+        // The invariant culture keeps the pattern Gregorian on a machine whose
+        // calendar or digit shapes differ (audit #17); the payload is JSON for the
+        // middleware, not text for a person.
+        "{\"store_id\":\"STORE-DN1\",\"taken_at\":\"" +
+        utcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture) +
         "\",\"items\":[{\"sku\":\"SKU-0001\",\"quantity\":999},{\"sku\":\"SKU-0004\",\"quantity\":999}]}";
 
     private async Task<ApiResult> SendAsync(HttpMethod method, string url, string? tokenName, string? json,

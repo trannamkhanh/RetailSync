@@ -107,6 +107,8 @@ public static class ServerCertificateValidator
         foreach (var address in addresses.OrderBy(
                      address => address.AddressFamily == AddressFamily.InterNetwork ? 0 : 1))
         {
+            // Own the socket through the stream only once the handshake can start:
+            // a cancelled or failed connect must not leak it (audit #17).
             var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp)
             {
                 NoDelay = true,
@@ -115,12 +117,21 @@ public static class ServerCertificateValidator
             {
                 await socket.ConnectAsync(new IPEndPoint(address, port), cancellationToken)
                     .ConfigureAwait(false);
-                return new NetworkStream(socket, ownsSocket: true);
+                var stream = new NetworkStream(socket, ownsSocket: true);
+                socket = null!;
+                return stream;
             }
-            catch (Exception error) when (error is SocketException or IOException)
+            catch (Exception error) when (error is SocketException or IOException
+                                          or OperationCanceledException)
             {
-                socket.Dispose();
+                socket?.Dispose();
                 lastError = error;
+                if (error is OperationCanceledException)
+                {
+                    // The caller stopped waiting: trying the next address would
+                    // only sleep through another cancellation.
+                    throw;
+                }
             }
         }
 

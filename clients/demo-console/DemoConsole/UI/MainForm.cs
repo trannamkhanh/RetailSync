@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography.X509Certificates;
 using DemoConsole.Configuration;
 using DemoConsole.Models;
 using DemoConsole.Services;
@@ -35,9 +36,13 @@ internal sealed class MainForm : Form
     private readonly ChangeTracker<string> _alertChanges;
 
     private readonly System.Windows.Forms.Timer _timer = new();
+    private readonly PendingWork _pending = new();
     private bool _refreshing;
+    private bool _closing;
     private DateTime _lastProbe = DateTime.MinValue;
     private IReadOnlyList<StockLine> _stock = Array.Empty<StockLine>();
+    private SplitContainer? _stockSplit;
+    private X509Certificate2? _authority;
 
     private FeatureState _syncFeature = FeatureState.Unknown;
     private FeatureState _snapshotFeature = FeatureState.Unknown;
@@ -88,7 +93,9 @@ internal sealed class MainForm : Form
     {
         _loaded = loaded;
         _config = loaded.Config;
-        _font = _config.FontSize;
+        // A hand-edited settings file could ask for a size WinForms refuses, so the
+        // draw code clamps it here once (audit #17).
+        _font = ConsoleLayout.FontSize(_config.FontSize);
         var hold = TimeSpan.FromSeconds(_config.HighlightSeconds);
         _stockChanges = new ChangeTracker<int>(hold);
         _transactionChanges = new ChangeTracker<string>(hold);
@@ -101,6 +108,7 @@ internal sealed class MainForm : Form
         _storeNames = _config.Stores.ToDictionary(s => s.StoreId, s => s.Name, StringComparer.OrdinalIgnoreCase);
 
         var authority = Security.ServerCertificateValidator.LoadAuthority(loaded.Paths.CaCertificate);
+        _authority = authority;
         _api = new DemoApiClient(_config.MiddlewareBaseUrl, _config.HqBaseUrl, authority, loaded.Tokens);
         _sql = loaded.SqlPassword.Length > 0
             ? new ReadOnlySql(_config.SqlServer, _config.Database, loaded.SqlPassword)
@@ -158,13 +166,15 @@ internal sealed class MainForm : Form
             Dock = DockStyle.Fill,
             Orientation = Orientation.Horizontal,
             SplitterWidth = 8,
+            Panel1MinSize = 25,
+            Panel2MinSize = 100,
         };
         stockSplit.Panel1.Controls.Add(_stockGrid);
         stockSplit.Panel2.Controls.Add(_batchGrid);
         stockSplit.Panel2.Controls.Add(_batchTitle);
         _batchTitle.Dock = DockStyle.Top;
         tabs.TabPages.Add(Page("Tồn và lô", _stockStatus, stockSplit));
-        stockSplit.SplitterDistance = Math.Max(200, (int)(Screen.PrimaryScreen!.WorkingArea.Height * 0.45));
+        _stockSplit = stockSplit;
 
         // --- Tab 2: transactions and audit ----------------------------------
         _activityStatus = StatusLine();
@@ -302,21 +312,66 @@ internal sealed class MainForm : Form
         _timer.Tick += async (_, _) => await RefreshAllAsync();
         Shown += async (_, _) =>
         {
+            ApplyStockSplit();
             await RefreshAllAsync();
-            _timer.Start();
+            // Starting the timer after a close began would keep a dead form busy.
+            if (!Gone)
+            {
+                _timer.Start();
+            }
+        };
+        Resize += (_, _) => ApplyStockSplit();
+        FormClosing += (_, _) =>
+        {
+            _closing = true;
+            _pending.Close();
+            _timer.Stop();
         };
         FormClosed += (_, _) =>
         {
             _timer.Stop();
+            _timer.Dispose();
             _api.Dispose();
+            _authority?.Dispose();
         };
+    }
+
+    /// <summary>True once the form cannot be drawn to any more (during close or after it).</summary>
+    private bool Gone => _closing || IsDisposed || Disposing;
+
+    /// <summary>
+    /// Gives the stock pane its share of the tab, now that the container has a size.
+    /// <para>
+    /// The distance used to be set in the constructor from the screen height, before
+    /// the container was laid out, so a short window (or a large font, up to 40)
+    /// pushed it past the container and made the stock pane shrink to 22 px or threw
+    /// <see cref="InvalidOperationException"/> (audit #17). It is now clamped to what
+    /// the container accepts, and skipped when both panes cannot fit.
+    /// </para>
+    /// </summary>
+    private void ApplyStockSplit()
+    {
+        if (_stockSplit is null || _stockSplit.IsDisposed)
+        {
+            return;
+        }
+
+        var preferred = ConsoleLayout.PreferredStockPaneHeight(_stockSplit.Height);
+        var distance = ConsoleLayout.SplitterDistance(_stockSplit.Height, _stockSplit.SplitterWidth,
+            _stockSplit.Panel1MinSize, _stockSplit.Panel2MinSize, preferred);
+        if (distance is null || distance.Value == _stockSplit.SplitterDistance)
+        {
+            return;
+        }
+
+        _stockSplit.SplitterDistance = distance.Value;
     }
 
     // --- Refresh ------------------------------------------------------------
 
     private async Task RefreshAllAsync()
     {
-        if (_refreshing)
+        if (_refreshing || Gone)
         {
             return;
         }
@@ -340,6 +395,13 @@ internal sealed class MainForm : Form
 
             await Task.WhenAll(tasks);
         }
+        catch (ObjectDisposedException) when (Gone)
+        {
+            // The window closed while a refresh was in flight; nothing to draw.
+        }
+        catch (OperationCanceledException) when (Gone)
+        {
+        }
         finally
         {
             _refreshing = false;
@@ -347,16 +409,31 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>Runs one tab's refresh and writes its last refresh time and last error.</summary>
-    private static async Task Guard(Label status, Func<Task<string?>> refresh)
+    private async Task Guard(Label status, Func<Task<string?>> refresh)
     {
         string? error;
         try
         {
             error = await refresh();
         }
+        catch (ObjectDisposedException) when (Gone)
+        {
+            return;
+        }
+        catch (OperationCanceledException) when (Gone)
+        {
+            return;
+        }
         catch (Exception exception)
         {
             error = exception.Message;
+        }
+
+        // Every tab writes to its own label after awaiting, so a close in between
+        // would otherwise touch a disposed control (audit #17).
+        if (Gone || status.IsDisposed)
+        {
+            return;
         }
 
         var time = BusinessClock.ToLocal(DateTime.UtcNow).ToString("HH:mm:ss", CultureInfo.InvariantCulture);
@@ -631,6 +708,11 @@ internal sealed class MainForm : Form
         var snapshot = _api.ProbeSnapshotAsync();
         var thresholds = _api.ProbeThresholdsAsync();
         await Task.WhenAll(sync, snapshot, thresholds);
+        if (Gone)
+        {
+            return;
+        }
+
         _syncFeature = Merge(_syncFeature, FeatureAvailability.FromProbe(sync.Result));
         _snapshotFeature = Merge(_snapshotFeature, FeatureAvailability.FromProbe(snapshot.Result));
         _nearExpiryFeature = Merge(_nearExpiryFeature, FeatureAvailability.FromProbe(thresholds.Result));
@@ -642,6 +724,11 @@ internal sealed class MainForm : Form
 
     private void UpdateFeatureControls()
     {
+        if (Gone)
+        {
+            return;
+        }
+
         _runSync.Enabled = _syncFeature != FeatureState.NotDeployed && !IsBusy(_runSync);
         _sendSnapshot.Enabled = _snapshotFeature != FeatureState.NotDeployed && !IsBusy(_sendSnapshot);
         _runNearExpiry.Enabled = _nearExpiryFeature != FeatureState.NotDeployed && !IsBusy(_runNearExpiry);
@@ -773,21 +860,58 @@ internal sealed class MainForm : Form
     /// <summary>Disables the button while the call runs and writes the answer to the result line.</summary>
     private async Task<ApiResult> RunActionAsync(Button button, string label, Func<Task<ApiResult>> call)
     {
+        if (Gone)
+        {
+            // The window is going away: do not start a request whose answer has
+            // nowhere to go, and do not touch the disposed button (audit #17).
+            return new ApiResult(0, string.Empty, "cửa sổ đang đóng", string.Empty, 0);
+        }
+
         button.Enabled = false;
         button.Tag = "busy";
+        _pending.Begin();
         ShowResult($"{label}: đang gửi...", Theme.Muted);
         try
         {
             var answer = await call();
+            // Consumes the pending mark and tells us whether the window closed in
+            // between; drawing then would touch disposed controls.
+            if (!_pending.TryComplete(out var abandoned) || abandoned)
+            {
+                return answer;
+            }
+
+            if (Gone || button.IsDisposed || _resultLine.IsDisposed)
+            {
+                return answer;
+            }
+
             var colour = answer.IsSuccess ? Theme.Ok : answer.IsUnreachable || answer.Status >= 500 ? Theme.Error : Theme.Warn;
             ShowResult($"{label}: {answer.Summary}", colour);
             return answer;
         }
+        catch (ObjectDisposedException) when (Gone)
+        {
+            _pending.TryAbandon();
+            return new ApiResult(0, string.Empty, "cửa sổ đã đóng", string.Empty, 0);
+        }
+        catch (OperationCanceledException) when (Gone)
+        {
+            _pending.TryAbandon();
+            return new ApiResult(0, string.Empty, "cửa sổ đã đóng", string.Empty, 0);
+        }
         finally
         {
-            button.Tag = null;
-            button.Enabled = true;
-            UpdateFeatureControls();
+            if (!Gone && !button.IsDisposed)
+            {
+                button.Tag = null;
+                button.Enabled = true;
+            }
+
+            if (!Gone)
+            {
+                UpdateFeatureControls();
+            }
         }
     }
 
@@ -795,6 +919,11 @@ internal sealed class MainForm : Form
 
     private void ShowResult(string text, Color colour)
     {
+        if (_resultLine.IsDisposed)
+        {
+            return;
+        }
+
         _resultLine.Text = $"[{LocalTime(DateTime.UtcNow)}] {text}";
         _resultLine.ForeColor = colour;
     }
