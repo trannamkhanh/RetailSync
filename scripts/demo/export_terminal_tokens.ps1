@@ -83,7 +83,8 @@ foreach ($source in $sources.Values) {
     if (-not (Test-Path $source)) { throw "Missing $source. Run scripts/generate_dev_certs.sh on machine S." }
 }
 
-$outRoot = [IO.Path]::GetFullPath((Join-Path (Get-Location) $Out))
+# Combine keeps an absolute -Out as is and joins a relative one with the current folder.
+$outRoot = [IO.Path]::GetFullPath([IO.Path]::Combine((Get-Location).Path, $Out))
 $outTokens = Join-Path $outRoot ".tokens"
 $outCerts = Join-Path $outRoot ".certs"
 New-Item -ItemType Directory -Force (Join-Path $outCerts "pos"), $outTokens | Out-Null
@@ -111,8 +112,10 @@ Push-Location $RepoRoot
 try {
     $relative = @(Get-ChildItem -Recurse -File -Force $outRoot | ForEach-Object { $_.FullName })
     $tracked = @()
+    # Trailing separator, so a sibling such as RetailSync-export is not "inside".
+    $repoPrefix = $RepoRoot.TrimEnd('\') + '\'
     foreach ($file in $relative) {
-        if ($file.StartsWith($RepoRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        if ($file.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase)) {
             & git check-ignore -q -- $file 2>$null
             if ($LASTEXITCODE -ne 0) { $tracked += $file }
         }

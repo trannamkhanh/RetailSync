@@ -19,6 +19,9 @@
     When .env already has DB_NAME equal to -Database, the script starts the
     middleware, the POS gateway and the HQ demo again and runs the forecast job
     once if it exists. Otherwise it leaves them stopped and says what to do.
+    Before the forecast call it polls GET /api/v1/health on MIDDLEWARE_BIND_ADDRESS
+    (localhost when unset) for up to -HealthTimeoutSeconds (120), and it waits while
+    the job answers 409 JOB_RUNNING (scheduler catch-up), up to 10 minutes.
 
     It refuses the development database names (RTS_DB, RTS_DB_TEST), stops at the
     first error, prints no secret and can be run again at any time. It never edits
@@ -44,7 +47,8 @@ param(
     [string]$Database = "RTS_DB_DEMO",
     [string]$HqDatabase = "RTS_HQ",
     [switch]$DemoMode,
-    [switch]$NoBuild
+    [switch]$NoBuild,
+    [int]$HealthTimeoutSeconds = 120
 )
 
 $ErrorActionPreference = "Stop"
@@ -91,6 +95,10 @@ if ([string]::IsNullOrWhiteSpace($Password)) {
 $EnvDbName = Get-EnvValue "DB_NAME"
 $EnvHqDbName = Get-EnvValue "HQ_DB_NAME"
 if ([string]::IsNullOrWhiteSpace($EnvHqDbName)) { $EnvHqDbName = "RTS_HQ" }
+# The middleware publishes 8443 on MIDDLEWARE_BIND_ADDRESS (the LAN IP in 3-laptop mode).
+$ApiHost = Get-EnvValue "MIDDLEWARE_BIND_ADDRESS"
+if ([string]::IsNullOrWhiteSpace($ApiHost) -or $ApiHost -eq "0.0.0.0") { $ApiHost = "localhost" }
+$ApiBaseUrl = "https://${ApiHost}:8443/api/v1"
 
 # --- Helpers ----------------------------------------------------------------
 
@@ -133,11 +141,18 @@ function Invoke-Compose {
 
 function Invoke-Sql {
     param([string]$Query, [string]$DatabaseName = "master")
-    # docker compose exec does not pass host environment variables; -e does.
+    # docker compose exec does not pass host environment variables; -e NAME copies one
+    # from this process, so the password never appears on a command line.
     # -I sets QUOTED_IDENTIFIER, which updates on tables with filtered indexes need.
-    & docker compose exec -T -e "SQLCMDPASSWORD=$Password" sqlserver `
-        /opt/mssql-tools18/bin/sqlcmd `
-        -S localhost -U sa -C -b -I -W -d $DatabaseName -Q $Query
+    $env:SQLCMDPASSWORD = $Password
+    try {
+        & docker compose exec -T -e SQLCMDPASSWORD sqlserver `
+            /opt/mssql-tools18/bin/sqlcmd `
+            -S localhost -U sa -C -b -I -W -d $DatabaseName -Q $Query
+    }
+    finally {
+        Remove-Item Env:\SQLCMDPASSWORD -ErrorAction SilentlyContinue
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "sqlcmd failed on '$DatabaseName' with exit code $LASTEXITCODE. Is sqlserver healthy?"
     }
@@ -145,7 +160,7 @@ function Invoke-Sql {
 
 function Invoke-Migration {
     param([string]$DatabaseName, [string]$HqDatabaseName)
-    & docker compose run --rm @PullArgs -e "DB_NAME=$DatabaseName" -e "HQ_DB_NAME=$HqDatabaseName" migrate
+    & docker compose run --rm --no-deps @PullArgs -e "DB_NAME=$DatabaseName" -e "HQ_DB_NAME=$HqDatabaseName" migrate
     if ($LASTEXITCODE -ne 0) {
         throw "the migration failed for '$DatabaseName' with exit code $LASTEXITCODE."
     }
@@ -153,7 +168,8 @@ function Invoke-Migration {
 
 function Invoke-MiddlewareScript {
     param([string]$DatabaseName, [string]$Script, [string]$VolumeMode)
-    & docker compose run --rm @PullArgs -e "DB_NAME=$DatabaseName" `
+    # --no-deps: middleware depends on migrate, which would re-run against .env's DB_NAME.
+    & docker compose run --rm --no-deps @PullArgs -e "DB_NAME=$DatabaseName" `
         --volume "${PWD}:/repo:$VolumeMode" --workdir /repo `
         middleware python $Script
     if ($LASTEXITCODE -ne 0) {
@@ -214,7 +230,7 @@ Invoke-MiddlewareScript -DatabaseName $Database `
 $HistoryLoaded = $false
 if ($Database -ieq "RTS_DB_DEMO") {
     Write-Host "==> Loading 90 days of sales history (seed 42)"
-    & docker compose run --rm @PullArgs -e "DB_NAME=$Database" `
+    & docker compose run --rm --no-deps @PullArgs -e "DB_NAME=$Database" `
         --volume "${PWD}:/repo:ro" --workdir /repo/tools/history-generator `
         -e PYTHONPATH=/repo/middleware -e PYTHONDONTWRITEBYTECODE=1 `
         middleware python -m history_generator --database $Database --days 90 --seed 42
@@ -275,8 +291,33 @@ $ForecastLine = ""
 if ($ServicesStarted) {
     Write-Host "==> Running the forecast job once, if it exists"
     . (Join-Path $PSScriptRoot "_demo_http.ps1")
-    $forecast = Invoke-DemoApi -Method POST -Url "https://localhost:8443/api/v1/admin/jobs/forecast/run" `
-        -TokenName "admin" -TimeoutSeconds 300
+
+    # Do not rely on a compose healthcheck: poll /health until it answers 200.
+    $healthUrl = "$ApiBaseUrl/health"
+    $deadline = (Get-Date).AddSeconds($HealthTimeoutSeconds)
+    while ($true) {
+        $health = Invoke-DemoApi -Method GET -Url $healthUrl -TimeoutSeconds 5 -Quiet
+        if ($health.Status -eq 200) { break }
+        if ((Get-Date) -ge $deadline) {
+            throw ("The middleware did not answer 200 on $healthUrl within $HealthTimeoutSeconds seconds " +
+                "(last: HTTP $($health.Status) $($health.Error)). Check docker compose logs middleware " +
+                "and MIDDLEWARE_BIND_ADDRESS in .env.")
+        }
+        Start-Sleep -Seconds 2
+    }
+
+    # After 01:00 (UTC+7) the scheduler's catch-up may be running forecast: wait for it.
+    $jobDeadline = (Get-Date).AddSeconds(600)
+    while ($true) {
+        $forecast = Invoke-DemoApi -Method POST -Url "$ApiBaseUrl/admin/jobs/forecast/run" `
+            -TokenName "admin" -TimeoutSeconds 300
+        if ($forecast.Status -ne 409 -or $forecast.Body -notmatch '"JOB_RUNNING"') { break }
+        if ((Get-Date) -ge $jobDeadline) {
+            throw "The forecast job was still running after 600 seconds (HTTP 409 JOB_RUNNING)."
+        }
+        Write-Host "Forecast is already running (scheduler catch-up); retrying in 10 seconds."
+        Start-Sleep -Seconds 10
+    }
     if ($forecast.Status -eq 200) {
         $ForecastLine = "Forecast job ran."
     }
