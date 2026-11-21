@@ -1,9 +1,9 @@
 """Manual sync: POST /api/v1/sync/run (SYNC15-5, DS-05 section 6). Admin only.
 
 Runs aggregation and then one send cycle in the request, each under the
-scheduler's per-job lock (``Job.running`` of ``registered_jobs()``), so a
-scheduled run and a requested run never overlap. A job that is already running
-is joined by nothing: its count is 0, and the answer gives what can be read.
+registered job's local lock and its per-job SQL session lock. A job that is
+already running is joined by nothing: its count is 0, and the answer gives
+what can be read.
 """
 
 from collections.abc import Callable
@@ -17,6 +17,7 @@ from app.core.db import get_db
 from app.core.security import Principal, require_role
 from app.jobs import registry  # noqa: F401  registers the jobs, also when the scheduler is off
 from app.jobs.scheduler import registered_jobs
+from app.jobs.locks import job_lock
 from app.jobs.sync_send import SendResult
 from app.repositories import sync_batches
 
@@ -41,7 +42,8 @@ def _run_unless_running(name: str, empty: Callable[[], T]) -> T:
     if not job.running.acquire(blocking=False):
         return empty()
     try:
-        return job.run()
+        with job_lock(name) as acquired:
+            return job.run() if acquired else empty()
     finally:
         job.running.release()
 

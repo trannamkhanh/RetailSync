@@ -8,10 +8,10 @@ repository root:
 
 It talks to the real ports: Staff, Admin and Auditor through the middleware on
 8443, POS events through the POS gateway on 9443 with the terminal certificate.
-The container mounts the repository at /repo and the certificates at /certs, so
-the defaults are the compose service names. Set RTS_MIDDLEWARE_URL and
-RTS_GATEWAY_URL to point it somewhere else; on the host it falls back to
-127.0.0.1.
+The container mounts the repository at /repo (including .certs/pos) and the
+service CA at /certs/ca.crt, so the defaults are the compose service names.
+Set RTS_MIDDLEWARE_URL and RTS_GATEWAY_URL to point it somewhere else; on the
+host it falls back to 127.0.0.1.
 
 Every run registers a new store and terminal and uses fresh transaction ids, so
 it can run again on the same database. It exits 1 if any check fails.
@@ -35,15 +35,14 @@ REPO = Path(__file__).resolve().parents[2]
 TOKENS_FILE = REPO / ".tokens" / "demo_tokens.json"
 TOKENS = json.loads(TOKENS_FILE.read_text(encoding="utf-8")) if TOKENS_FILE.is_file() else {}
 
+CERT_DIR = REPO / ".certs" / "pos"
 CONTAINER_CA = Path("/certs/ca.crt")
 if CONTAINER_CA.is_file():
     CA = CONTAINER_CA
-    CERT_DIR = Path("/certs/pos")
     default_middleware = "https://middleware:8443/api/v1"
     default_gateway = "https://pos-gateway:9443/api/v1/pos/events"
 else:
     CA = REPO / ".certs" / "ca.crt"
-    CERT_DIR = REPO / ".certs" / "pos"
     default_middleware = "https://127.0.0.1:8443/api/v1"
     default_gateway = "https://127.0.0.1:9443/api/v1/pos/events"
 
