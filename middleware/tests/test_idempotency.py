@@ -55,7 +55,7 @@ def claim(session: Session, world: World, payload: str = "a" * 64,
                              payload, occurred_at)
 
 
-def test_claim_stores_the_pos_declared_occurred_at(db_session, world) -> None:
+def test_pb49_claim_stores_the_pos_declared_occurred_at(db_session, world) -> None:
     moment = datetime(2026, 11, 17, 2, 30, 0)
 
     assert claim(db_session, world, occurred_at=moment) is True
@@ -64,13 +64,13 @@ def test_claim_stores_the_pos_declared_occurred_at(db_session, world) -> None:
     assert row.occurred_at == moment
 
 
-def test_claim_without_occurred_at_leaves_it_null(db_session, world) -> None:
+def test_pb49_claim_without_occurred_at_leaves_it_null(db_session, world) -> None:
     assert claim(db_session, world) is True
 
     assert db_session.get(PosTransaction, world.txn).occurred_at is None
 
 
-def test_an_offset_occurred_at_is_stored_as_utc(db_session, world) -> None:
+def test_pb49_an_offset_occurred_at_is_stored_as_utc(db_session, world) -> None:
     bangkok = datetime(2026, 11, 17, 9, 30, tzinfo=timezone(timedelta(hours=7)))
 
     assert claim(db_session, world, occurred_at=bangkok) is True
@@ -80,7 +80,7 @@ def test_an_offset_occurred_at_is_stored_as_utc(db_session, world) -> None:
     assert stored.tzinfo is None
 
 
-def test_a_naive_occurred_at_is_kept_as_utc(db_session, world) -> None:
+def test_pb49_a_naive_occurred_at_is_kept_as_utc(db_session, world) -> None:
     moment = datetime(2026, 11, 17, 2, 30)
 
     assert claim(db_session, world, occurred_at=moment) is True
@@ -88,7 +88,7 @@ def test_a_naive_occurred_at_is_kept_as_utc(db_session, world) -> None:
     assert db_session.get(PosTransaction, world.txn).occurred_at == moment
 
 
-def test_a_duplicate_keeps_the_first_occurred_at(db_session, world) -> None:
+def test_pb49_a_duplicate_keeps_the_first_occurred_at(db_session, world) -> None:
     """Plan rule 4: occurred_at is never overwritten by a resend."""
     first = datetime(2026, 11, 17, 2, 30)
     later = datetime(2026, 11, 18, 9, 0)
@@ -99,7 +99,7 @@ def test_a_duplicate_keeps_the_first_occurred_at(db_session, world) -> None:
     assert db_session.get(PosTransaction, world.txn).occurred_at == first
 
 
-def test_a_duplicate_with_a_timestamp_only_response_keeps_the_first(db_session, world) -> None:
+def test_pb49_a_duplicate_with_a_timestamp_only_response_keeps_the_first(db_session, world) -> None:
     """The resend's moment is never read, so the claim returns before it is compared."""
     first = datetime(2026, 11, 17, 2, 30)
 
@@ -109,7 +109,7 @@ def test_a_duplicate_with_a_timestamp_only_response_keeps_the_first(db_session, 
     assert db_session.get(PosTransaction, world.txn).occurred_at == first
 
 
-def test_the_stored_occurred_at_is_readable_after_a_duplicate(db_session, world) -> None:
+def test_pb49_the_stored_occurred_at_is_readable_after_a_duplicate(db_session, world) -> None:
     from app.services.idempotency import stored_occurred_at
 
     first = datetime(2026, 11, 17, 2, 30)
@@ -120,7 +120,7 @@ def test_the_stored_occurred_at_is_readable_after_a_duplicate(db_session, world)
     assert stored_occurred_at(db_session, "TEST-MISSING") is None
 
 
-def test_effective_at_falls_back_to_created_at_when_occurred_at_is_null(db_session, world) -> None:
+def test_pb49_effective_at_falls_back_to_created_at_when_occurred_at_is_null(db_session, world) -> None:
     """The computed column is the database's, not the ORM's (plan M2)."""
     from sqlalchemy import text
 
@@ -135,7 +135,7 @@ def test_effective_at_falls_back_to_created_at_when_occurred_at_is_null(db_sessi
     assert effective == created_at
 
 
-def test_effective_at_uses_occurred_at_when_it_is_set(db_session, world) -> None:
+def test_pb49_effective_at_uses_occurred_at_when_it_is_set(db_session, world) -> None:
     from sqlalchemy import text
 
     moment = datetime(2026, 11, 17, 2, 30)

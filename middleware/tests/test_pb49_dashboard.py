@@ -734,3 +734,47 @@ def test_pb49_an_hourly_window_back_to_year_1_is_answered(client, world) -> None
 
     assert response.status_code == 200, response.text
     assert response.json()["buckets"]
+
+
+# --- a stored instant at the ceiling (review round 2, point 1) -------------
+
+
+def test_pb49_a_transaction_near_year_9999_is_answered_not_503(client, db_session, world) -> None:
+    """A row stored at the top of the type must not break the whole request.
+
+    `DATEADD(HOUR, +offset, moment)` in the bucket expression overflowed for an
+    `occurred_at` at or beyond 9999-12-31T17:00Z, so every /dashboard/revenue call
+    whose interval covered it answered 503. The POS clamp can also store
+    9999-12-31T23:59:59, so a `to` with fractional seconds reached the same edge.
+    """
+    near_max = datetime(9999, 12, 31, 23, 0, 0)
+    add_transaction(db_session, world, key="PB49-CEILING", occurred_at=near_max,
+                    created_at=near_max, sku=world.skus[0], quantity=1)
+
+    response = client.get(URL_REVENUE, params={
+        "from": "9999-12-01T00:00:00Z",
+        "to": "9999-12-31T23:59:59.999999Z",
+        "bucket": "day",
+        "store_id": world.store_id,
+    }, headers=headers(world, "Admin"))
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["transactions"] == 1
+    assert body["total_revenue"] == 10.0
+
+
+@pytest.mark.parametrize("bucket", ["hour", "day", "week", "month"])
+def test_pb49_the_api_answers_at_the_ceiling_for_every_bucket(client, db_session, world, bucket) -> None:
+    near_max = datetime(9999, 12, 31, 22, 30, 0)
+    add_transaction(db_session, world, key=f"PB49-CEIL-{bucket}", occurred_at=near_max,
+                    created_at=near_max, sku=world.skus[0], quantity=1)
+
+    response = client.get(URL_REVENUE, params={
+        "from": "9999-12-31T00:00:00Z",
+        "to": "9999-12-31T23:59:59Z",
+        "bucket": bucket,
+        "store_id": world.store_id,
+    }, headers=headers(world, "Admin"))
+
+    assert response.status_code == 200, response.text

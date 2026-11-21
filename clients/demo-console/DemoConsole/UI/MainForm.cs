@@ -542,10 +542,10 @@ internal sealed class MainForm : Form
         _dashboard.SetBusy(true);
         try
         {
-            // Probe only until the answer is known. Re-probing every tick spent an
-            // extra GET /dashboard/revenue each 30 seconds for a route that had
-            // already answered, and the old condition also stopped probing once the
-            // route went missing, so a restarted middleware was never picked up.
+            // Probe once: the answer is stable for the life of this window, so an
+            // already-answering route no longer costs an extra GET every 30 seconds.
+            // A route that answers 404 stays disabled until the console is reopened,
+            // which matches the other tabs' "open again after the merge" rule.
             if (_dashboardFeature == FeatureState.Unknown)
             {
                 _dashboardFeature = Merge(_dashboardFeature, await ProbeDashboardAsync());
