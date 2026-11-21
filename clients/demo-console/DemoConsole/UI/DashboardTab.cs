@@ -69,6 +69,34 @@ internal sealed class DashboardTab : UserControl
         ["Dry goods"] = "Thực phẩm khô",
     };
 
+    /// <summary>
+    /// The pie's slice colours, assigned in order and reused by the legend swatch.
+    ///
+    /// The colours are set explicitly rather than left to LiveCharts2's default
+    /// palette, because the legend under the chart paints its own swatch and there is
+    /// no supported way to read back the colour the library picked. Sharing this list
+    /// is what guarantees a swatch and its slice are the same colour.
+    /// </summary>
+    public static readonly SKColor[] SliceColors =
+    {
+        new(0, 84, 166),      // the console's blue, matching the line and bars
+        new(224, 122, 26),    // orange
+        new(37, 138, 74),     // green
+        new(155, 60, 160),    // purple
+        new(196, 60, 60),     // red
+        new(120, 120, 120),   // grey
+    };
+
+    /// <summary>The colour of the slice at <paramref name="index"/>, cycling the palette.</summary>
+    public static SKColor SliceColor(int index) => SliceColors[index % SliceColors.Length];
+
+    /// <summary>The same colour as a WinForms colour, for the legend swatch.</summary>
+    public static Color SliceColorWinForms(int index)
+    {
+        var colour = SliceColor(index);
+        return Color.FromArgb(colour.Red, colour.Green, colour.Blue);
+    }
+
     private readonly Func<DateTime> _utcNow;
     private readonly ComboBox _scope = new();
     private readonly ComboBox _period = new();
@@ -79,7 +107,7 @@ internal sealed class DashboardTab : UserControl
     private readonly Label _sourceLine;
     private readonly Label _emptyLine;
     private readonly Label _pieNote;
-    private readonly Label _pieLegend;
+    private readonly FlowLayoutPanel _pieLegend;
     private readonly CartesianChart _lineChart;
     private readonly PieChart _pieChart;
     private readonly CartesianChart _barChart;
@@ -136,9 +164,14 @@ internal sealed class DashboardTab : UserControl
         _pieNote = Theme.Line(fontSize);
         _pieNote.ForeColor = Theme.Warn;
         _pieNote.Dock = DockStyle.Top;
-        _pieLegend = Theme.Line(fontSize, bold: true);
-        _pieLegend.Dock = DockStyle.Top;
-        _pieLegend.Visible = false;
+        _pieLegend = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = true,
+            Visible = false,
+        };
 
         // --- chart 1: revenue over time -----------------------------------
         _lineSeries = new LineSeries<double>
@@ -200,12 +233,13 @@ internal sealed class DashboardTab : UserControl
         kpis.Controls.Add(_kpiTransactions);
 
         // The line gets the most room: it is the chart the demo talks through.
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6 };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 7 };
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // filters
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // KPI
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // badge
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 48));   // line
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 52));   // pie + bar
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // pie legend
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // source
         layout.Controls.Add(filters, 0, 0);
         layout.Controls.Add(kpis, 0, 1);
@@ -224,12 +258,26 @@ internal sealed class DashboardTab : UserControl
         var pieArea = new Panel { Dock = DockStyle.Fill };
         pieArea.Controls.Add(_pieChart);
         pieArea.Controls.Add(_pieNote);
-        pieArea.Controls.Add(_pieLegend);
         var barArea = new Panel { Dock = DockStyle.Fill };
         barArea.Controls.Add(_barChart);
         split.Controls.Add(Captioned("Tỷ lệ theo danh mục", pieArea, fontSize), 0, 0);
         split.Controls.Add(Captioned("So sánh cửa hàng (độc lập với phạm vi xem)", barArea, fontSize), 1, 0);
         layout.Controls.Add(split, 0, 4);
+
+        // The legend gets its own row under the charts. Docked inside the pie panel it
+        // ended up underneath the chart control, which regenerates its canvas on every
+        // refresh and covered the swatches: the entries existed but could not be seen.
+        var legendHost = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.Fill,
+            WrapContents = true,
+        };
+        legendHost.Controls.Add(LabelText("Chú giải:", fontSize));
+        _pieLegend.Dock = DockStyle.Top;
+        legendHost.Controls.Add(_pieLegend);
+        layout.Controls.Add(legendHost, 0, 5);
 
         layout.Controls.Add(_sourceLine, 0, 5);
 
@@ -310,14 +358,16 @@ internal sealed class DashboardTab : UserControl
 
         // LiveCharts2 keeps one colour per *series* and does not cycle a palette across
         // the points of a single series, so one series holding every value would draw a
-        // one-colour disc. One series per category gives each slice its own colour and
-        // its own legend entry, and the pie still splits by value because every series
-        // contributes one sector.
+        // one-colour disc. One series per category gives each slice its own colour, and
+        // the pie still splits by value because every series contributes one sector.
+        // The colour is set from SliceColors so the legend swatch below can match it.
         _pieChart.Series = slices
-            .Select(slice => (ISeries)new PieSeries<double>
+            .Select((slice, index) => (ISeries)new PieSeries<double>
             {
                 Values = new[] { (double)slice.Revenue },
                 Name = $"{Label(slice.Category)} {Share(slice.Revenue, total)}%",
+                Fill = new SolidColorPaint(SliceColor(index)),
+                Stroke = new SolidColorPaint(SKColors.White) { StrokeThickness = 2 },
                 DataLabelsPaint = new SolidColorPaint(SKColors.Black),
                 DataLabelsSize = (int)_quality.Font.SizeInPoints + 1,
                 DataLabelsPosition = LiveChartsCore.Measure.PolarLabelsPosition.Middle,
@@ -330,12 +380,20 @@ internal sealed class DashboardTab : UserControl
         _pieChart.Invalidate();
         _pieChart.PerformLayout();
 
-        // The legend carries the category names, because a pie slice has no axis.
-        _pieLegend.Text = slices.Count == 0
-            ? string.Empty
-            : string.Join("    ", slices.Select(slice =>
-                $"■ {Label(slice.Category)} {Share(slice.Revenue, total)}%"));
-        _pieLegend.Visible = _pieLegend.Text.Length > 0;
+        // The legend carries the category names, because a pie slice has no axis. The
+        // swatch is the slice's own colour and the text stays black, so it reads on a
+        // projector while still tying each name to its slice.
+        _pieLegend.Controls.Clear();
+        for (var index = 0; index < slices.Count; index++)
+        {
+            var slice = slices[index];
+            _pieLegend.Controls.Add(LegendEntry(
+                SliceColorWinForms(index),
+                $"{Label(slice.Category)} {Share(slice.Revenue, total)}%",
+                _quality.Font));
+        }
+
+        _pieLegend.Visible = slices.Count > 0;
 
         _pieNote.Text = NoteLine(revenue);
         _pieNote.Visible = _pieNote.Text.Length > 0;
@@ -506,6 +564,49 @@ internal sealed class DashboardTab : UserControl
         Name = "VNĐ",
         NamePaint = new SolidColorPaint(SKColors.Black),
     };
+
+    /// <summary>
+    /// One legend item: a filled swatch in the slice's colour, then the name in black.
+    ///
+    /// The swatch is a small <see cref="Panel"/> rather than the "■" character, because
+    /// a character can only be coloured by colouring the whole label — which would tint
+    /// the text too. Two controls let the square carry the colour and the text stay
+    /// black, which is what reads best on a projector.
+    /// </summary>
+    private static Control LegendEntry(Color colour, string text, Font font)
+    {
+        var item = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false,
+            Margin = new Padding(6, 2, 18, 2),
+        };
+
+        var size = Math.Max(12, (int)(font.SizeInPoints * 1.1));
+        var swatch = new Panel
+        {
+            Size = new Size(size, size),
+            BackColor = colour,
+            Margin = new Padding(0, (int)(size * 0.35), 6, 0),
+            // A thin border keeps a pale swatch visible on a white background.
+            BorderStyle = BorderStyle.FixedSingle,
+        };
+
+        var label = new Label
+        {
+            AutoSize = true,
+            Font = Theme.Bold(font.SizeInPoints),
+            // Black, as asked: only the square carries the slice colour.
+            ForeColor = Theme.Text,
+            Text = text,
+            Margin = new Padding(0, 0, 0, 0),
+        };
+
+        item.Controls.Add(swatch);
+        item.Controls.Add(label);
+        return item;
+    }
 
     private static Control Captioned(string title, Control content, float fontSize)
     {

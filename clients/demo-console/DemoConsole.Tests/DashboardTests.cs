@@ -438,4 +438,58 @@ public sealed class DashboardTests
         Assert.StartsWith("?", DemoApiClient.CategoryWindow(from, to, null));
         Assert.Contains("store_id=STORE-DN1", DemoApiClient.CategoryWindow(from, to, "STORE-DN1"));
     }
+
+    // --- the pie legend swatches --------------------------------------------
+
+    [Fact]
+    public void Every_slice_gets_a_colour_from_the_palette()
+    {
+        // The legend paints its own swatch, so the colours must come from a list the
+        // legend can read. If this ever moves back to the library default palette the
+        // swatch and the slice would silently disagree.
+        Assert.NotEmpty(DashboardTab.SliceColors);
+        Assert.Equal(DashboardTab.SliceColors[0], DashboardTab.SliceColor(0));
+        Assert.Equal(DashboardTab.SliceColors[2], DashboardTab.SliceColor(2));
+    }
+
+    [Fact]
+    public void The_palette_cycles_rather_than_running_out()
+    {
+        var count = DashboardTab.SliceColors.Length;
+
+        Assert.Equal(DashboardTab.SliceColor(0), DashboardTab.SliceColor(count));
+        Assert.Equal(DashboardTab.SliceColor(1), DashboardTab.SliceColor(count + 1));
+    }
+
+    [Fact]
+    public void The_slices_of_one_pie_never_share_a_colour()
+    {
+        // Three categories is the demo's shape; each must look different.
+        var colours = Enumerable.Range(0, 3).Select(DashboardTab.SliceColor).ToList();
+
+        Assert.Equal(3, colours.Distinct().Count());
+    }
+
+    [Fact]
+    public void The_winforms_swatch_colour_matches_the_skia_slice_colour()
+    {
+        var skia = DashboardTab.SliceColor(1);
+        var winforms = DashboardTab.SliceColorWinForms(1);
+
+        Assert.Equal(skia.Red, winforms.R);
+        Assert.Equal(skia.Green, winforms.G);
+        Assert.Equal(skia.Blue, winforms.B);
+    }
+
+    [Fact]
+    public void The_first_slice_keeps_the_console_blue()
+    {
+        // The line and the bars are this blue, so the first category matching it keeps
+        // the tab looking like one dashboard rather than three charts.
+        var first = DashboardTab.SliceColor(0);
+
+        Assert.Equal(0, (int)first.Red);
+        Assert.Equal(84, (int)first.Green);
+        Assert.Equal(166, (int)first.Blue);
+    }
 }
