@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using DemoPos.Configuration;
 using DemoPos.Models;
@@ -298,7 +299,7 @@ public sealed class MockPosBackend : IPosBackend
                 .OrderBy(item => item.Sku, StringComparer.Ordinal)
                 .ThenBy(item => item.Quantity)
                 .ThenBy(item => item.UnitPrice)
-                .Select(item => $"{item.Sku}:{item.Quantity}:{item.UnitPrice:0.00}"));
+                .Select(item => FormattableString.Invariant($"{item.Sku}:{item.Quantity}:{item.UnitPrice:0.00}")));
         return $"{posEvent.EventType}|{posEvent.StoreId}|{posEvent.PosId}|" +
                $"{posEvent.OriginalTransactionId ?? string.Empty}|{items}";
     }
@@ -341,7 +342,7 @@ public sealed class MockPosBackend : IPosBackend
             EntityName = "pos_transaction",
             EntityKey = entityKey,
             Details = details,
-            CreatedAt = DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'"),
+            CreatedAt = DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
         });
     }
 

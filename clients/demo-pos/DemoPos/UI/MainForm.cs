@@ -50,9 +50,14 @@ public sealed class MainForm : Form
     private bool _autoChanging;
     private AutomaticSales? _autoSales;
     private bool _monitorBusy;
+    private bool _monitorRefreshPending;
     private bool _statusBusy;
+    private bool _statusRefreshPending;
     private bool _closing;
     private bool? _linkUp;
+    private int _modeEpoch;
+    private int _terminalEpoch;
+    private Font? _terminalBoldFont;
     private PendingRequest? _pendingRetry;
 
     private readonly ComboBox _terminalCombo = new();
@@ -142,8 +147,23 @@ public sealed class MainForm : Form
 
         Shown += async (_, _) =>
         {
+            if (_closing || IsDisposed)
+            {
+                return;
+            }
+
             await RefreshStatusAsync();
+            if (_closing || IsDisposed)
+            {
+                return;
+            }
+
             await RefreshMonitorAsync();
+            if (_closing || IsDisposed)
+            {
+                return;
+            }
+
             await DrainQueuesAsync();
         };
         FormClosing += OnFormClosing;
@@ -201,9 +221,26 @@ public sealed class MainForm : Form
 
     internal int HistoryCount => _historyView.Count;
 
+    internal Action<string, string>? WarningPresenter { get; set; }
+
+    internal Func<TxnRecord, (bool Confirmed, string Sku, int Quantity)>? ReturnPrompt { get; set; }
+
+    internal Func<TxnRecord, bool>? CancelPrompt { get; set; }
+
+    private void ShowWarning(string title, string message)
+    {
+        if (WarningPresenter is not null)
+        {
+            WarningPresenter(title, message);
+            return;
+        }
+
+        MessageBox.Show(this, message, title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+    }
+
     internal async Task ToggleMockAsync()
     {
-        if (_closing)
+        if (_closing || IsDisposed)
         {
             return;
         }
@@ -211,29 +248,52 @@ public sealed class MainForm : Form
         if (!_mockMode)
         {
             _mockMode = true;
+            _modeEpoch++;
+            var epoch = _modeEpoch;
             _config.UseMock = true;
             ApplyMode();
             _resultPanel.ShowInfo("Đang ở chế độ MOCK — dữ liệu không đến middleware.");
             await RefreshMonitorAsync();
+            if (_closing || IsDisposed || !_mockMode || _modeEpoch != epoch)
+            {
+                return;
+            }
+
             await RefreshStatusAsync();
             return;
         }
 
         if (!CanUseLive(out var reason))
         {
-            MessageBox.Show(this, reason, "Chưa thể chuyển sang LIVE",
-                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            ShowWarning("Chưa thể chuyển sang LIVE", reason);
             return;
         }
 
-        _authority ??= ServerCertificateValidator.LoadAuthority(_loaded.Paths.CaCertificate);
+        try
+        {
+            _authority ??= ServerCertificateValidator.LoadAuthority(_loaded.Paths.CaCertificate);
+        }
+        catch (ConfigurationException error)
+        {
+            ShowWarning("Chưa thể chuyển sang LIVE", error.Message);
+            _resultPanel.ShowInfo(error.Message);
+            return;
+        }
+
         _monitorClient ??= new MonitorApiClient(_config.MonitorBaseUrl, _authority, _requestLog);
         _gatewayProbe ??= new GatewayProbe(_authority);
         _mockMode = false;
+        _modeEpoch++;
+        var liveEpoch = _modeEpoch;
         _config.UseMock = false;
         ApplyMode();
         _resultPanel.ShowInfo("Đang ở chế độ LIVE — mọi request đi vào middleware thật.");
         await RefreshMonitorAsync();
+        if (_closing || IsDisposed || _mockMode || _modeEpoch != liveEpoch)
+        {
+            return;
+        }
+
         await RefreshStatusAsync();
     }
 
@@ -538,7 +598,7 @@ public sealed class MainForm : Form
 
     private async Task AutomaticTickAsync()
     {
-        if (_autoSales is not { } automatic || _autoSending || _busy || _closing)
+        if (_autoSales is not { } automatic || _autoSending || _busy || _closing || IsDisposed)
         {
             return;
         }
@@ -550,6 +610,8 @@ public sealed class MainForm : Form
         }
 
         _autoSending = true;
+        var wasMock = _mockMode;
+        var modeEpoch = _modeEpoch;
         try
         {
             foreach (var item in automatic.NextItems())
@@ -563,7 +625,12 @@ public sealed class MainForm : Form
             }
 
             var result = await PayCoreAsync(throwOnError: true);
-            if (_mockMode && result is not null && !result.IsSuccess)
+            if (_closing || IsDisposed)
+            {
+                return;
+            }
+
+            if (wasMock && _mockMode && _modeEpoch == modeEpoch && result is not null && !result.IsSuccess)
             {
                 StopAutomaticQuietly();
                 _resultPanel.ShowInfo($"Chế độ tự động đã dừng: {result.Code} — {result.Message}");
@@ -571,10 +638,13 @@ public sealed class MainForm : Form
         }
         catch (Exception error)
         {
-            _autoChanging = true;
-            _autoToggle.Checked = false;
-            _autoChanging = false;
-            StopAutomatic($"Chế độ tự động đã dừng vì lỗi: {error.Message}");
+            if (!_closing && !IsDisposed)
+            {
+                _autoChanging = true;
+                _autoToggle.Checked = false;
+                _autoChanging = false;
+                StopAutomatic($"Chế độ tự động đã dừng vì lỗi: {error.Message}");
+            }
         }
         finally
         {
@@ -812,6 +882,12 @@ public sealed class MainForm : Form
 
     private void OnTerminalChanged()
     {
+        if (_closing || IsDisposed)
+        {
+            return;
+        }
+
+        _terminalEpoch++;
         StopAutomaticQuietly();
         if (CurrentTerminal is not { } terminal)
         {
@@ -836,6 +912,12 @@ public sealed class MainForm : Form
 
     private void UpdateTerminalHighlight()
     {
+        if (_closing || IsDisposed)
+        {
+            return;
+        }
+
+        _terminalBoldFont ??= new Font(_terminalsGrid.Font, FontStyle.Bold);
         var selected = CurrentTerminal?.PosId;
         foreach (DataGridViewRow row in _terminalsGrid.Rows)
         {
@@ -849,7 +931,7 @@ public sealed class MainForm : Form
                 ? Color.FromArgb(220, 237, 255)
                 : Color.White;
             row.DefaultCellStyle.Font = isSelected
-                ? new Font(_terminalsGrid.Font, FontStyle.Bold)
+                ? _terminalBoldFont
                 : _terminalsGrid.Font;
         }
 
@@ -935,7 +1017,7 @@ public sealed class MainForm : Form
 
     private async Task<PosResult> PayCoreAsync(bool throwOnError = false)
     {
-        if (_busy)
+        if (_busy || _closing || IsDisposed)
         {
             return default!;
         }
@@ -972,7 +1054,12 @@ public sealed class MainForm : Form
             {
                 throw;
             }
-            _resultPanel.ShowInfo(error.Message);
+
+            if (!_closing && !IsDisposed)
+            {
+                _resultPanel.ShowInfo(error.Message);
+            }
+
             return default!;
         }
         finally
@@ -987,31 +1074,45 @@ public sealed class MainForm : Form
                                                 TerminalClient? directClient = null,
                                                 bool clearCartOnSuccess = false)
     {
+        var wasMock = _mockMode;
+        var modeEpoch = _modeEpoch;
+        var terminalEpoch = _terminalEpoch;
         if (_mockMode || directClient is not null)
         {
-            // MOCK mode and the F12 certificate/gateway scenarios send directly: a diagnostic
-            // request must not enter the terminal's durable queue.
+            // MOCK mode and the F12 diagnostic scenarios send directly: they must not enter the
+            // terminal's durable queue.
             var result = _mockMode
                 ? await _mockBackend.SendAsync(rawBody)
                 : await directClient!.SendAsync(rawBody);
 
-            _resultPanel.ShowResult(result);
-            UpdateTerminalResult(terminal, result);
-            _pendingRetry = result.CanRetry
-                ? new PendingRequest(terminal, rawBody, clearCartOnSuccess)
-                : null;
-
-            // Keep Pay and Retry consistent: a successful SALE empties the cart
-            // exactly once, whether it succeeded on the first send or on Retry.
-            if (clearCartOnSuccess && posEvent.EventType == EventTypes.Sale && result.IsSuccess)
+            if (_closing || IsDisposed || _mockMode != wasMock || _modeEpoch != modeEpoch)
             {
-                _cart.Clear();
-                UpdateCartTotal();
+                return result;
             }
 
+            UpdateTerminalResult(terminal, result);
             if (addHistory)
             {
                 AddHistory(NewRecord(posEvent, rawBody, result.Outcome.ToString(), result.Code));
+            }
+
+            var isCurrentTerminal = _terminalEpoch == terminalEpoch
+                                    && string.Equals(CurrentTerminal?.PosId, terminal.PosId,
+                                        StringComparison.OrdinalIgnoreCase);
+            if (isCurrentTerminal)
+            {
+                _resultPanel.ShowResult(result);
+                _pendingRetry = result.CanRetry
+                    ? new PendingRequest(terminal, rawBody, clearCartOnSuccess)
+                    : null;
+
+                // Keep Pay and Retry consistent: a successful SALE empties the cart
+                // exactly once, whether it succeeded on the first send or on Retry.
+                if (clearCartOnSuccess && posEvent.EventType == EventTypes.Sale && result.IsSuccess)
+                {
+                    _cart.Clear();
+                    UpdateCartTotal();
+                }
             }
 
             await RefreshMonitorAsync();
@@ -1097,7 +1198,8 @@ public sealed class MainForm : Form
         var token = _loaded.TokenForTerminal(terminal)
                     ?? throw new ConfigurationException(
                         $"Missing token '{terminal.PosId}'.\nRun:\n  {SetupCommands.IssueTokens}");
-        var client = new TerminalClient(_config.PosBaseUrl, _authority!, info.Certificate,
+        _authority ??= ServerCertificateValidator.LoadAuthority(_loaded.Paths.CaCertificate);
+        var client = new TerminalClient(_config.PosBaseUrl, _authority, info.Certificate,
             terminal.PosId, token, _requestLog);
         _liveClients[terminal.PosId] = client;
         return client;
@@ -1108,14 +1210,21 @@ public sealed class MainForm : Form
 
     private async Task DrainTerminalAsync(TerminalConfig terminal)
     {
-        if (_closing || _mockMode)
+        if (_closing || IsDisposed || _mockMode)
         {
             return;
         }
 
+        var modeEpoch = _modeEpoch;
+        var terminalEpoch = _terminalEpoch;
         await _queueGate.WaitAsync();
         try
         {
+            if (_closing || IsDisposed || _mockMode || _modeEpoch != modeEpoch)
+            {
+                return;
+            }
+
             var queue = _queues[terminal.PosId];
             if (queue.Count == 0)
             {
@@ -1129,9 +1238,9 @@ public sealed class MainForm : Form
 
             var result = await queue.DrainAsync(
                 entry => SendQueuedAsync(terminal, entry),
-                (entry, settled) => OnQueuedSettled(terminal, entry, settled));
+                (entry, settled) => OnQueuedSettled(terminal, entry, settled, modeEpoch, terminalEpoch));
 
-            if (result is null)
+            if (_closing || IsDisposed || _mockMode || _modeEpoch != modeEpoch || result is null)
             {
                 return;
             }
@@ -1141,7 +1250,8 @@ public sealed class MainForm : Form
             {
                 // DS-05 section 8: keep the event, stop this cycle, retry after 5 seconds.
                 _retryAfter[terminal.PosId] = DateTime.UtcNow.AddSeconds(5);
-                if (CurrentTerminal?.PosId == terminal.PosId)
+                if (_terminalEpoch == terminalEpoch
+                    && string.Equals(CurrentTerminal?.PosId, terminal.PosId, StringComparison.OrdinalIgnoreCase))
                 {
                     _resultPanel.ShowInfo("Mất liên lạc tới gateway — sự kiện đã lưu, sẽ gửi lại.");
                 }
@@ -1153,7 +1263,9 @@ public sealed class MainForm : Form
         }
         catch (Exception error)
         {
-            if (!_closing)
+            if (!_closing && !IsDisposed && !_mockMode && _modeEpoch == modeEpoch
+                && _terminalEpoch == terminalEpoch
+                && string.Equals(CurrentTerminal?.PosId, terminal.PosId, StringComparison.OrdinalIgnoreCase))
             {
                 _resultPanel.ShowInfo($"Hàng đợi {terminal.PosId}: {error.Message}");
             }
@@ -1161,7 +1273,7 @@ public sealed class MainForm : Form
         finally
         {
             _queueGate.Release();
-            if (!_closing)
+            if (!_closing && !IsDisposed)
             {
                 UpdateQueueStatus();
             }
@@ -1170,47 +1282,59 @@ public sealed class MainForm : Form
 
     private async Task DrainQueuesAsync()
     {
-        if (_closing || _mockMode)
+        if (_closing || IsDisposed || _mockMode)
         {
             return;
         }
 
+        var modeEpoch = _modeEpoch;
         foreach (var terminal in _config.Terminals)
         {
+            if (_closing || IsDisposed || _mockMode || _modeEpoch != modeEpoch)
+            {
+                return;
+            }
+
             await DrainTerminalAsync(terminal);
         }
     }
 
-    private void OnQueuedSettled(TerminalConfig terminal, DurableEventQueue.Entry entry, PosResult result)
+    private void OnQueuedSettled(TerminalConfig terminal, DurableEventQueue.Entry entry,
+                                 PosResult result, int modeEpoch, int terminalEpoch)
     {
-        if (_closing)
+        if (_closing || IsDisposed || _mockMode || _modeEpoch != modeEpoch)
         {
             return;
         }
 
+        var isCurrentTerminal = string.Equals(
+            CurrentTerminal?.PosId, terminal.PosId, StringComparison.OrdinalIgnoreCase);
         var record = _historyByPos[terminal.PosId].FirstOrDefault(item => item.QueueEntryId == entry.Id);
         if (record is not null)
         {
             // "Gửi lại" keeps the body and its transaction_id: this row turns DUPLICATE, not a new sale.
             record.Outcome = result.Outcome.ToString();
             record.Code = result.Code;
-            _historyView.ResetBindings();
-            UpdateHistoryButtons();
+            if (isCurrentTerminal)
+            {
+                _historyView.ResetBindings();
+                UpdateHistoryButtons();
+            }
         }
 
         UpdateTerminalResult(terminal, result);
-        if (CurrentTerminal?.PosId == terminal.PosId)
+        if (isCurrentTerminal && _terminalEpoch == terminalEpoch)
         {
             _resultPanel.ShowResult(result);
+            _ = RefreshMonitorAsync();
         }
 
         UpdateQueueStatus();
-        _ = RefreshMonitorAsync();
     }
 
     private void UpdateQueueStatus()
     {
-        if (_closing)
+        if (_closing || IsDisposed)
         {
             return;
         }
@@ -1288,7 +1412,7 @@ public sealed class MainForm : Form
 
     private async Task SendAgainAsync()
     {
-        if (_busy || SelectedHistory is not { } record)
+        if (_busy || _closing || IsDisposed || SelectedHistory is not { } record)
         {
             return;
         }
@@ -1310,7 +1434,10 @@ public sealed class MainForm : Form
         }
         catch (Exception error)
         {
-            _resultPanel.ShowInfo(error.Message);
+            if (!_closing && !IsDisposed)
+            {
+                _resultPanel.ShowInfo(error.Message);
+            }
         }
         finally
         {
@@ -1319,25 +1446,51 @@ public sealed class MainForm : Form
         }
     }
 
-    private async Task ReturnAsync()
+    private (bool Confirmed, string Sku, int Quantity) PromptForReturn(TxnRecord record)
     {
-        if (_busy || SelectedHistory is not { } record || !record.CanReturnOrCancel)
+        if (ReturnPrompt is not null)
         {
-            return;
+            return ReturnPrompt(record);
         }
 
         using var dialog = new ReturnDialog(record, _config.Products.ToDictionary(
             product => product.Sku, product => product.Name, StringComparer.OrdinalIgnoreCase));
-        if (dialog.ShowDialog(this) != DialogResult.OK)
+        return dialog.ShowDialog(this) == DialogResult.OK
+            ? (true, dialog.SelectedSku, dialog.Quantity)
+            : (false, string.Empty, 0);
+    }
+
+    private bool ConfirmCancellation(TxnRecord record)
+    {
+        if (CancelPrompt is not null)
+        {
+            return CancelPrompt(record);
+        }
+
+        return MessageBox.Show(this,
+                   $"Hủy toàn bộ đơn {record.TransactionId}?\nTồn kho sẽ được hoàn lại.",
+                   "Xác nhận CANCELLATION", MessageBoxButtons.YesNo, MessageBoxIcon.Question)
+               == DialogResult.Yes;
+    }
+
+    private async Task ReturnAsync()
+    {
+        if (_busy || _closing || IsDisposed || SelectedHistory is not { } record || !record.CanReturnOrCancel)
+        {
+            return;
+        }
+
+        var (confirmed, selectedSku, quantity) = PromptForReturn(record);
+        if (!confirmed || _busy || _closing || IsDisposed)
         {
             return;
         }
 
         var soldItem = record.Items.FirstOrDefault(item =>
-            string.Equals(item.Sku, dialog.SelectedSku, StringComparison.OrdinalIgnoreCase));
+            string.Equals(item.Sku, selectedSku, StringComparison.OrdinalIgnoreCase));
         if (soldItem is null)
         {
-            _resultPanel.ShowInfo($"SKU {dialog.SelectedSku} không có trong đơn gốc.");
+            _resultPanel.ShowInfo($"SKU {selectedSku} không có trong đơn gốc.");
             return;
         }
 
@@ -1354,8 +1507,8 @@ public sealed class MainForm : Form
             {
                 new PosEventItem
                 {
-                    Sku = dialog.SelectedSku,
-                    Quantity = dialog.Quantity,
+                    Sku = selectedSku,
+                    Quantity = quantity,
                     UnitPrice = soldItem.UnitPrice,
                 },
             });
@@ -1369,7 +1522,10 @@ public sealed class MainForm : Form
         }
         catch (Exception error)
         {
-            _resultPanel.ShowInfo(error.Message);
+            if (!_closing && !IsDisposed)
+            {
+                _resultPanel.ShowInfo(error.Message);
+            }
         }
         finally
         {
@@ -1380,15 +1536,12 @@ public sealed class MainForm : Form
 
     private async Task CancelAsync()
     {
-        if (_busy || SelectedHistory is not { } record || !record.CanReturnOrCancel)
+        if (_busy || _closing || IsDisposed || SelectedHistory is not { } record || !record.CanReturnOrCancel)
         {
             return;
         }
 
-        if (MessageBox.Show(this,
-                $"Hủy toàn bộ đơn {record.TransactionId}?\nTồn kho sẽ được hoàn lại.",
-                "Xác nhận CANCELLATION", MessageBoxButtons.YesNo, MessageBoxIcon.Question)
-            != DialogResult.Yes)
+        if (!ConfirmCancellation(record) || _busy || _closing || IsDisposed)
         {
             return;
         }
@@ -1412,7 +1565,10 @@ public sealed class MainForm : Form
         }
         catch (Exception error)
         {
-            _resultPanel.ShowInfo(error.Message);
+            if (!_closing && !IsDisposed)
+            {
+                _resultPanel.ShowInfo(error.Message);
+            }
         }
         finally
         {
@@ -1423,9 +1579,13 @@ public sealed class MainForm : Form
 
     private async Task RetryAsync()
     {
-        if (_busy || _pendingRetry is not { } pending)
+        if (_busy || _closing || IsDisposed || _pendingRetry is not { } pending)
         {
-            _resultPanel.ShowInfo("Không có request nào để Retry.");
+            if (!_closing && !IsDisposed)
+            {
+                _resultPanel.ShowInfo("Không có request nào để Retry.");
+            }
+
             return;
         }
 
@@ -1439,7 +1599,10 @@ public sealed class MainForm : Form
         }
         catch (Exception error)
         {
-            _resultPanel.ShowInfo(error.Message);
+            if (!_closing && !IsDisposed)
+            {
+                _resultPanel.ShowInfo(error.Message);
+            }
         }
         finally
         {
@@ -1450,7 +1613,7 @@ public sealed class MainForm : Form
 
     private async Task RunScenarioAsync(ScenarioKind kind)
     {
-        if (_busy || CurrentTerminal is not { } terminal)
+        if (_busy || _closing || IsDisposed || CurrentTerminal is not { } terminal)
         {
             return;
         }
@@ -1463,7 +1626,10 @@ public sealed class MainForm : Form
         }
         catch (Exception error)
         {
-            _resultPanel.ShowInfo(error.Message);
+            if (!_closing && !IsDisposed)
+            {
+                _resultPanel.ShowInfo(error.Message);
+            }
         }
         finally
         {
@@ -1499,7 +1665,7 @@ public sealed class MainForm : Form
                     },
                     lastSale.TransactionId);
                 await SendCoreAsync(terminal, conflictEvent, PosEventJson.Serialize(conflictEvent),
-                    addHistory: false);
+                    addHistory: false, directClient: _mockMode ? null : GetLiveClient(terminal));
                 return;
 
             case ScenarioKind.InsufficientStock:
@@ -1507,7 +1673,8 @@ public sealed class MainForm : Form
                 {
                     new PosEventItem { Sku = product.Sku, Quantity = 999, UnitPrice = product.UnitPrice },
                 });
-                await SendCoreAsync(terminal, big, PosEventJson.Serialize(big), addHistory: false);
+                await SendCoreAsync(terminal, big, PosEventJson.Serialize(big), addHistory: false,
+                    directClient: _mockMode ? null : GetLiveClient(terminal));
                 return;
 
             case ScenarioKind.UnregisteredStore:
@@ -1516,7 +1683,7 @@ public sealed class MainForm : Form
                     new PosEventItem { Sku = product.Sku, Quantity = 1, UnitPrice = product.UnitPrice },
                 });
                 await SendCoreAsync(terminal, unknown, PosEventJson.Serialize(unknown),
-                    addHistory: false);
+                    addHistory: false, directClient: _mockMode ? null : GetLiveClient(terminal));
                 return;
 
             case ScenarioKind.ReturnLimit:
@@ -1539,7 +1706,7 @@ public sealed class MainForm : Form
                         },
                     });
                 await SendCoreAsync(terminal, overReturn, PosEventJson.Serialize(overReturn),
-                    addHistory: false);
+                    addHistory: false, directClient: _mockMode ? null : GetLiveClient(terminal));
                 return;
         }
 
@@ -1612,12 +1779,22 @@ public sealed class MainForm : Form
 
     private async Task RefreshMonitorAsync()
     {
-        if (_monitorBusy || _closing || CurrentTerminal is not { } terminal)
+        if (_closing || IsDisposed || CurrentTerminal is not { } terminal)
         {
             return;
         }
 
+        if (_monitorBusy)
+        {
+            _monitorRefreshPending = true;
+            return;
+        }
+
         _monitorBusy = true;
+        var wasMock = _mockMode;
+        var modeEpoch = _modeEpoch;
+        var terminalPosId = terminal.PosId;
+        var terminalEpoch = _terminalEpoch;
         try
         {
             if (_mockMode)
@@ -1661,6 +1838,14 @@ public sealed class MainForm : Form
             else if (auditTask is not null)
             {
                 await auditTask;
+            }
+
+            if (_closing || IsDisposed
+                || _mockMode != wasMock || _modeEpoch != modeEpoch
+                || _terminalEpoch != terminalEpoch
+                || !string.Equals(CurrentTerminal?.PosId, terminalPosId, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
             }
 
             if (stockTask is null)
@@ -1709,12 +1894,23 @@ public sealed class MainForm : Form
         }
         catch (Exception error)
         {
-            _stockStatus.Text = error.Message;
-            _auditStatus.Text = error.Message;
+            if (!_closing && !IsDisposed
+                && _mockMode == wasMock && _modeEpoch == modeEpoch
+                && _terminalEpoch == terminalEpoch
+                && string.Equals(CurrentTerminal?.PosId, terminalPosId, StringComparison.OrdinalIgnoreCase))
+            {
+                _stockStatus.Text = error.Message;
+                _auditStatus.Text = error.Message;
+            }
         }
         finally
         {
             _monitorBusy = false;
+            if (_monitorRefreshPending && !_closing && !IsDisposed)
+            {
+                _monitorRefreshPending = false;
+                _ = RefreshMonitorAsync();
+            }
         }
     }
 
@@ -1738,12 +1934,20 @@ public sealed class MainForm : Form
 
     private async Task RefreshStatusAsync()
     {
-        if (_statusBusy || _closing)
+        if (_closing || IsDisposed)
         {
             return;
         }
 
+        if (_statusBusy)
+        {
+            _statusRefreshPending = true;
+            return;
+        }
+
         _statusBusy = true;
+        var wasMock = _mockMode;
+        var modeEpoch = _modeEpoch;
         try
         {
             _clockStatus.Text = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
@@ -1769,6 +1973,11 @@ public sealed class MainForm : Form
             }
 
             var health = await _monitorClient.GetHealthAsync();
+            if (_closing || IsDisposed || _mockMode != wasMock || _modeEpoch != modeEpoch)
+            {
+                return;
+            }
+
             if (health.IsSuccess && string.Equals(health.Data?.Status, "ok", StringComparison.OrdinalIgnoreCase))
             {
                 _middlewareStatus.Text = $"Middleware: OK ({health.ElapsedMs:0} ms)";
@@ -1783,6 +1992,11 @@ public sealed class MainForm : Form
             var root = new Uri(_config.PosBaseUrl).GetLeftPart(UriPartial.Authority);
             _gatewayProbe ??= new GatewayProbe(_authority!);
             var gateway = await _gatewayProbe.CheckAsync(root, _requestLog);
+            if (_closing || IsDisposed || _mockMode != wasMock || _modeEpoch != modeEpoch)
+            {
+                return;
+            }
+
             if (gateway.Up)
             {
                 _gatewayStatus.Text = $"Gateway: UP (400, {gateway.ElapsedMs:0} ms)";
@@ -1800,18 +2014,26 @@ public sealed class MainForm : Form
         }
         catch (Exception error)
         {
-            _middlewareStatus.Text = $"Middleware: error — {error.Message}";
-            _middlewareStatus.ForeColor = Color.FromArgb(179, 38, 30);
+            if (!_closing && !IsDisposed && _mockMode == wasMock && _modeEpoch == modeEpoch)
+            {
+                _middlewareStatus.Text = $"Middleware: error — {error.Message}";
+                _middlewareStatus.ForeColor = Color.FromArgb(179, 38, 30);
+            }
         }
         finally
         {
             _statusBusy = false;
+            if (_statusRefreshPending && !_closing && !IsDisposed)
+            {
+                _statusRefreshPending = false;
+                _ = RefreshStatusAsync();
+            }
         }
     }
 
     private void OnRequestLogChanged()
     {
-        if (_closing)
+        if (_closing || IsDisposed)
         {
             return;
         }
@@ -1822,9 +2044,9 @@ public sealed class MainForm : Form
             {
                 BeginInvoke(new Action(RefreshLogView));
             }
-            catch (InvalidOperationException)
+            catch (Exception error) when (error is InvalidOperationException or ObjectDisposedException)
             {
-                // The form is closing.
+                // The form is closing or disposed.
             }
 
             return;
@@ -1835,6 +2057,11 @@ public sealed class MainForm : Form
 
     private void RefreshLogView()
     {
+        if (_closing || IsDisposed)
+        {
+            return;
+        }
+
         var filter = _logFilter.SelectedIndex;
         var entries = _requestLog.Snapshot().Where(entry => filter switch
         {
@@ -1848,7 +2075,7 @@ public sealed class MainForm : Form
             _logView.Add(entry);
         }
 
-        if (_logView.Count > 0 && _logGrid.CurrentRow is null)
+        if (_logView.Count > 0 && _logGrid.Rows.Count > 0 && _logGrid.CurrentRow is null)
         {
             _logGrid.Rows[0].Selected = true;
             ShowLogDetails();
@@ -1900,6 +2127,11 @@ public sealed class MainForm : Form
 
     private void SetBusy(bool busy)
     {
+        if (_closing || IsDisposed)
+        {
+            return;
+        }
+
         UseWaitCursor = busy;
         _payButton.Enabled = !busy;
         _returnButton.Enabled = !busy && SelectedHistory?.CanReturnOrCancel == true;
@@ -1980,6 +2212,31 @@ public sealed class MainForm : Form
     private void OnFormClosing(object? sender, FormClosingEventArgs e)
     {
         _closing = true;
+        ReleaseManagedResources();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _closing = true;
+            ReleaseManagedResources();
+            _autoTimer.Dispose();
+            _monitorTimer.Dispose();
+            _statusTimer.Dispose();
+            _queueTimer.Dispose();
+        }
+
+        base.Dispose(disposing);
+        if (disposing)
+        {
+            _terminalBoldFont?.Dispose();
+            _terminalBoldFont = null;
+        }
+    }
+
+    private void ReleaseManagedResources()
+    {
         _autoTimer.Stop();
         _monitorTimer.Stop();
         _statusTimer.Stop();
@@ -1991,8 +2248,11 @@ public sealed class MainForm : Form
 
         _liveClients.Clear();
         _monitorClient?.Dispose();
+        _monitorClient = null;
         _gatewayProbe?.Dispose();
+        _gatewayProbe = null;
         _authority?.Dispose();
+        _authority = null;
         foreach (var certificate in _certificates.Values)
         {
             certificate.Dispose();

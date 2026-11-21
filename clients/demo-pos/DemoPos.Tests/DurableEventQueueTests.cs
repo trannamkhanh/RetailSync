@@ -182,7 +182,8 @@ public sealed class DurableEventQueueTests
         queue.Enqueue("rejected");
         await queue.DrainAsync(_ => Task.FromResult(Result(PosOutcome.REJECTED, 422, "INVALID_EVENT")));
 
-        for (var index = 0; index < 200; index++)
+        // Cross the 64 KB compaction threshold (~315 bytes per enqueue+settle pair).
+        for (var index = 0; index < 220; index++)
         {
             queue.Enqueue($$"""{"transaction_id":"TXN-{{index}}","event_type":"SALE"}""");
         }
