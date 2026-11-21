@@ -502,9 +502,20 @@ def _registry_jobs(monkeypatch) -> dict[str, Job]:
     return {job.name: job for job in scheduler.registered_jobs()}
 
 
+def test_sync15_1_with_sync_interval_60_aggregation_runs_every_60_and_sync_send_every_30(monkeypatch):
+    # Workbook SYNC15-1: set SYNC_INTERVAL to 60 → a cycle runs each interval (DS-05 section 6 poll: 30 s).
+    monkeypatch.setattr(settings, "sync_interval", 60)
+
+    jobs = _registry_jobs(monkeypatch)
+
+    assert jobs["sync-send"].run is run_send_cycle
+    assert (jobs["aggregation"].every_seconds, jobs["aggregation"].daily_at) == (60, None)
+    assert (jobs["sync-send"].every_seconds, jobs["sync-send"].daily_at) == (30, None)
+
+
 @pytest.mark.parametrize("interval, expected", [(3600, 30), (60, 30), (10, 10)])
 def test_audit05_sync_send_polls_every_sync_send_poll_seconds(monkeypatch, interval, expected):
-    # Replaces test_sync15_1_sync_send_is_registered_every_sync_interval. Default poll: 30 s.
+    # Default poll: 30 s.
     monkeypatch.setattr(settings, "sync_interval", interval)
 
     jobs = _registry_jobs(monkeypatch)
