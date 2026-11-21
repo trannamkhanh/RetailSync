@@ -1,7 +1,7 @@
 # DS-09: Test Strategy and Simulator Specification
 
 Status: approved, 1 Nov 2026.
-Baseline: SRS v1.3 (section 4.4), DS-05, Sprint Backlog v1.4. Traces to PB-03, PB-24, PB-28, PB-37 to PB-40, PB-43, PB-44.
+Baseline: SRS v1.3 (section 4.4), DS-05, Sprint Backlog v1.4. Traces to PB-03, PB-24, PB-28, PB-37 to PB-40, PB-43, PB-44, PB-49.
 
 ## 1. Test levels
 
@@ -35,6 +35,7 @@ API and integration tests use a real SQL Server database, because idempotency an
 | FR07 | List, details, Accept, Reject, already decided, other store, expired | PB-32, PB-33 |
 | FR08 | Distance order, same Middleware only, no store, none in stock, unknown barcode | PB-35 |
 | FR09 | Sales continue while HQ is offline; ordered resend | PB-17, PB-37 |
+| FR10 | Revenue by bucket, category and store; `[from, to)`; money is a number; zero fill; quality labels ON_TIME, BACKFILL, SUSPECT_FUTURE, SUSPECT_OLD, UNKNOWN; Manager scope and comparison scope | PB-49 |
 | NFR01 | Latency under load | PB-39 |
 | NFR02 | DS-05 scenarios 1 to 14 | PB-37 |
 | NFR03 | Local operations during an HQ outage | PB-37 |

@@ -17,6 +17,8 @@ public sealed class DemoApiClient : IDisposable
     public static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(5);
     public static readonly TimeSpan ActionTimeout = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan JobTimeout = TimeSpan.FromMinutes(5);
+    /// <summary>The Dashboard aggregates a range, so it is slower than a list read.</summary>
+    public static readonly TimeSpan DashboardTimeout = TimeSpan.FromSeconds(10);
 
     private readonly HttpClient _http;
     private readonly string _middleware;
@@ -53,6 +55,85 @@ public sealed class DemoApiClient : IDisposable
 
     public Task<ApiResult> GetHqBatchesAsync() =>
         SendAsync(HttpMethod.Get, $"{_hq}/demo/batches", null, null, ReadTimeout);
+
+    // --- Dashboard (PB-49): Admin only, read-only ---------------------------
+
+    /// <summary>GET /dashboard/revenue over the half-open interval [fromUtc, toUtc).</summary>
+    public Task<ApiResult> GetDashboardRevenueAsync(DateTime fromUtc, DateTime toUtc, string? storeId,
+                                                    string bucket) =>
+        SendAsync(HttpMethod.Get,
+            $"{_middleware}/dashboard/revenue{DashboardWindow(fromUtc, toUtc, storeId, bucket)}",
+            "admin", null, DashboardTimeout);
+
+    /// <summary>GET /dashboard/stores: the store filter's choices.</summary>
+    public Task<ApiResult> GetDashboardStoresAsync() =>
+        SendAsync(HttpMethod.Get, $"{_middleware}/dashboard/stores", "admin", null, ReadTimeout);
+
+    /// <summary>GET /dashboard/revenue-by-category: the pie, over the view scope.</summary>
+    public Task<ApiResult> GetDashboardCategoryAsync(DateTime fromUtc, DateTime toUtc, string? storeId) =>
+        SendAsync(HttpMethod.Get,
+            $"{_middleware}/dashboard/revenue-by-category{CategoryWindow(fromUtc, toUtc, storeId)}",
+            "admin", null, DashboardTimeout);
+
+    /// <summary>
+    /// GET /dashboard/revenue-by-store: the comparison bar chart. Omitting the store
+    /// ids asks for the caller's whole comparison scope, which is what the design
+    /// makes the default selection (Survey v6 §6.7).
+    /// </summary>
+    public Task<ApiResult> GetDashboardStoresRevenueAsync(DateTime fromUtc, DateTime toUtc,
+                                                          IEnumerable<string>? storeIds) =>
+        SendAsync(HttpMethod.Get,
+            $"{_middleware}/dashboard/revenue-by-store{StoresWindow(fromUtc, toUtc, storeIds)}",
+            "admin", null, DashboardTimeout);
+
+    /// <summary>
+    /// The query string for the revenue route, including its leading ``?`` so the
+    /// caller can concatenate it onto the path. Without the ``?`` the parameters run
+    /// into the last path segment and the route answers 404.
+    /// </summary>
+    public static string DashboardWindow(DateTime fromUtc, DateTime toUtc, string? storeId, string bucket)
+    {
+        var query = $"?from={Uri.EscapeDataString(Iso(fromUtc))}&to={Uri.EscapeDataString(Iso(toUtc))}" +
+                    $"&bucket={Uri.EscapeDataString(bucket)}";
+        return string.IsNullOrEmpty(storeId)
+            ? query
+            : $"{query}&store_id={Uri.EscapeDataString(storeId)}";
+    }
+
+    /// <summary>``yyyy-MM-ddTHH:mm:ssZ`` in UTC, the form the contract documents.</summary>
+    public static string Iso(DateTime utc) =>
+        DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToString("yyyy-MM-ddTHH:mm:ssZ",
+            System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>The query string for the category route, including its leading ``?``.</summary>
+    public static string CategoryWindow(DateTime fromUtc, DateTime toUtc, string? storeId)
+    {
+        var query = $"?from={Uri.EscapeDataString(Iso(fromUtc))}&to={Uri.EscapeDataString(Iso(toUtc))}";
+        return string.IsNullOrEmpty(storeId)
+            ? query
+            : $"{query}&store_id={Uri.EscapeDataString(storeId)}";
+    }
+
+    /// <summary>
+    /// The query string for the comparison route. ``compare_store_ids`` repeats the
+    /// key rather than joining with commas, which is what the contract and FastAPI
+    /// expect; no ids means the caller's whole scope.
+    /// </summary>
+    public static string StoresWindow(DateTime fromUtc, DateTime toUtc, IEnumerable<string>? storeIds)
+    {
+        var query = $"?from={Uri.EscapeDataString(Iso(fromUtc))}&to={Uri.EscapeDataString(Iso(toUtc))}";
+        if (storeIds is null)
+        {
+            return query;
+        }
+
+        foreach (var storeId in storeIds.Where(id => !string.IsNullOrEmpty(id)))
+        {
+            query += $"&compare_store_ids={Uri.EscapeDataString(storeId)}";
+        }
+
+        return query;
+    }
 
     // --- Probes for the 404 rule (no side effect) ----------------------------
 

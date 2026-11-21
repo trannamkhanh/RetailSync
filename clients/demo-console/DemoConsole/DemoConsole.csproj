@@ -18,6 +18,9 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
+    <!-- PB-49: the revenue line. SkiaSharp ships native assets, so the demo machine
+         must run "dotnet build" before the session; see clients/demo-console/README.md. -->
+    <PackageReference Include="LiveChartsCore.SkiaSharpView.WinForms" Version="2.0.5" />
   </ItemGroup>
 
   <ItemGroup>

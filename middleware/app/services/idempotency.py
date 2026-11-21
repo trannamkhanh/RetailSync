@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy.exc import IntegrityError
@@ -35,17 +36,50 @@ def _duplicate(existing_hash: str, payload_hash: str) -> bool:
     return False
 
 
+def _to_utc_naive(value: datetime | None) -> datetime | None:
+    """A naive timestamp is already UTC; an offset is converted before storing.
+
+    ``pos_transaction`` keeps ``datetime2`` without an offset, as every other
+    table does, and the convention (DS-04) is that a value without one is UTC.
+
+    A timestamp within one offset of ``datetime.min`` or ``datetime.max`` cannot be
+    converted: ``0001-01-01T00:00:00+07:00`` is a legal instant that the UTC
+    conversion pushes out of range, and ``astimezone`` raises ``OverflowError``.
+    Raising there would answer 503 for an accepted event, so the value is clamped
+    to the nearest representable instant instead. The stored moment is then a
+    boundary value, which the classifier reports as ``SUSPECT_FUTURE`` or
+    ``SUSPECT_OLD`` rather than silently trusting it (Dashboard_Review 4.4).
+    """
+    if value is None or value.tzinfo is None:
+        return value
+    try:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    except (OverflowError, ValueError):
+        # The conversion left the representable range. An early year underflowed below
+        # datetime.min; anything else overflowed above datetime.max. Both are pinned to
+        # the representable edge, which the classifier then reports as suspect.
+        return datetime.min if value.year < 2 else datetime.max.replace(microsecond=0)
+
+
 def claim_transaction(
     session: Session, txn_id: str, store_id: str, pos_id: str, txn_type: str,
-    ref_txn_id: str | None, payload_hash: str,
+    ref_txn_id: str | None, payload_hash: str, occurred_at: datetime | None = None,
 ) -> bool:
+    """Claim ``txn_id`` and store ``occurred_at`` on the first one only.
+
+    ``occurred_at`` is the moment the POS declares, never the moment of arrival,
+    and it is never overwritten: a duplicate returns before anything is written,
+    so a resend with a different timestamp keeps the first value.
+    """
     existing = repository.find_payload_hash(session, txn_id)
     if existing is not None:
         return _duplicate(existing, payload_hash)
+    occurred = _to_utc_naive(occurred_at)
     try:
         with session.begin_nested():
             repository.insert_transaction(
                 session, txn_id, store_id, pos_id, txn_type, ref_txn_id, payload_hash,
+                occurred,
             )
     except IntegrityError:
         existing = repository.find_payload_hash(session, txn_id)
@@ -53,6 +87,11 @@ def claim_transaction(
             raise
         return _duplicate(existing, payload_hash)
     return True
+
+
+def stored_occurred_at(session: Session, txn_id: str) -> datetime | None:
+    """The ``occurred_at`` of the stored transaction, or ``None`` when it has none."""
+    return repository.find_occurred_at(session, txn_id)
 
 
 def stock_of_transaction(session: Session, store_id: str, txn_id: str) -> dict[str, int]:

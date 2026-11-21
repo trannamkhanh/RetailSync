@@ -126,6 +126,116 @@ public static class ApiParsers
         return RequiredString(document.RootElement, "mode");
     }
 
+    /// <summary>GET /dashboard/revenue.</summary>
+    public static DashboardRevenue DashboardRevenue(string body)
+    {
+        using var document = Parse(body);
+        var root = document.RootElement;
+
+        var buckets = RequiredArray(root, "buckets")
+            .Select(item => new DashboardBucket(
+                RequiredUtc(item, "from"),
+                RequiredUtc(item, "to"),
+                RequiredDecimal(item, "revenue"),
+                RequiredInt(item, "transactions")))
+            .ToList();
+
+        return new DashboardRevenue(
+            Scope(root),
+            TimePolicy(root),
+            OptionalUtc(root, "data_from"),
+            OptionalUtc(root, "data_to"),
+            RequiredBool(root, "has_data"),
+            RequiredDecimal(root, "total_revenue"),
+            RequiredInt(root, "transactions"),
+            Quality(root),
+            buckets);
+    }
+
+    /// <summary>GET /dashboard/stores.</summary>
+    public static IReadOnlyList<DashboardStore> DashboardStores(string body)
+    {
+        using var document = Parse(body);
+        return RequiredArray(document.RootElement, "stores")
+            .Select(item => new DashboardStore(
+                RequiredString(item, "store_id"),
+                RequiredString(item, "name"),
+                RequiredString(item, "region_id"),
+                RequiredBool(item, "is_active")))
+            .ToList();
+    }
+
+    /// <summary>GET /dashboard/revenue-by-category.</summary>
+    public static DashboardCategoryRevenue DashboardCategoryRevenue(string body)
+    {
+        using var document = Parse(body);
+        var root = document.RootElement;
+        var categories = RequiredArray(root, "categories")
+            .Select(item => new DashboardCategory(
+                RequiredString(item, "category"),
+                RequiredDecimal(item, "revenue"),
+                RequiredDecimal(item, "share")))
+            .ToList();
+
+        return new DashboardCategoryRevenue(
+            Scope(root),
+            TimePolicy(root),
+            RequiredDecimal(root, "total_revenue"),
+            RequiredInt(root, "transactions"),
+            Quality(root),
+            categories);
+    }
+
+    /// <summary>GET /dashboard/revenue-by-store.</summary>
+    public static DashboardStoreRevenueResponse DashboardStoreRevenue(string body)
+    {
+        using var document = Parse(body);
+        var root = document.RootElement;
+        var stores = RequiredArray(root, "stores")
+            .Select(item => new DashboardStoreRevenue(
+                RequiredString(item, "store_id"),
+                RequiredString(item, "name"),
+                RequiredString(item, "region_id"),
+                RequiredDecimal(item, "revenue"),
+                RequiredDecimal(item, "share")))
+            .ToList();
+
+        return new DashboardStoreRevenueResponse(
+            Scope(root),
+            TimePolicy(root),
+            OptionalUtc(root, "data_from"),
+            OptionalUtc(root, "data_to"),
+            RequiredBool(root, "has_data"),
+            RequiredDecimal(root, "total_revenue"),
+            RequiredInt(root, "transactions"),
+            Quality(root),
+            stores);
+    }
+
+    private static DashboardScope Scope(JsonElement root)
+    {
+        var scope = RequiredProperty(root, "scope");
+        return new DashboardScope(OptionalString(scope, "store_id"), RequiredBool(scope, "is_system_wide"));
+    }
+
+    private static DashboardTimePolicy TimePolicy(JsonElement root)
+    {
+        var policy = RequiredProperty(root, "time_policy");
+        return new DashboardTimePolicy(RequiredInt(policy, "max_future_skew_seconds"),
+            RequiredInt(policy, "max_backfill_days"));
+    }
+
+    private static DashboardTimeQuality Quality(JsonElement root)
+    {
+        var quality = RequiredProperty(root, "quality");
+        return new DashboardTimeQuality(
+            RequiredInt(quality, "on_time"),
+            RequiredInt(quality, "backfill"),
+            RequiredInt(quality, "suspect_future"),
+            RequiredInt(quality, "suspect_old"),
+            RequiredInt(quality, "unknown"));
+    }
+
     private static JsonDocument Parse(string body)
     {
         try
@@ -205,5 +315,37 @@ public static class ApiParsers
         }
 
         return value.UtcDateTime;
+    }
+
+    private static DateTime? OptionalUtc(JsonElement element, string name) =>
+        OptionalString(element, name) is null ? null : RequiredUtc(element, name);
+
+    private static bool RequiredBool(JsonElement element, string name)
+    {
+        var value = RequiredProperty(element, name);
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => throw new FormatException($"Field '{name}' is not true or false."),
+        };
+    }
+
+    /// <summary>
+    /// Money is a JSON number with two decimals (DS-04), never a string. Reading it
+    /// as <see cref="decimal"/> keeps the cents exact; going through a double first
+    /// would reintroduce the rounding the contract avoids.
+    /// </summary>
+    private static decimal RequiredDecimal(JsonElement element, string name)
+    {
+        var value = RequiredProperty(element, name);
+        if (value.ValueKind != JsonValueKind.Number)
+        {
+            throw new FormatException($"Field '{name}' is not a number.");
+        }
+
+        return value.TryGetDecimal(out var number)
+            ? number
+            : throw new FormatException($"Field '{name}' is not a decimal number.");
     }
 }

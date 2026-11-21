@@ -2,6 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from hashlib import sha256
 from threading import Barrier
@@ -48,8 +49,104 @@ def world(db_session: Session) -> World:
     return seed(db_session)
 
 
-def claim(session: Session, world: World, payload: str = "a" * 64) -> bool:
-    return claim_transaction(session, world.txn, world.store, world.pos, "SALE", None, payload)
+def claim(session: Session, world: World, payload: str = "a" * 64,
+          occurred_at: datetime | None = None) -> bool:
+    return claim_transaction(session, world.txn, world.store, world.pos, "SALE", None,
+                             payload, occurred_at)
+
+
+def test_pb49_claim_stores_the_pos_declared_occurred_at(db_session, world) -> None:
+    moment = datetime(2026, 11, 17, 2, 30, 0)
+
+    assert claim(db_session, world, occurred_at=moment) is True
+
+    row = db_session.get(PosTransaction, world.txn)
+    assert row.occurred_at == moment
+
+
+def test_pb49_claim_without_occurred_at_leaves_it_null(db_session, world) -> None:
+    assert claim(db_session, world) is True
+
+    assert db_session.get(PosTransaction, world.txn).occurred_at is None
+
+
+def test_pb49_an_offset_occurred_at_is_stored_as_utc(db_session, world) -> None:
+    bangkok = datetime(2026, 11, 17, 9, 30, tzinfo=timezone(timedelta(hours=7)))
+
+    assert claim(db_session, world, occurred_at=bangkok) is True
+
+    stored = db_session.get(PosTransaction, world.txn).occurred_at
+    assert stored == datetime(2026, 11, 17, 2, 30)
+    assert stored.tzinfo is None
+
+
+def test_pb49_a_naive_occurred_at_is_kept_as_utc(db_session, world) -> None:
+    moment = datetime(2026, 11, 17, 2, 30)
+
+    assert claim(db_session, world, occurred_at=moment) is True
+
+    assert db_session.get(PosTransaction, world.txn).occurred_at == moment
+
+
+def test_pb49_a_duplicate_keeps_the_first_occurred_at(db_session, world) -> None:
+    """Plan rule 4: occurred_at is never overwritten by a resend."""
+    first = datetime(2026, 11, 17, 2, 30)
+    later = datetime(2026, 11, 18, 9, 0)
+
+    assert claim(db_session, world, occurred_at=first) is True
+    assert claim(db_session, world, occurred_at=later) is False
+
+    assert db_session.get(PosTransaction, world.txn).occurred_at == first
+
+
+def test_pb49_a_duplicate_with_a_timestamp_only_response_keeps_the_first(db_session, world) -> None:
+    """The resend's moment is never read, so the claim returns before it is compared."""
+    first = datetime(2026, 11, 17, 2, 30)
+
+    assert claim(db_session, world, occurred_at=first) is True
+    assert claim(db_session, world, occurred_at=None) is False
+
+    assert db_session.get(PosTransaction, world.txn).occurred_at == first
+
+
+def test_pb49_the_stored_occurred_at_is_readable_after_a_duplicate(db_session, world) -> None:
+    from app.services.idempotency import stored_occurred_at
+
+    first = datetime(2026, 11, 17, 2, 30)
+    claim(db_session, world, occurred_at=first)
+    claim(db_session, world, occurred_at=datetime(2026, 12, 1, 0, 0))
+
+    assert stored_occurred_at(db_session, world.txn) == first
+    assert stored_occurred_at(db_session, "TEST-MISSING") is None
+
+
+def test_pb49_effective_at_falls_back_to_created_at_when_occurred_at_is_null(db_session, world) -> None:
+    """The computed column is the database's, not the ORM's (plan M2)."""
+    from sqlalchemy import text
+
+    assert claim(db_session, world) is True
+    created_at = db_session.get(PosTransaction, world.txn).created_at
+
+    effective = db_session.execute(
+        text("SELECT effective_at FROM dbo.pos_transaction WHERE txn_id = :txn_id"),
+        {"txn_id": world.txn},
+    ).scalar_one()
+
+    assert effective == created_at
+
+
+def test_pb49_effective_at_uses_occurred_at_when_it_is_set(db_session, world) -> None:
+    from sqlalchemy import text
+
+    moment = datetime(2026, 11, 17, 2, 30)
+    assert claim(db_session, world, occurred_at=moment) is True
+
+    effective = db_session.execute(
+        text("SELECT effective_at FROM dbo.pos_transaction WHERE txn_id = :txn_id"),
+        {"txn_id": world.txn},
+    ).scalar_one()
+
+    assert effective == moment
 
 
 def test_hash_reproduces_vector_in_reverse_item_order() -> None:
