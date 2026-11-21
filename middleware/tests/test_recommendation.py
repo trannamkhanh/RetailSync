@@ -234,7 +234,7 @@ def test_pb25_final_state_suppresses_only_same_business_date(
     business_date = clock.today_local() - timedelta(days=days_ago)
     timestamp = utc_start(business_date) + timedelta(minutes=1)
     # Always create the recommendation yesterday so decisions are checked by
-    # decided_at, while BLOCKED uses its own creation timestamp.
+    # decided_at, while BLOCKED uses the guardrail result's checked_at.
     original.created_at = utc_start(clock.today_local() - timedelta(days=1))
     if state == "BLOCKED":
         original.status = state

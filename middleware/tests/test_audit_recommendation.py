@@ -2,7 +2,6 @@
 
 from datetime import datetime, timedelta, timezone
 
-import pytest
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
@@ -82,6 +81,30 @@ def test_audit09_rules_loaded_once_prevents_partial_release(db_session, recommen
     db_session.refresh(second)
     assert len(calls) == 1
     assert (first.status, second.status) == ("PENDING", "PENDING")
+
+
+def test_audit09_first_rule_load_failure_keeps_existing_and_new_rows_generated(
+    db_session, recommendation_world, monkeypatch,
+):
+    store, sku, _ = recommendation_world
+    existing = queued(db_session, store, sku, None)
+    calls = []
+
+    def unavailable(session):
+        calls.append(1)
+        raise RuntimeError("first rule read failed")
+
+    monkeypatch.setattr(guardrail_rules, "active_rules", unavailable)
+    assert job._process_store(db_session, store, clock.today_local(), []) == 1
+    db_session.commit()
+    rows = recommendations(db_session, store)
+    assert len(calls) == 1
+    assert len(rows) == 2
+    assert existing.rec_id in {row.rec_id for row in rows}
+    assert all(row.status == "GENERATED" for row in rows)
+    assert not list(db_session.scalars(select(GuardrailResult).where(
+        GuardrailResult.rec_id.in_([row.rec_id for row in rows]),
+    )))
 
 
 def test_audit09_old_generated_blocked_today_is_not_duplicated(db_session, recommendation_world, monkeypatch):
