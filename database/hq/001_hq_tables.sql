@@ -1,4 +1,7 @@
 -- HQ mock database (not part of RTS_DB). Database Design v1.3, tables 21, 22.
+SET XACT_ABORT ON;
+BEGIN TRANSACTION;
+
 CREATE TABLE dbo.hq_sync_batch (
     sync_batch_id varchar(40) NOT NULL CONSTRAINT pk_hq_sync_batch PRIMARY KEY,
     store_id varchar(10) NOT NULL,
@@ -16,3 +19,5 @@ CREATE TABLE dbo.hq_sales_total (
     net_revenue decimal(14,2) NOT NULL,
     CONSTRAINT pk_hq_sales_total PRIMARY KEY (store_id, sku)
 );
+
+COMMIT;

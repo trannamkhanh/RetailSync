@@ -273,6 +273,36 @@ Invoke-Case "test_audit11a_folder_inside_repo_still_warns_when_not_ignored" {
     finally { Set-Location $env:TEMP; Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue }
 }
 
+# --- hq_snapshot.ps1 (minor) -----------------------------------------------
+
+$FakeSnapshotHttp = @'
+function New-DemoCommonArgs { param([string]$TokensPath, [string]$CaPath) return @{} }
+function Get-DemoErrorCode { param([string]$Body) return "SNAPSHOT_REJECTED" }
+function Exit-Demo { param($Result) }
+function Invoke-DemoApi {
+    param([string]$Method, [string]$Url, [string]$TokenName, [string]$Body)
+    $global:AuditSnapshotBody = $Body
+    return [pscustomobject]@{ Status = 422; Body = '{"code":"SNAPSHOT_REJECTED"}'; Error = "stub" }
+}
+'@
+
+Invoke-Case "test_audit_minor_hq_snapshot_taken_at_is_iso_8601_in_any_culture" {
+    $root = New-TempDir
+    try {
+        Copy-Item (Join-Path $DemoDir "hq_snapshot.ps1") $root
+        Set-Content -Encoding ASCII (Join-Path $root "_demo_http.ps1") $FakeSnapshotHttp
+        foreach ($culture in @("th-TH", "fi-FI")) {
+            $global:AuditSnapshotBody = $null
+            # One statement, so Windows PowerShell 5.1 keeps the culture while the script runs.
+            & { [Threading.Thread]::CurrentThread.CurrentCulture = $culture; & (Join-Path $root "hq_snapshot.ps1") *> $null }
+            $takenAt = ($global:AuditSnapshotBody | ConvertFrom-Json).taken_at
+            $year = [DateTime]::UtcNow.Year
+            Assert-That ($takenAt -match "^$year-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$") "culture $culture gave taken_at '$takenAt'"
+        }
+    }
+    finally { Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue }
+}
+
 Write-Host ""
 Write-Host "$script:Passes passed, $script:Failures failed"
 if ($script:Failures -gt 0) { exit 1 }

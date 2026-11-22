@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from pydantic import SecretStr
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -38,6 +38,14 @@ class Settings(BaseSettings):
     hq_timeout_seconds: float = Field(default=3, gt=0)
     # The alert window of a product category that has no near_expiry_config row.
     near_expiry_default_days: int = Field(default=3, ge=0, le=3650)
+
+    @field_validator("pos_gateway_secret")
+    @classmethod
+    def _gateway_secret_fits_nginx(cls, value: SecretStr | None) -> SecretStr | None:
+        # pos-gateway pastes the secret inside "..." in its nginx config (deploy/nginx/pos-gateway.conf.template).
+        if value is not None and any(c in '$"\\;' or c.isspace() for c in value.get_secret_value()):
+            raise ValueError('POS_GATEWAY_SECRET must not contain $, ", \\, ; or whitespace; use a hex value.')
+        return value
 
 
 settings = Settings()

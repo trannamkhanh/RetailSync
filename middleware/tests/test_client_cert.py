@@ -17,12 +17,12 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 from sqlalchemy import Engine, delete, select
 from sqlalchemy.orm import Session
 
 from app.core.client_cert import certificate_fingerprint
-from app.core.config import settings
+from app.core.config import Settings, settings
 from app.core.security import create_token
 from app.domain.models import AuditLog, Inventory, PosTerminal, PosTransaction, Product, StaffUser, Store
 from app.main import app
@@ -278,3 +278,16 @@ def test_pb48_4_headers_are_ignored_with_mtls_off(client, db_session, world, mon
 def test_pb48_5_fingerprint_matches_openssl(certificates):
     for certificate in certificates.values():
         assert certificate_fingerprint(certificate.pem) == certificate.fingerprint
+
+
+@pytest.mark.parametrize("secret", ['abc$def', 'abc"def', 'abc\\def', 'abc;def', 'abc def', 'abc\tdef', ' abc'],
+                         ids=["dollar", "quote", "backslash", "semicolon", "space", "tab", "leading-space"])
+def test_audit_minor_gateway_secret_with_nginx_special_characters_is_refused(secret):
+    # pos-gateway pastes the secret inside "..." in its nginx config.
+    with pytest.raises(ValidationError, match="POS_GATEWAY_SECRET"):
+        Settings(_env_file=None, pos_gateway_secret=secret)
+
+
+@pytest.mark.parametrize("secret", [None, "", "0f3a9c" * 10, "Abc-123_x.y~z+/="])
+def test_audit_minor_gateway_secret_hex_or_unset_is_accepted(secret):
+    Settings(_env_file=None, pos_gateway_secret=secret)

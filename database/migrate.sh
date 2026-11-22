@@ -8,6 +8,16 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 sqlcmd_bin=${SQLCMD_BIN:-/opt/mssql-tools18/bin/sqlcmd}
 online_timeout=${MIGRATE_DB_ONLINE_TIMEOUT_SECONDS:-60}
 run() { "$sqlcmd_bin" -S "$host" -U sa -C -I -b -f 65001 "$@"; }
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+# One file and its schema_migration row commit together or not at all: one sqlcmd session, one transaction.
+apply() {
+  local target=$1 file=$2 version=$3
+  printf '%s\n' 'SET XACT_ABORT ON;' 'BEGIN TRANSACTION;' 'GO' > "$work/begin.sql"
+  printf '%s\n' '' 'GO' "INSERT dbo.schema_migration (version) VALUES ('$version');" 'COMMIT;' 'GO' > "$work/end.sql"
+  run -d "$target" -i "$work/begin.sql,$file,$work/end.sql"
+}
 
 wait_online() {
   local target=$1
@@ -35,8 +45,7 @@ for file in "$root"/migrations/*.sql; do
   applied=$(run -d "$db" -h -1 -W -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM dbo.schema_migration WHERE version='$version';" | tr -d '[:space:]')
   if [[ "$applied" == "0" ]]; then
     echo "Applying $version"
-    run -d "$db" -i "$file"
-    run -d "$db" -Q "INSERT dbo.schema_migration (version) VALUES ('$version');"
+    apply "$db" "$file" "$version"
   fi
 done
 
@@ -56,8 +65,7 @@ for file in "$root"/hq/*.sql; do
   applied=$(run -d "$hq_db" -h -1 -W -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM dbo.schema_migration WHERE version='$version';" | tr -d '[:space:]')
   if [[ "$applied" == "0" ]]; then
     echo "Applying HQ $version"
-    run -d "$hq_db" -i "$file"
-    run -d "$hq_db" -Q "INSERT dbo.schema_migration (version) VALUES ('$version');"
+    apply "$hq_db" "$file" "$version"
   fi
 done
 echo "HQ database $hq_db is up to date"
