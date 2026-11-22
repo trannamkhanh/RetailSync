@@ -25,7 +25,7 @@ new output.
 Command, from the repository root:
 
 ```
-docker compose run --rm --volume "${PWD}:/repo" --workdir /repo middleware python scripts/metrics/near_expiry_accuracy.py --db RTS_DB_TEST
+docker compose run --rm --no-deps --volume "${PWD}:/repo" --workdir /repo middleware python scripts/metrics/near_expiry_accuracy.py --db RTS_DB_TEST
 ```
 
 Output of the run:
@@ -86,7 +86,7 @@ threshold.
 - `--cleanup` used, so the store and its rows were removed again.
 
 ```
-docker compose run --rm --volume "${PWD}:/repo" --workdir /repo middleware \
+docker compose run --rm --no-deps --volume "${PWD}:/repo" --workdir /repo middleware \
     python scripts/metrics/near_expiry_accuracy.py --db RTS_DB_TEST --cleanup
 ```
 
@@ -116,4 +116,3 @@ days here, so a run that mislabelled one as the other could not be told apart by
 totals alone -- which is exactly why the test asserts the absence of the config
 row rather than only the score. The other markdown of this report (`RTS_DB_DEMO`
 figures) is from the earlier commit and was not re-run for this audit.
-
