@@ -38,6 +38,9 @@ def _utc(moment: datetime) -> datetime:
     return moment.astimezone(timezone.utc)
 
 
+FREE_SECOND_TRIES = 60
+
+
 def batch_id_for(store_id: str, moment: datetime) -> str:
     """DS-05 section 2: SB-<store_id>-<yyyyMMddHHmmss UTC>, at most 28 characters."""
     return f"SB-{store_id}-{_utc(moment):%Y%m%d%H%M%S}"
@@ -87,15 +90,18 @@ def aggregate_store(session: Session, store_id: str, now: datetime) -> str | Non
     the pool never hands a 2000 ms limit to a POS request.
     """
     moment = _utc(now)
-    sync_batch_id = batch_id_for(store_id, moment)
     with lock_wait_limited(session, settings.pos_lock_timeout_ms):
         if repository.count_unassigned(session, store_id) == 0:
             return None
         # A second aggregation of the store within the same second takes the next free second (same format).
-        taken = moment
-        while session.get(SyncBatch, sync_batch_id) is not None:
-            taken += timedelta(seconds=1)
-            sync_batch_id = batch_id_for(store_id, taken)
+        for step in range(FREE_SECOND_TRIES):
+            sync_batch_id = batch_id_for(store_id, moment + timedelta(seconds=step))
+            if session.get(SyncBatch, sync_batch_id) is None:
+                break
+        else:
+            # The job rolls this store back and logs it; its transactions join the next run.
+            raise RuntimeError(f"No free sync_batch_id for store {store_id} in the "
+                               f"{FREE_SECOND_TRIES} seconds from {moment:%Y-%m-%dT%H:%M:%SZ}.")
 
         stored_moment = moment.replace(tzinfo=None)
         batch = SyncBatch(sync_batch_id=sync_batch_id, store_id=store_id,

@@ -486,3 +486,20 @@ def test_audit_minor_two_aggregations_in_the_same_second_get_distinct_ids(db_ses
     assert second == f"SB-{store_id}-20261114030406"
     assert len(second) <= 28
     assert db_session.get(PosTransaction, late).sync_batch_id == second
+
+
+def test_audit_minor_free_second_search_is_bounded(db_session, monkeypatch):
+    monkeypatch.setattr("app.services.aggregation.FREE_SECOND_TRIES", 2)
+    skus = [f"TEST-SKU-{_uid(5)}"]
+    store_id, pos_id = _create_store(db_session, skus)
+    moment = datetime(2026, 11, 14, 3, 4, 5, tzinfo=timezone.utc)
+    for _ in range(2):
+        _add_transaction(db_session, store_id, pos_id, "SALE", [(skus[0], 1, Decimal("10.00"))])
+        assert aggregate_store(db_session, store_id, moment)
+    late = _add_transaction(db_session, store_id, pos_id, "SALE", [(skus[0], 1, Decimal("10.00"))])
+
+    with pytest.raises(RuntimeError, match="No free sync_batch_id"):
+        aggregate_store(db_session, store_id, moment)
+
+    assert db_session.get(PosTransaction, late).sync_batch_id is None
+    assert len(db_session.scalars(select(SyncBatch).where(SyncBatch.store_id == store_id)).all()) == 2
