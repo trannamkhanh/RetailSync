@@ -88,16 +88,28 @@ def _authorize(claims: dict[str, Any], session: Session, allowed: frozenset[str]
     return Principal(user.username, role, user.store_id, None)
 
 
+def bearer_claims(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> dict[str, Any]:
+    """Decode the bearer token without touching the database.
+
+    Routers that want to refuse a bad token before they take a pooled connection
+    declare this dependency ahead of ``get_db``: FastAPI resolves dependencies in
+    the order they are declared, so a missing or invalid token is answered 401
+    without opening a session (audit #5). ``require_role`` uses it too, and the
+    per-request dependency cache means the token is decoded once.
+    """
+    if credentials is None:
+        raise _unauthorized()
+    return _decode_token(credentials.credentials)
+
+
 def require_role(*roles: str) -> Callable[..., Principal]:
     unknown = sorted(set(roles) - set(API_ROLE_BY_DB_ROLE.values()))
     if unknown or not roles:
         raise ValueError(f"require_role needs known API roles, got: {unknown or 'none'}")
     allowed = frozenset(roles)
 
-    def dependency(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    def dependency(claims: dict[str, Any] = Depends(bearer_claims),
                    session: Session = Depends(get_db)) -> Principal:
-        if credentials is None:
-            raise _unauthorized()
-        return _authorize(_decode_token(credentials.credentials), session, allowed)
+        return _authorize(claims, session, allowed)
 
     return dependency

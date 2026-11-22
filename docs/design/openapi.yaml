@@ -226,7 +226,6 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-
         '422':
           $ref: '#/components/responses/ValidationError'
 
@@ -247,7 +246,9 @@ paths:
           description: Must be the store of the caller
           schema:
             type: string
+            minLength: 1
             maxLength: 10
+            pattern: '^[A-Za-z0-9_-]+$'
       responses:
         '200':
           description: Stores ordered from nearest to farthest
@@ -280,6 +281,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
 
   /near-expiry-alerts:
     get:
@@ -353,6 +356,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
 
   /recommendations/{rec_id}/decision:
     post:
@@ -513,6 +518,8 @@ paths:
           required: true
           schema:
             type: integer
+            minimum: 1
+            maximum: 2147483647
       requestBody:
         required: true
         content:
@@ -581,7 +588,9 @@ paths:
           required: true
           schema:
             type: string
+            minLength: 1
             maxLength: 50
+            pattern: '^[A-Za-z0-9_-]+(?: [A-Za-z0-9_-]+)*$'
       requestBody:
         required: true
         content:
@@ -932,14 +941,18 @@ components:
       required: true
       schema:
         type: string
+        minLength: 1
         maxLength: 10
+        pattern: '^[A-Za-z0-9_-]+$'
     Barcode:
       name: barcode
       in: path
       required: true
       schema:
         type: string
+        minLength: 1
         maxLength: 30
+        pattern: '^[A-Za-z0-9-]+$'
     RecId:
       name: rec_id
       in: path
@@ -947,6 +960,8 @@ components:
       schema:
         type: integer
         format: int64
+        minimum: 1
+        maximum: 9223372036854775807
   responses:
     Unauthorized:
       description: 'Missing, invalid or expired token. Code: UNAUTHORIZED.'

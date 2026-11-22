@@ -157,16 +157,23 @@ def test_pb07_failure_after_stock_change_rolls_back_and_can_retry(client, db_ses
 
 
 def test_pb07_corrected_lock_order(client, db_session, monkeypatch):
+    """The update lock comes before the FK-bearing claim, and only once.
+
+    Audit #5 removed the separate unlock check and the second lock: the locked
+    read answers the 404 and yields the quantities, and the lock is held until
+    the transaction ends, so re-reading the same row bought nothing.
+    """
     world = seed_sale(db_session)
     calls = []
-    for name in ("require_original_sale", "lock_original_sale", "claim_transaction"):
+    for name in ("lock_original_sale", "claim_transaction"):
         original = getattr(pos_cancellation, name)
         def traced(*args, _name=name, _original=original, **kwargs):
             calls.append(_name)
             return _original(*args, **kwargs)
         monkeypatch.setattr(pos_cancellation, name, traced)
+
     assert post(client, cancellation(world), world.token).status_code == 200
-    assert calls == ["require_original_sale", "lock_original_sale", "claim_transaction", "lock_original_sale"]
+    assert calls == ["lock_original_sale", "claim_transaction"]
 
 
 def cleanup(engine, world, txn_ids):

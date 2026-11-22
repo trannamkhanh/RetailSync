@@ -13,7 +13,7 @@ from app.repositories.pos_events import add_transaction_items
 from app.services.event_validation import validate_event_source
 from app.services.idempotency import claim_transaction, content_hash, stock_of_transaction
 from app.services.inventory import restore_items
-from app.services.original_sale import lock_original_sale, require_original_sale
+from app.services.original_sale import lock_original_sale
 
 if TYPE_CHECKING:
     from app.api.schemas.pos import PosEvent
@@ -24,10 +24,13 @@ def process_cancellation(session: Session, event: PosEvent, principal: Principal
     original_id = event.original_transaction_id
     if original_id is None:
         raise ApiError(422, "INVALID_EVENT", "original_transaction_id is required for CANCELLATION.")
-    require_original_sale(session, event.store_id, original_id)
-    # Match process_return: take UPDLOCK before inserting the FK-bearing claim.
-    # Otherwise concurrent events can deadlock while upgrading FK shared locks.
-    lock_original_sale(session, event.store_id, original_id)
+    # One locked read answers both questions the old code asked separately
+    # (audit #5): an unknown sale is 404 ORIGINAL_SALE_NOT_FOUND before the
+    # FK-bearing claim row is inserted, which is where DS-04 puts that check, and
+    # the row comes back with its sold and returned quantities. The update lock
+    # is held until this transaction ends, so the second lock_original_sale the
+    # old code took after the claim was re-reading a row it already held.
+    sale = lock_original_sale(session, event.store_id, original_id)
     payload_hash = content_hash("CANCELLATION", event.store_id, event.pos_id, original_id, [])
     if not claim_transaction(session, event.transaction_id, event.store_id, event.pos_id,
                              "CANCELLATION", original_id, payload_hash):
@@ -36,7 +39,6 @@ def process_cancellation(session: Session, event: PosEvent, principal: Principal
             "message": "Transaction already recorded",
             "current_stock": stock_of_transaction(session, event.store_id, event.transaction_id),
         }
-    sale = lock_original_sale(session, event.store_id, original_id)
     if sale.status == "CANCELLED":
         raise ApiError(409, "SALE_ALREADY_CANCELLED", f"Sale '{original_id}' has already been cancelled.")
     if any(quantity > 0 for quantity in sale.returned.values()):
