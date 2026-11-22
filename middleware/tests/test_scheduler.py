@@ -5,10 +5,13 @@ always held, so no thread and no database are needed. The application lock
 tests use real SQL Server sessions in RTS_DB_TEST.
 """
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, time, timedelta, timezone
 import logging
 import threading
 import time as wall
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,7 +20,7 @@ from sqlalchemy import Engine, text
 
 from app.core.config import Settings, settings
 from app.core.db import database_url
-from app.jobs import scheduler
+from app.jobs import locks, scheduler
 from app.jobs.scheduler import Job, JobLock, Scheduler, register_job
 from app.main import app
 
@@ -49,6 +52,20 @@ class HeldLock:
         self.released = True
 
 
+class SwitchLock(HeldLock):
+    """An application lock the test can take away from or give to this scheduler."""
+
+    def __init__(self, free: bool) -> None:
+        super().__init__()
+        self.free = free
+
+    def acquire(self) -> bool:
+        return self.free
+
+    def holds(self) -> bool:
+        return self.free
+
+
 class Counter:
     def __init__(self) -> None:
         self.calls = 0
@@ -60,9 +77,20 @@ class Counter:
 START = datetime(2026, 11, 14, 18, 30, tzinfo=timezone.utc)
 
 
+@contextmanager
+def free_job_lock(name: str) -> Iterator[bool]:
+    yield True
+
+
 @pytest.fixture(autouse=True)
 def empty_registry(monkeypatch):
     monkeypatch.setattr(scheduler, "_jobs", {})
+
+
+@pytest.fixture(autouse=True)
+def job_lock_always_free(monkeypatch):
+    # Timing tests need no SQL Server; the per-job lock tests put the real lock back.
+    monkeypatch.setattr(scheduler, "job_lock", free_job_lock, raising=False)
 
 
 @pytest.fixture
@@ -99,6 +127,7 @@ def test_pb15_1_interval_job_runs_once_each_interval(clock):
 def test_pb15_1_missed_intervals_run_once_not_in_a_burst(clock):
     count = Counter()
     sched = make([Job("every-minute", count, every_seconds=60)], clock)
+    assert sched.tick() == []  # takes the lock and plans from START
 
     clock.advance(300)
     assert sched.tick() == ["every-minute"]
@@ -113,6 +142,7 @@ def test_pb15_1_daily_job_runs_at_business_local_time(clock, monkeypatch):
     # 18:30 UTC on 14 Nov is 01:30 on 15 Nov in UTC+7, so 02:00 local is 19:00 UTC.
     sched = make([Job("nightly", count, daily_at=time(2, 0))], clock)
 
+    assert sched.tick() == []  # takes the lock and plans from START
     assert sched.next_run("nightly") == datetime(2026, 11, 14, 19, 0, tzinfo=timezone.utc)
     clock.advance(29 * 60)
     assert sched.tick() == []
@@ -126,6 +156,7 @@ def test_pb15_1_daily_time_already_passed_today_runs_tomorrow(clock, monkeypatch
     # 01:30 local is after 01:00 local, so the next run is 01:00 local on 16 Nov.
     sched = make([Job("nightly", Counter(), daily_at=time(1, 0))], clock)
 
+    sched.tick()  # takes the lock and plans from START
     assert sched.next_run("nightly") == datetime(2026, 11, 15, 18, 0, tzinfo=timezone.utc)
 
 
@@ -134,6 +165,7 @@ def test_pb15_1_daily_time_follows_the_configured_offset(clock, monkeypatch):
 
     sched = make([Job("nightly", Counter(), daily_at=time(2, 0))], clock)
 
+    sched.tick()  # takes the lock and plans from START
     assert sched.next_run("nightly") == datetime(2026, 11, 15, 2, 0, tzinfo=timezone.utc)
 
 
@@ -157,7 +189,7 @@ def test_pb15_6_start_after_the_daily_time_runs_the_job_once(clock, monkeypatch)
     count = Counter()
     sched = make([Job("nightly", count, daily_at=time(1, 0))], clock)
 
-    assert sched.catch_up_pending() == ["nightly"]
+    # Catch-up is decided when the lock is first taken, at the first tick (audit #15).
     assert sched.tick() == ["nightly"]
     clock.advance(60)
     assert sched.tick() == []
@@ -180,14 +212,16 @@ def test_pb15_6_two_daily_jobs_catch_up_in_registry_order(clock, monkeypatch):
     assert order == ["near-expiry", "forecast"]
 
 
-def test_pb15_6_catch_up_runs_before_jobs_due_at_the_same_tick(clock, monkeypatch):
+def test_pb15_6_catch_up_runs_at_the_first_tick_before_any_other_job(clock, monkeypatch):
+    # Schedules start when the lock is taken (audit #15), so no other job is due at that tick.
     monkeypatch.setattr(settings, "business_utc_offset_hours", 7)
     order: list[str] = []
     sched = make([Job("every-minute", lambda: order.append("every-minute"), every_seconds=60),
                   Job("nightly", lambda: order.append("nightly"), daily_at=time(1, 0))], clock)
 
+    assert sched.tick() == ["nightly"]
     clock.advance(60)
-    assert sched.tick() == ["nightly", "every-minute"]
+    assert sched.tick() == ["every-minute"]
     assert order == ["nightly", "every-minute"]
 
 
@@ -232,6 +266,155 @@ def test_pb15_6_a_failing_catch_up_job_is_logged_and_not_retried(clock, monkeypa
     assert any("nightly" in record.getMessage() for record in caplog.records)
 
 
+# Failover and several jobs in one tick (audit #15)
+
+
+def test_audit15_late_takeover_runs_each_catch_up_job_once(clock, monkeypatch):
+    # Started at 01:30 local on 15 Nov as a standby; takes the lock a day later.
+    monkeypatch.setattr(settings, "business_utc_offset_hours", 7)
+    lock = SwitchLock(free=False)
+    count = Counter()
+    sched = make([Job("nightly", count, daily_at=time(1, 0))], clock, lock=lock, lock_retry_seconds=0)
+    assert sched.tick() == []
+
+    clock.advance(24 * 3600)
+    lock.free = True
+
+    assert sched.tick() == ["nightly"]
+    assert sched.tick() == []
+    assert count.calls == 1
+
+
+def test_audit15_catch_up_is_decided_when_the_lock_is_taken(clock, monkeypatch):
+    # Standby started at 01:30 local; it gets the lock at 00:45 the next day, before 01:00.
+    monkeypatch.setattr(settings, "business_utc_offset_hours", 7)
+    lock = SwitchLock(free=False)
+    count = Counter()
+    sched = make([Job("nightly", count, daily_at=time(1, 0))], clock, lock=lock, lock_retry_seconds=0)
+    assert sched.tick() == []
+
+    clock.advance(23 * 3600 + 15 * 60)
+    lock.free = True
+    assert sched.tick() == []
+    assert sched.catch_up_pending() == []
+
+    clock.advance(15 * 60)
+    assert sched.tick() == ["nightly"]
+    assert count.calls == 1
+
+
+def test_audit15_lock_lost_mid_tick_stops_the_remaining_jobs(clock):
+    lock = SwitchLock(free=True)
+    second = Counter()
+
+    def first() -> None:
+        lock.free = False  # as if the database dropped the lock session
+
+    sched = make([Job("first", first, every_seconds=60), Job("second", second, every_seconds=60)],
+                 clock, lock=lock)
+    assert sched.tick() == []  # takes the lock and plans from START
+    clock.advance(60)
+
+    assert sched.tick() == ["first"]
+    assert second.calls == 0
+
+
+def test_audit15_stop_mid_tick_stops_the_remaining_jobs(clock):
+    second = Counter()
+    sched = make([Job("first", lambda: sched.stop(), every_seconds=60),
+                  Job("second", second, every_seconds=60)], clock)
+    assert sched.tick() == []  # takes the lock and plans from START
+    clock.advance(60)
+
+    assert sched.tick() == ["first"]
+    assert second.calls == 0
+
+
+def test_audit_minor_job_lock_acquire_closes_connection_when_the_query_fails(monkeypatch):
+    class BrokenConnection:
+        closed = False
+
+        def execution_options(self, **_options):
+            return self
+
+        def exec_driver_sql(self, *_args):
+            raise RuntimeError("sp_getapplock failed")
+
+        def close(self) -> None:
+            self.closed = True
+
+    connection = BrokenConnection()
+
+    class FakeEngine:
+        def connect(self) -> BrokenConnection:
+            return connection
+
+    monkeypatch.setattr(scheduler, "create_engine", lambda *args, **kwargs: FakeEngine())
+    lock = JobLock(database_url(settings.test_db_name))
+
+    with pytest.raises(RuntimeError, match="sp_getapplock failed"):
+        lock.acquire()
+
+    assert connection.closed is True
+    assert lock.holds() is False
+
+
+# The per-job lock shared with POST /admin/jobs/{name}/run and other workers (#14, #15)
+
+
+def test_audit15_run_job_returns_false_when_another_worker_holds_the_job_lock(clock, monkeypatch):
+    monkeypatch.setattr(scheduler, "job_lock", locks.job_lock, raising=False)
+    name = f"TEST-audit15-{uuid4().hex[:8]}"
+    count = Counter()
+    sched = make([Job(name, count, every_seconds=60)], clock)
+
+    with locks.job_lock(name) as held:
+        assert held is True
+        assert sched.run_job(name) is False
+        assert count.calls == 0
+
+    assert sched.run_job(name) is True
+    assert count.calls == 1
+
+
+def test_audit15_tick_keeps_a_job_due_while_another_worker_holds_its_lock(clock, monkeypatch):
+    monkeypatch.setattr(scheduler, "job_lock", locks.job_lock, raising=False)
+    name = f"TEST-audit15-{uuid4().hex[:8]}"
+    count = Counter()
+    sched = make([Job(name, count, every_seconds=60)], clock)
+    assert sched.tick() == []  # takes the lock and plans from START
+    clock.advance(60)
+
+    with locks.job_lock(name) as held:
+        assert held is True
+        assert sched.tick() == []
+        assert sched.next_run(name) == clock.now  # not moved: it did not run
+
+    assert sched.tick() == [name]
+    assert count.calls == 1
+
+
+def test_audit15_job_lock_error_is_logged_and_the_tick_goes_on(clock, monkeypatch, caplog):
+    @contextmanager
+    def flaky_job_lock(name: str) -> Iterator[bool]:
+        if name == "broken-lock":
+            raise RuntimeError("SQL Server unreachable")
+        yield True
+
+    monkeypatch.setattr(scheduler, "job_lock", flaky_job_lock, raising=False)
+    broken, healthy = Counter(), Counter()
+    sched = make([Job("broken-lock", broken, every_seconds=60), Job("healthy", healthy, every_seconds=60)],
+                 clock)
+    assert sched.tick() == []  # takes the lock and plans from START
+    clock.advance(60)
+
+    with caplog.at_level(logging.ERROR, logger=scheduler.__name__):
+        assert sched.tick() == ["healthy"]
+
+    assert (broken.calls, healthy.calls) == (0, 1)
+    assert any("broken-lock" in record.getMessage() and record.exc_info for record in caplog.records)
+
+
 # Failures and overlap
 
 
@@ -244,6 +427,7 @@ def test_pb15_1_failing_job_is_logged_and_runs_again(clock, caplog):
         raise RuntimeError("job failed")
 
     sched = make([Job("broken", broken, every_seconds=60), Job("healthy", healthy, every_seconds=60)], clock)
+    assert sched.tick() == []  # takes the lock and plans from START
     clock.advance(60)
 
     with caplog.at_level(logging.ERROR, logger=scheduler.__name__):
@@ -265,6 +449,7 @@ def test_pb15_1_runs_of_the_same_job_never_overlap(clock):
         finish.wait(timeout=10)
 
     sched = make([Job("slow", slow, every_seconds=60), Job("quick", quick, every_seconds=60)], clock)
+    assert sched.tick() == []  # takes the lock and plans from START
     clock.advance(60)
     first = threading.Thread(target=sched.tick)
     first.start()
@@ -307,11 +492,16 @@ def test_pb15_1_second_scheduler_cannot_get_the_lock_and_runs_nothing(clock):
     second = make([Job("job", second_count, every_seconds=60)], clock, lock=lock_for_tests(),
                   lock_retry_seconds=0)
     try:
+        assert first.tick() == []  # takes the lock and plans from START
+        assert second.tick() == []
         clock.advance(60)
         assert first.tick() == ["job"]
         assert second.tick() == []
 
         first.stop()
+        # The standby plans from the moment it takes over (audit #15).
+        assert second.tick() == []
+        clock.advance(60)
         assert second.tick() == ["job"]
     finally:
         first.stop()
@@ -348,6 +538,7 @@ def test_pb15_1_lost_lock_stops_the_jobs_until_it_is_held_again(clock, test_engi
     sched = make([Job("job", count, every_seconds=60)], clock, lock=holder, lock_retry_seconds=0)
     other = lock_for_tests()
     try:
+        assert sched.tick() == []  # takes the lock and plans from START
         clock.advance(60)
         assert sched.tick() == ["job"]
         # As if the database dropped the holder's session.
