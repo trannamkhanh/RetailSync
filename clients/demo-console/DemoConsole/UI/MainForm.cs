@@ -39,6 +39,8 @@ internal sealed class MainForm : Form
     private readonly PendingWork _pending = new();
     private bool _refreshing;
     private bool _closing;
+    private bool _released;
+    private bool _splitterMovedByUser;
     private DateTime _lastProbe = DateTime.MinValue;
     private IReadOnlyList<StockLine> _stock = Array.Empty<StockLine>();
     private SplitContainer? _stockSplit;
@@ -173,6 +175,9 @@ internal sealed class MainForm : Form
         stockSplit.Panel2.Controls.Add(_batchGrid);
         stockSplit.Panel2.Controls.Add(_batchTitle);
         _batchTitle.Dock = DockStyle.Top;
+        // Once the operator drags the splitter, a resize only clamps it back into
+        // range instead of recomputing the share and undoing the drag.
+        stockSplit.SplitterMoved += (_, _) => _splitterMovedByUser = true;
         tabs.TabPages.Add(Page("Tồn và lô", _stockStatus, stockSplit));
         _stockSplit = stockSplit;
 
@@ -327,17 +332,49 @@ internal sealed class MainForm : Form
             _pending.Close();
             _timer.Stop();
         };
-        FormClosed += (_, _) =>
-        {
-            _timer.Stop();
-            _timer.Dispose();
-            _api.Dispose();
-            _authority?.Dispose();
-        };
+        // FormClosed does not run when the form is disposed without being closed,
+        // so the cleanup lives in Dispose as well (review of PR #79).
+        FormClosed += (_, _) => ReleaseResources();
     }
 
     /// <summary>True once the form cannot be drawn to any more (during close or after it).</summary>
     private bool Gone => _closing || IsDisposed || Disposing;
+
+    /// <summary>
+    /// Frees the timer, the HTTP client and the trust anchor exactly once.
+    /// <para>
+    /// Runs from both <see cref="Form.FormClosed"/> and
+    /// <see cref="Dispose(bool)"/>: a form disposed without being closed -- by an
+    /// exception unwinding past the message loop, or by the test host -- would
+    /// otherwise leave the TLS certificate and the pooled connections alive
+    /// (review of PR #79).
+    /// </para>
+    /// </summary>
+    private void ReleaseResources()
+    {
+        if (_released)
+        {
+            return;
+        }
+
+        _released = true;
+        _pending.Close();
+        _timer.Stop();
+        _timer.Dispose();
+        _api.Dispose();
+        _authority?.Dispose();
+        _authority = null;
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            ReleaseResources();
+        }
+
+        base.Dispose(disposing);
+    }
 
     /// <summary>
     /// Gives the stock pane its share of the tab, now that the container has a size.
@@ -348,6 +385,11 @@ internal sealed class MainForm : Form
     /// <see cref="InvalidOperationException"/> (audit #17). It is now clamped to what
     /// the container accepts, and skipped when both panes cannot fit.
     /// </para>
+    /// <para>
+    /// On a resize the operator's own splitter position is kept and only clamped
+    /// back into range: recomputing the share on every resize would undo a drag the
+    /// moment the window changed size (review of PR #79).
+    /// </para>
     /// </summary>
     private void ApplyStockSplit()
     {
@@ -356,10 +398,13 @@ internal sealed class MainForm : Form
             return;
         }
 
-        var preferred = ConsoleLayout.PreferredStockPaneHeight(_stockSplit.Height);
+        var current = _stockSplit.SplitterDistance;
+        var wanted = _splitterMovedByUser
+            ? current
+            : ConsoleLayout.PreferredStockPaneHeight(_stockSplit.Height);
         var distance = ConsoleLayout.SplitterDistance(_stockSplit.Height, _stockSplit.SplitterWidth,
-            _stockSplit.Panel1MinSize, _stockSplit.Panel2MinSize, preferred);
-        if (distance is null || distance.Value == _stockSplit.SplitterDistance)
+            _stockSplit.Panel1MinSize, _stockSplit.Panel2MinSize, wanted);
+        if (distance is null || distance.Value == current)
         {
             return;
         }
@@ -487,6 +532,13 @@ internal sealed class MainForm : Form
             _stockChanges.Update(lines.ToDictionary(line => StockKey(line), line => line.Quantity), now);
         }
 
+        // The window may have closed while those calls were in flight; drawing now
+        // would touch disposed controls (audit #17).
+        if (Gone)
+        {
+            return errors.Count == 0 ? null : string.Join("; ", errors);
+        }
+
         _stock = lines;
         var rows = lines.Select(line =>
         {
@@ -545,6 +597,11 @@ internal sealed class MainForm : Form
             try
             {
                 var transactions = await _sql.LatestTransactionsAsync(TransactionLimit);
+                if (Gone)
+                {
+                    return null;
+                }
+
                 _transactionChanges.Update(
                     transactions.ToDictionary(row => row.TxnId, row => $"{row.Status}|{row.SyncBatchId}"), now);
                 GridFiller.Fill(_transactionGrid, transactions.Select(row => new GridRow(row.TxnId,
@@ -558,6 +615,11 @@ internal sealed class MainForm : Form
         }
 
         var audit = await auditTask;
+        if (Gone)
+        {
+            return null;
+        }
+
         if (audit.IsSuccess)
         {
             try
@@ -601,6 +663,11 @@ internal sealed class MainForm : Form
             try
             {
                 var batches = await _sql.SyncBatchesAsync(SyncBatchLimit);
+                if (Gone)
+                {
+                    return null;
+                }
+
                 _syncChanges.Update(batches.ToDictionary(row => row.SyncBatchId,
                     row => $"{row.Status}|{row.Attempts}|{row.LastError}"), now);
                 GridFiller.Fill(_syncGrid, batches.Select(row => new GridRow(row.SyncBatchId,
@@ -620,6 +687,11 @@ internal sealed class MainForm : Form
         }
 
         var hq = await hqTask;
+        if (Gone)
+        {
+            return null;
+        }
+
         if (hq.IsSuccess)
         {
             try
@@ -667,6 +739,11 @@ internal sealed class MainForm : Form
         try
         {
             var alerts = await _sql.OpenAlertsAsync(BusinessClock.Today(now));
+            if (Gone)
+            {
+                return null;
+            }
+
             _alertChanges.Update(alerts.ToDictionary(a => a.BatchId, a => $"{a.AlertType}|{a.RemainingQty}|{a.DaysLeft}"), now);
             GridFiller.Fill(_alertGrid, alerts.Select(a => new GridRow(a.BatchId,
                 new object?[] { a.StoreId, a.Sku, SkuName(a.Sku), a.BatchId, a.ExpiryDate.ToString("yyyy-MM-dd"), a.DaysLeft, a.RemainingQty, a.AlertType, a.Status },
@@ -681,6 +758,11 @@ internal sealed class MainForm : Form
         try
         {
             var forecasts = await _sql.LatestForecastsAsync();
+            if (Gone)
+            {
+                return null;
+            }
+
             _forecastEmpty.Text = forecasts.Count == 0 ? "  (bảng forecast chưa có dòng nào)" : $"  ({forecasts.Count} dòng)";
             GridFiller.Fill(_forecastGrid, forecasts.Select(f => new GridRow($"{f.StoreId}|{f.Sku}",
                 new object?[]
@@ -752,9 +834,19 @@ internal sealed class MainForm : Form
 
     // --- Actions --------------------------------------------------------------
 
+    // Each action below returns as soon as the window starts closing: these run
+    // from async void handlers (button clicks, the timer), so touching a control
+    // after an await on a disposed form throws ObjectDisposedException and takes
+    // the process down with it (audit #17).
+
     private async Task RunSyncAsync()
     {
         var answer = await RunActionAsync(_runSync, "Chạy đồng bộ", () => _api.RunSyncAsync());
+        if (Gone)
+        {
+            return;
+        }
+
         _syncFeature = FeatureAvailability.FromAction(answer, _syncFeature);
         if (answer.IsSuccess)
         {
@@ -777,6 +869,11 @@ internal sealed class MainForm : Form
     {
         var button = _modeButtons.First(item => item.Text == mode);
         var answer = await RunActionAsync(button, $"HQ {mode}", () => _api.SetHqModeAsync(mode));
+        if (Gone)
+        {
+            return;
+        }
+
         if (answer.IsSuccess)
         {
             try
@@ -790,6 +887,11 @@ internal sealed class MainForm : Form
 
             foreach (var item in _modeButtons)
             {
+                if (item.IsDisposed)
+                {
+                    continue;
+                }
+
                 item.BackColor = item == button ? Theme.Changed : Theme.ButtonBack;
             }
         }
@@ -800,6 +902,11 @@ internal sealed class MainForm : Form
     private async Task SendSnapshotAsync()
     {
         var answer = await RunActionAsync(_sendSnapshot, "Gửi snapshot", () => _api.SendSnapshotAsync(DateTime.UtcNow));
+        if (Gone)
+        {
+            return;
+        }
+
         _snapshotFeature = FeatureAvailability.FromAction(answer, _snapshotFeature);
         if (answer.Status == 422 && answer.Code == "SNAPSHOT_REJECTED")
         {
@@ -815,6 +922,11 @@ internal sealed class MainForm : Form
         var button = name == "forecast" ? _runForecast : _runNearExpiry;
         var label = name == "forecast" ? "Chạy dự báo" : "Chạy kiểm tra cận hạn";
         var answer = await RunActionAsync(button, label, () => _api.RunJobAsync(name));
+        if (Gone)
+        {
+            return;
+        }
+
         if (answer.Status == 404 && answer.Code == "NOT_FOUND")
         {
             if (name == "forecast")
@@ -849,6 +961,11 @@ internal sealed class MainForm : Form
         var days = (int)_thresholdDays.Value;
         var answer = await RunActionAsync(_setThreshold, $"Ngưỡng {category} = {days}",
             () => _api.SetThresholdAsync(category, days));
+        if (Gone)
+        {
+            return;
+        }
+
         if (answer.Status == 404)
         {
             _nearExpiryFeature = FeatureState.NotDeployed;

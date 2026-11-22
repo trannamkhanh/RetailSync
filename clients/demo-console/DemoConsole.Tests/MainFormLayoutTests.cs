@@ -1,3 +1,4 @@
+using System.Windows.Forms;
 using DemoConsole.UI;
 using Xunit;
 
@@ -5,7 +6,7 @@ namespace DemoConsole.Tests;
 
 /// <summary>
 /// Audit #17: the sizes the configuration allows (up to 40) must lay out without
-/// throwing, and a close while a request is pending must not touch a disposed form.
+/// throwing, and a close while requests are pending must not touch a disposed form.
 /// <para>
 /// These are headless tests. The layout helpers are pure geometry and are checked
 /// against a real <see cref="SplitContainer"/>, and the close behaviour is exercised
@@ -17,7 +18,7 @@ public class MainFormLayoutTests
     [Theory]
     [InlineData(30f)]
     [InlineData(40f)]
-    public void The_largest_configured_fonts_still_lay_out_a_stock_split(float fontSize)
+    public void Audit17_the_largest_configured_fonts_still_lay_out_a_stock_split(float fontSize)
     {
         // At font 40 the header and status lines grow, so the container is shorter
         // than the 45%-of-screen distance the old code used.
@@ -45,7 +46,7 @@ public class MainFormLayoutTests
     }
 
     [Fact]
-    public void The_stock_pane_does_not_shrink_to_a_few_pixels()
+    public void Audit17_the_stock_pane_does_not_shrink_to_a_few_pixels()
     {
         // The audit's symptom: the pane became 22 px because the distance was larger
         // than the container. Clamping keeps it usable.
@@ -65,7 +66,7 @@ public class MainFormLayoutTests
     }
 
     [Fact]
-    public void A_close_during_a_pending_call_reports_that_the_work_was_abandoned()
+    public void Audit17_a_close_during_one_pending_call_abandons_it()
     {
         var work = new PendingWork();
         work.Begin();
@@ -75,11 +76,62 @@ public class MainFormLayoutTests
         Assert.True(work.IsClosed);
         Assert.False(work.TryComplete(out _), "a closed form must not draw an answer");
         Assert.True(work.TryAbandon());
-        Assert.False(work.TryAbandon(), "the close reason is recorded once");
+        Assert.False(work.IsBusy);
     }
 
     [Fact]
-    public void A_completed_call_before_the_close_still_draws()
+    public void Audit17_a_close_during_two_pending_calls_abandons_both()
+    {
+        // The reviewer's case: TryAbandon used to clear the closed flag, so with two
+        // calls in flight the first one's abandon let the second draw to a disposed
+        // form -- the crash this type exists to prevent.
+        var work = new PendingWork();
+        work.Begin();
+        work.Begin();
+
+        work.Close();
+
+        Assert.True(work.TryAbandon(), "the first in-flight answer must be abandoned");
+        Assert.True(work.IsClosed, "closing is monotonic; the flag must not be cleared");
+        Assert.True(work.TryAbandon(), "the second in-flight answer must be abandoned too");
+        Assert.True(work.IsClosed);
+        Assert.False(work.IsBusy);
+    }
+
+    [Fact]
+    public void Audit17_many_pending_calls_all_see_the_close()
+    {
+        var work = new PendingWork();
+        for (var index = 0; index < 10; index++)
+        {
+            work.Begin();
+        }
+
+        work.Close();
+
+        var abandoned = Enumerable.Range(0, 10).Count(_ => work.TryAbandon());
+
+        Assert.Equal(10, abandoned);
+        Assert.True(work.IsClosed);
+        Assert.False(work.IsBusy);
+    }
+
+    [Fact]
+    public void Audit17_closing_twice_keeps_the_flag_set()
+    {
+        var work = new PendingWork();
+        work.Begin();
+
+        work.Close();
+        work.Close();
+
+        Assert.True(work.IsClosed);
+        Assert.True(work.TryAbandon());
+        Assert.True(work.IsClosed);
+    }
+
+    [Fact]
+    public void Audit17_a_completed_call_before_the_close_still_draws()
     {
         var work = new PendingWork();
         work.Begin();
@@ -87,6 +139,17 @@ public class MainFormLayoutTests
         Assert.True(work.TryComplete(out var abandoned));
         Assert.False(abandoned);
         Assert.False(work.IsClosed);
+        Assert.False(work.IsBusy);
+    }
+
+    [Fact]
+    public void Audit17_completing_more_calls_than_began_never_goes_negative()
+    {
+        var work = new PendingWork();
+
+        Assert.False(work.TryAbandon());
+        Assert.True(work.TryComplete(out _));
+        Assert.False(work.IsBusy);
     }
 
     [Theory]
@@ -94,7 +157,7 @@ public class MainFormLayoutTests
     [InlineData(7.9f)]
     [InlineData(40.1f)]
     [InlineData(200f)]
-    public void A_hand_edited_font_outside_the_range_is_clamped(float configured)
+    public void Audit17_a_hand_edited_font_outside_the_range_is_clamped(float configured)
     {
         // ConfigLoader refuses these, but a Local override or a stale build must not
         // be able to reach WinForms with a size it rejects.
@@ -104,7 +167,7 @@ public class MainFormLayoutTests
     }
 
     [Fact]
-    public void The_snapshot_body_is_iso_8601_whatever_the_machine_culture()
+    public void Audit17_the_snapshot_body_is_iso_8601_whatever_the_machine_culture()
     {
         var previous = Thread.CurrentThread.CurrentCulture;
         try

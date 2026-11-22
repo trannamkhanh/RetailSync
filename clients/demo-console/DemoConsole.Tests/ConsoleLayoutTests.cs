@@ -15,7 +15,7 @@ public class ConsoleLayoutTests
     [InlineData(320, 8, 200)]
     [InlineData(1000, 400, 200)]
     [InlineData(2000, 8, 900)]
-    public void Splitter_distance_stays_inside_the_panel_limits(int height, int panel2MinSize, int preferred)
+    public void Audit17_splitter_distance_stays_inside_the_panel_limits(int height, int panel2MinSize, int preferred)
     {
         var distance = ConsoleLayout.SplitterDistance(height, 8, 25, panel2MinSize, preferred);
 
@@ -24,7 +24,7 @@ public class ConsoleLayoutTests
     }
 
     [Fact]
-    public void The_old_fixed_distance_is_clamped_instead_of_throwing()
+    public void Audit17_the_old_fixed_distance_is_clamped_instead_of_throwing()
     {
         // The crash: about 45% of a 1080 px screen, at least 200 px, in a short pane.
         const int shortHeight = 240;
@@ -38,14 +38,14 @@ public class ConsoleLayoutTests
     [InlineData(120, 25, 200)]
     [InlineData(50, 25, 100)]
     [InlineData(0, 25, 200)]
-    public void A_container_too_short_for_both_panes_reports_no_distance(int height, int panel2MinSize,
-                                                                       int panel1MinSize)
+    public void Audit17_a_container_too_short_for_both_panes_reports_no_distance(int height, int panel2MinSize,
+                                                                                int panel1MinSize)
     {
         Assert.Null(ConsoleLayout.SplitterDistance(height, 8, panel1MinSize, panel2MinSize, 200));
     }
 
     [Fact]
-    public void The_preferred_height_never_drops_below_a_usable_pane()
+    public void Audit17_the_preferred_height_never_drops_below_a_usable_pane()
     {
         Assert.Equal(ConsoleLayout.MinimumPaneHeight, ConsoleLayout.PreferredStockPaneHeight(120));
         Assert.Equal(540, ConsoleLayout.PreferredStockPaneHeight(1200));
@@ -57,13 +57,13 @@ public class ConsoleLayoutTests
     [InlineData(13f, 13f)]
     [InlineData(40f, 40f)]
     [InlineData(64f, 40f)]
-    public void The_font_size_is_clamped_to_the_configured_range(float configured, float expected)
+    public void Audit17_the_font_size_is_clamped_to_the_configured_range(float configured, float expected)
     {
         Assert.Equal(expected, ConsoleLayout.FontSize(configured));
     }
 
     [Fact]
-    public void A_real_split_container_accepts_what_the_clamp_returns()
+    public void Audit17_a_real_split_container_accepts_what_the_clamp_returns()
     {
         // The geometry has to agree with WinForms, not just with itself.
         using var split = new SplitContainer
@@ -81,5 +81,27 @@ public class ConsoleLayoutTests
         split.SplitterDistance = distance!.Value;
 
         Assert.Equal(distance.Value, split.SplitterDistance);
+    }
+
+    [Fact]
+    public void Audit17_a_shrunk_window_clamps_the_operators_own_position()
+    {
+        // What ApplyStockSplit does on a resize after a drag: keep the position,
+        // clamp it into range, never recompute the share.
+        using var split = new SplitContainer
+        {
+            Orientation = Orientation.Horizontal,
+            SplitterWidth = 8,
+            Size = new Size(1200, 900),
+        };
+        split.Panel1MinSize = 25;
+        split.Panel2MinSize = 100;
+        split.SplitterDistance = 700;
+
+        var shrunk = 400;
+        var clamped = ConsoleLayout.SplitterDistance(shrunk, split.SplitterWidth,
+            split.Panel1MinSize, split.Panel2MinSize, split.SplitterDistance);
+
+        Assert.Equal(400 - 100 - 8, clamped);
     }
 }
