@@ -1,4 +1,4 @@
-"""Phase 8 Q5 (POS write path): one locked read of the original sale, not three.
+"""Audit minor (POS/API group, POS write path): one locked read of the original sale, not three.
 
 ``process_return`` and ``process_cancellation`` read the original SALE three
 times for one answer: ``require_original_sale`` (a plain read), the
@@ -18,8 +18,8 @@ count and the error order that the change must not disturb.
 
 These tests are the unnumbered "Minor backend/POS" group of PR Q5, not audit
 finding #5 (Kiệt's `SYNC_SEND_POLL_SECONDS`, which lives in
-`test_sync_sender.py` under `test_audit05_*`). The `test_q5_` prefix keeps the
-two apart (review of PR #78).
+`test_sync_sender.py` under `test_audit05_*`). The `test_audit_minor_` prefix keeps
+the two apart (review of PR #78).
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ def count_reads_of_the_sale(statements: list[str]) -> int:
                and "WITH (UPDLOCK" in statement)
 
 
-def test_q5_the_lock_is_taken_once_per_return(db_session, monkeypatch):
+def test_audit_minor_the_lock_is_taken_once_per_return(db_session, monkeypatch):
     world = seed_sale(db_session, sold={f"TEST-SKU-{uid(8)}": 2}, stock=10)
     calls: list[str] = []
     original_lock = original_sale_service.lock_original_sale
@@ -100,7 +100,7 @@ def test_q5_the_lock_is_taken_once_per_return(db_session, monkeypatch):
     assert calls == ["lock"]
 
 
-def test_q5_an_unknown_sale_is_still_404_before_the_claim(db_session):
+def test_audit_minor_an_unknown_sale_is_still_404_before_the_claim(db_session):
     world = seed_sale(db_session, sold={f"TEST-SKU-{uid(8)}": 2}, stock=10)
     from app.api.schemas.pos import PosEvent
     from app.core.security import Principal
@@ -120,7 +120,7 @@ def test_q5_an_unknown_sale_is_still_404_before_the_claim(db_session):
     assert (raised.value.status, raised.value.code) == (404, "ORIGINAL_SALE_NOT_FOUND")
 
 
-def test_q5_a_return_reads_the_sale_once_under_the_lock(db_session):
+def test_audit_minor_a_return_reads_the_sale_once_under_the_lock(db_session):
     world = seed_sale(db_session, sold={f"TEST-SKU-{uid(8)}": 2}, stock=10)
     from app.api.schemas.pos import PosEvent
     from app.core.security import Principal
@@ -142,7 +142,7 @@ def test_q5_a_return_reads_the_sale_once_under_the_lock(db_session):
         statement for statement in counter.statements if "pos_transaction" in statement]
 
 
-def test_q5_a_cancellation_reads_the_sale_once_under_the_lock(db_session):
+def test_audit_minor_a_cancellation_reads_the_sale_once_under_the_lock(db_session):
     world = seed_sale(db_session, sold={f"TEST-SKU-{uid(8)}": 2}, stock=10)
     from app.api.schemas.pos import PosEvent
     from app.core.security import Principal
