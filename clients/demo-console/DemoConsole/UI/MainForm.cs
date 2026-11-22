@@ -94,6 +94,9 @@ internal sealed class MainForm : Form
     private readonly System.Windows.Forms.Timer _dashboardTimer = new();
     private readonly Func<DateTime> _utcNow = () => DateTime.UtcNow;
     private bool _dashboardRefreshing;
+    // Set when a refresh is asked for while one is running, so the request is run once
+    // afterwards instead of being dropped.
+    private bool _dashboardRefreshPending;
 
     // Window
     private readonly Label _resultLine;
@@ -530,11 +533,17 @@ internal sealed class MainForm : Form
     /// <summary>
     /// The Dashboard's own refresh, on its own timer. It keeps the last good chart
     /// when a call fails, so a transient error does not blank the demo screen.
+    ///
+    /// A request that arrives while one is in flight is remembered and run once when
+    /// the current one finishes. The tab asks for a refresh whenever the scope or the
+    /// period changes, and those controls are live during a refresh, so dropping the
+    /// request would leave the chart on the previous filter until the timer fired.
     /// </summary>
     private async Task RefreshDashboardAsync()
     {
         if (_dashboardRefreshing || Gone)
         {
+            _dashboardRefreshPending = true;
             return;
         }
 
@@ -661,6 +670,15 @@ internal sealed class MainForm : Form
             _dashboard.SetBusy(false);
             _dashboardRefreshing = false;
             UpdateFeatureControls();
+        }
+
+        // Run the queued request, if a filter changed while this one was in flight.
+        // The flag is cleared first so a further change during the follow-up queues
+        // its own run rather than being folded into this one.
+        if (_dashboardRefreshPending)
+        {
+            _dashboardRefreshPending = false;
+            await RefreshDashboardAsync();
         }
     }
 

@@ -117,5 +117,3 @@ public sealed record DashboardStoreRevenueResponse(
     int Transactions,
     DashboardTimeQuality Quality,
     IReadOnlyList<DashboardStoreRevenue> Stores);
-
-

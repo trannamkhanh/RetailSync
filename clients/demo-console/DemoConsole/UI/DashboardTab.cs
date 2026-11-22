@@ -535,18 +535,15 @@ internal sealed class DashboardTab : UserControl
             _selectedStoreId = _stores[_scope.SelectedIndex - 1].StoreId;
         }
 
-        if (!_loading)
-        {
-            _ = RaiseRefreshAsync();
-        }
+        // Always ask, even while a refresh is in flight: the host queues one follow-up
+        // run, whereas swallowing the event left the chart on the old filter until the
+        // 30-second timer happened to fire.
+        _ = RaiseRefreshAsync();
     }
 
     private void OnPeriodChanged()
     {
-        if (!_loading)
-        {
-            _ = RaiseRefreshAsync();
-        }
+        _ = RaiseRefreshAsync();
     }
 
     private async Task RaiseRefreshAsync()

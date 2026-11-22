@@ -237,51 +237,45 @@ def _shift(moment: datetime, hours: int) -> datetime:
         return datetime.max.replace(microsecond=0) if hours > 0 else datetime.min
 
 
-def _align(moment: datetime, bucket: str, offset_hours: int) -> datetime:
-    """The start of the bucket that contains ``moment``, in UTC.
+def _local_truncate(local: datetime, bucket: str) -> datetime:
+    """The start of the bucket containing ``local``, in the store's local time.
 
-    The arithmetic mirrors the repository's SQL: shift into local time, truncate,
-    shift back. Weeks start on Monday because 0001-01-01, the datetime2 anchor, was
-    one — the same instant the SQL uses, so both agree on a week boundary.
-    """
-    local = _shift(moment, offset_hours)
-    if bucket == "hour":
-        local = local.replace(minute=0, second=0, microsecond=0)
-    elif bucket == "day":
-        local = local.replace(hour=0, minute=0, second=0, microsecond=0)
-    elif bucket == "week":
-        local = (local - timedelta(days=local.weekday())).replace(
-            hour=0, minute=0, second=0, microsecond=0)
-    elif bucket == "month":
-        local = local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    else:
-        raise ValueError(f"unsupported dashboard bucket: {bucket!r}")
-    return _shift(local, -offset_hours)
-
-
-def _advance(moment: datetime, bucket: str, offset_hours: int = 0) -> datetime:
-    """The start of the bucket after the one starting at ``moment``.
-
-    Only months need the offset: a month boundary sits at local midnight, and the
-    UTC instant of that midnight moves with the business offset. Every step clamps,
-    for the same reason as :func:`_shift`: the last bucket may reach year 9999, where
-    adding a day would raise instead of ending the axis.
+    The axis is derived in local time because that is what the repository's SQL does:
+    it shifts the stored moment into local time, truncates there, and shifts back. A
+    day therefore starts at local midnight — 17:00Z the day before, at UTC+7 — and the
+    two sides cannot disagree about which bucket a row belongs to.
     """
     if bucket == "hour":
-        return _shift(moment, 1)
+        return local.replace(minute=0, second=0, microsecond=0)
     if bucket == "day":
-        return _shift(moment, 24)
+        return local.replace(hour=0, minute=0, second=0, microsecond=0)
     if bucket == "week":
-        return _shift(moment, 24 * 7)
+        return (local - timedelta(days=local.weekday())).replace(
+            hour=0, minute=0, second=0, microsecond=0)
     if bucket == "month":
-        local = _shift(moment, offset_hours)
+        return local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    raise ValueError(f"unsupported dashboard bucket: {bucket!r}")
+
+
+def _local_advance(local: datetime, bucket: str) -> datetime:
+    """The next bucket start in local time, clamping instead of raising.
+
+    At the top of the type the step clamps, so the result can equal its input. The
+    caller treats that as the end of the axis rather than looping on it.
+    """
+    if bucket == "hour":
+        return _shift(local, 1)
+    if bucket == "day":
+        return _shift(local, 24)
+    if bucket == "week":
+        return _shift(local, 24 * 7)
+    if bucket == "month":
         year, month = local.year + (local.month == 12), local.month % 12 + 1
         try:
-            following = local.replace(year=year, month=month, day=1)
+            return local.replace(year=year, month=month, day=1)
         except ValueError:
             # December 9999 has nowhere to advance to; the axis ends at the ceiling.
             return datetime.max.replace(microsecond=0)
-        return _shift(following, -offset_hours)
     raise ValueError(f"unsupported dashboard bucket: {bucket!r}")
 
 
@@ -289,27 +283,39 @@ def bucket_starts(start: datetime, end: datetime, bucket: str,
                   offset_hours: int) -> list[tuple[datetime, datetime]]:
     """``(from, to)`` of every bucket that meets ``[start, end)``, in order.
 
-    The first bucket is the one containing ``start`` and the last is clamped to
-    ``end``, so the axis covers the requested interval exactly; an empty bucket is
-    still returned, with no revenue.
+    Each bucket is derived as a local-time boundary and then converted to UTC with the
+    same floor clamp the SQL applies, so a row's SQL ``bucket_start`` always equals one
+    of these window starts. That matters because the two can only be compared with each
+    other: an earlier revision aligned each window by adding 24 hours to the previous
+    *UTC* edge, so once the first bucket was clamped at the floor of the type every
+    later window sat 7 hours away from the SQL bucket and its revenue was silently
+    dropped from the chart.
 
-    The loop stops when a step fails to move forward as well as when it reaches
-    ``end``. At the very top of the type ``_advance`` clamps, so the next bucket is
-    the same instant it started from; testing only ``current < end`` then looped
-    forever (one call pinned a CPU for minutes), because every iteration appended an
-    identical window. The guard makes the axis end at the ceiling instead.
+    The interval is covered exactly: the first window starts at the bucket containing
+    ``start``, and the last one ends at ``end``.
     """
-    current = _align(start, bucket, offset_hours)
-    window: list[tuple[datetime, datetime]] = []
-    while current < end:
-        following = _advance(current, bucket, offset_hours)
-        if following <= current:
-            # The type cannot express the next bucket; close the axis at the end.
-            window.append((current, end))
+    local_end = _shift(end, offset_hours)
+    current = _local_truncate(_shift(start, offset_hours), bucket)
+
+    starts: list[datetime] = []
+    while True:
+        starts.append(_shift(current, -offset_hours))
+        following = _local_advance(current, bucket)
+        # Stop at the end of the interval, and also when the type cannot express the
+        # next boundary: a non-advancing step would append identical windows forever.
+        if following <= current or following >= local_end:
             break
-        window.append((current, min(following, end)))
         current = following
-    return window
+
+    windows: list[tuple[datetime, datetime]] = []
+    for index, left in enumerate(starts):
+        right = starts[index + 1] if index + 1 < len(starts) else end
+        if right <= left:
+            # A degenerate window can only be the last one, at the very top of the
+            # type; clamping it to the interval keeps the axis usable.
+            right = end if end > left else left
+        windows.append((left, right))
+    return windows
 
 
 def _check_hourly_span(start: datetime, end: datetime, bucket: str) -> None:
@@ -328,7 +334,8 @@ def _check_hourly_span(start: datetime, end: datetime, bucket: str) -> None:
 
 
 def zero_fill(start: datetime, end: datetime, bucket: str, offset_hours: int,
-              rows: list[BucketRow]) -> list[BucketRow]:
+              rows: list[BucketRow],
+              windows: list[tuple[datetime, datetime]] | None = None) -> list[BucketRow]:
     """Merge the query's buckets into one row per bucket of the interval.
 
     Args:
@@ -337,16 +344,21 @@ def zero_fill(start: datetime, end: datetime, bucket: str, offset_hours: int,
         bucket: One of ``hour``, ``day``, ``week``, ``month``.
         offset_hours: The store's business offset.
         rows: ``BucketRow`` values, oldest first, with empty buckets missing.
+        windows: The axis to fill, when the caller has already built it. Passing it
+            avoids deriving the same axis twice for one request; ``revenue_series``
+            needs the windows for its own points as well.
 
     Returns:
         One ``BucketRow`` per bucket window, in order, with revenue 0 and no
         transactions where nothing happened.
     """
+    if windows is None:
+        windows = bucket_starts(start, end, bucket, offset_hours)
     known = {row.start: row for row in rows}
     return [
         known.get(window_start)
         or BucketRow(start=window_start, revenue=Decimal("0.00"), transactions=0)
-        for window_start, _ in bucket_starts(start, end, bucket, offset_hours)
+        for window_start, _ in windows
     ]
 
 
@@ -490,10 +502,12 @@ def revenue_series(session: Session, query: DashboardQuery) -> RevenueSeries:
         query.skew_seconds, query.backfill_days, query.offset_hours, query.bucket,
         query.include_suspect,
     )
-    # The axis is built once and reused: zero_fill only needs the row per bucket,
-    # and recomputing the windows doubled the work on a long hourly range.
+    # The axis is built once and handed to zero_fill, which needs the same windows to
+    # place a row and to know which buckets exist. Deriving it a second time inside
+    # zero_fill doubled the work on a long hourly range for no benefit.
     windows = bucket_starts(query.start, query.end, query.bucket, query.offset_hours)
-    filled = zero_fill(query.start, query.end, query.bucket, query.offset_hours, rows)
+    filled = zero_fill(query.start, query.end, query.bucket, query.offset_hours,
+                       rows, windows)
     points = [
         RevenuePoint(start=start, end=end, revenue=row.revenue, transactions=row.transactions)
         for (start, end), row in zip(windows, filled)

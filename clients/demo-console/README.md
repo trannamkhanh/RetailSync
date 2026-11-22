@@ -27,7 +27,7 @@ instead, which runs the test assembly in its own process:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/demo/run_console_tests.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/demo/run_console_tests.ps1 -Filter "DemoConsole.Tests.DashboardTests.Parses_every_field_of_the_revenue_contract"
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/demo/run_console_tests.ps1 -Method "DemoConsole.Tests.DashboardTests.Parses_every_field_of_the_revenue_contract"
 ```
 
 It builds the solution, downloads `xunit.runner.console` 2.9.2 into the temp folder

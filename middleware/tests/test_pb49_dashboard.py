@@ -802,3 +802,54 @@ def test_pb49_every_bucket_terminates_in_both_directions(bucket) -> None:
 
     assert top and bottom
     assert all(window[1] > window[0] for window in top + bottom)
+
+
+# --- the axis must name the buckets the SQL groups by (review round 3) -----
+
+
+@pytest.mark.parametrize("bucket", ["hour", "day", "week", "month"])
+def test_pb49_the_axis_names_the_bucket_the_sql_groups_by(db_session, bucket) -> None:
+    """Every SQL ``bucket_start`` must be one of the axis window starts.
+
+    The two are only ever compared with each other: the repository groups rows by a
+    bucket key it computes in local time, and the service fills the axis by looking a
+    row up under ``row.start``. An earlier revision advanced the axis by adding 24
+    hours to the previous *UTC* edge, so once the first window was clamped at the
+    floor of the type every later window sat 7 hours away from the SQL key and its
+    revenue was silently dropped from the chart while `quality` still counted it.
+
+    The moments below straddle the floor, an ordinary date, and the ceiling.
+    """
+    from sqlalchemy import text
+
+    from app.repositories import dashboard as repository
+
+    expression = repository._BUCKET_START.format(
+        bucket=repository._BUCKET_LOCAL[bucket].format(moment="CAST(:m AS datetime2)"))
+
+    moments = [
+        datetime(1, 1, 1, 0, 0, 0),
+        datetime(1, 1, 1, 12, 0, 0),
+        datetime(1, 1, 1, 20, 0, 0),
+        datetime(1, 1, 2, 3, 0, 0),
+        datetime(1, 1, 2, 18, 0, 0),
+        datetime(2026, 11, 17, 3, 15, 0),
+        datetime(2026, 11, 17, 17, 0, 0),
+        datetime(9999, 12, 31, 20, 0, 0),
+    ]
+
+    for moment in moments:
+        sql_bucket = db_session.execute(
+            text(f"SELECT {expression}"), {"m": moment, "offset": OFFSET}).scalar()
+        try:
+            end = moment + timedelta(days=40)
+        except OverflowError:
+            end = datetime.max.replace(microsecond=0)
+        if end <= moment:
+            end = datetime.max.replace(microsecond=0)
+
+        starts = [window[0] for window in bucket_starts(moment, end, bucket, OFFSET)]
+
+        assert sql_bucket in starts, (
+            f"{bucket}: SQL groups {moment.isoformat()} under "
+            f"{sql_bucket.isoformat()}, which is not an axis window start")
