@@ -21,7 +21,7 @@
     once if it exists. Otherwise it leaves them stopped and says what to do.
     Before the forecast call it polls GET /api/v1/health on MIDDLEWARE_BIND_ADDRESS
     (localhost when unset) for up to -HealthTimeoutSeconds (120), and it waits while
-    the job answers 409 JOB_RUNNING (scheduler catch-up), up to 10 minutes.
+    the job answers 409 JOB_RUNNING (scheduler catch-up), up to -JobTimeoutSeconds (600).
 
     It refuses the development database names (RTS_DB, RTS_DB_TEST), stops at the
     first error, prints no secret and can be run again at any time. It never edits
@@ -48,7 +48,8 @@ param(
     [string]$HqDatabase = "RTS_HQ",
     [switch]$DemoMode,
     [switch]$NoBuild,
-    [int]$HealthTimeoutSeconds = 120
+    [int]$HealthTimeoutSeconds = 120,
+    [int]$JobTimeoutSeconds = 600
 )
 
 $ErrorActionPreference = "Stop"
@@ -307,13 +308,13 @@ if ($ServicesStarted) {
     }
 
     # After 01:00 (UTC+7) the scheduler's catch-up may be running forecast: wait for it.
-    $jobDeadline = (Get-Date).AddSeconds(600)
+    $jobDeadline = (Get-Date).AddSeconds($JobTimeoutSeconds)
     while ($true) {
         $forecast = Invoke-DemoApi -Method POST -Url "$ApiBaseUrl/admin/jobs/forecast/run" `
             -TokenName "admin" -TimeoutSeconds 300
-        if ($forecast.Status -ne 409 -or $forecast.Body -notmatch '"JOB_RUNNING"') { break }
+        if ($forecast.Status -ne 409 -or $forecast.Body -notmatch '"code"\s*:\s*"JOB_RUNNING"') { break }
         if ((Get-Date) -ge $jobDeadline) {
-            throw "The forecast job was still running after 600 seconds (HTTP 409 JOB_RUNNING)."
+            throw "The forecast job was still running after $JobTimeoutSeconds seconds (HTTP 409 JOB_RUNNING)."
         }
         Write-Host "Forecast is already running (scheduler catch-up); retrying in 10 seconds."
         Start-Sleep -Seconds 10

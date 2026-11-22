@@ -78,6 +78,8 @@ function Invoke-ResetFixture {
     $global:AuditHttpCalls = New-Object System.Collections.Generic.List[string]
     $global:AuditHttpReplies = $Replies
     $result = [pscustomobject]@{ Error = $null }
+    # The script does Set-Location into $root; leave it again, or the folder cannot be removed.
+    Push-Location
     try {
         & (Join-Path $demo "reset_demo_db.ps1") @ScriptArgs *> $null
     }
@@ -85,7 +87,8 @@ function Invoke-ResetFixture {
         $result.Error = $_.Exception.Message
     }
     finally {
-        Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+        Pop-Location
+        Remove-Item -Recurse -Force $root
     }
     return $result
 }
@@ -144,6 +147,23 @@ Invoke-Case "test_audit10_job_running_409_is_retried_not_thrown" {
     Assert-That ($null -eq $run.Error) "script failed: $($run.Error)"
     $posts = @($global:AuditHttpCalls | Where-Object { $_ -like "POST *" })
     Assert-That ($posts.Count -eq 3) "expected 3 forecast calls, got $($posts.Count)"
+}
+
+Invoke-Case "test_audit10_job_running_409_timeout_gives_clear_error" {
+    $busy = '{"outcome":"REJECTED","code":"JOB_RUNNING","message":"Job ''forecast'' is already running."}'
+    $replies = @{ health = @(, @(200, '{"status":"ok"}')); job = @(, @(409, $busy)) }
+    $run = Invoke-ResetFixture -Replies $replies -ScriptArgs @{ JobTimeoutSeconds = 0 }
+    Assert-That ($null -ne $run.Error) "script did not fail while the job kept answering 409"
+    Assert-That ($run.Error -like "*still running after 0 seconds*JOB_RUNNING*") "unclear error: $($run.Error)"
+}
+
+Invoke-Case "test_audit10_other_409_code_is_not_retried" {
+    # Only the code field counts: "JOB_RUNNING" in another field is not enough.
+    $conflict = '{"outcome":"REJECTED","code":"CONFLICT","message":"Conflict.","previous":"JOB_RUNNING"}'
+    $replies = @{ health = @(, @(200, '{"status":"ok"}')); job = @(@(409, $conflict), @(200, '{}')) }
+    $run = Invoke-ResetFixture -Replies $replies
+    Assert-That ($run.Error -like "*HTTP 409*") "a 409 CONFLICT was not reported: $($run.Error)"
+    Assert-That (@($global:AuditHttpCalls | Where-Object { $_ -like "POST *" }).Count -eq 1) "a 409 CONFLICT was retried"
 }
 
 Invoke-Case "test_audit10_every_compose_run_has_no_deps" {
