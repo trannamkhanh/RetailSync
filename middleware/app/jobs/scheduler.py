@@ -8,13 +8,18 @@ once a day at a business local time (UTC + ``BUSINESS_UTC_OFFSET_HOURS``).
   own and keeps it until it stops. A process that cannot get the lock runs
   nothing and tries again later, so it takes over if the holder goes away.
 - A job that raises is logged and runs again at its next time.
-- Two runs of the same job never overlap. ``POST /admin/jobs/{name}/run``
-  takes the same per-job lock (``Job.running``).
+- Two runs of the same job never overlap, in this process or across workers:
+  a run takes ``Job.running`` and the per-job SQL lock of ``app/jobs/locks.py``,
+  like ``POST /admin/jobs/{name}/run`` and ``POST /sync/run``. A job whose lock
+  is held elsewhere is not run and stays due.
+- Schedules are computed when the application lock is first taken, not when the
+  scheduler is created, so a standby that takes over late plans from that moment.
 - Catch-up (PB-15-6, decided 11 Nov 2026): every ``daily_at`` job whose time
-  has already passed today when the scheduler starts runs once, in registry
-  order, at the first tick that holds the application lock and before any
-  other job. No run history is stored, so daily jobs must be safe to run
-  twice on one business date.
+  has already passed today when the scheduler first takes the application lock
+  runs once, in registry order, before any other job. No run history is stored,
+  so daily jobs must be safe to run twice on one business date.
+- Between two jobs of one tick the scheduler checks again that it holds the
+  application lock and has not been stopped.
 
 A job takes no arguments, opens its own sessions with ``SessionLocal()`` and
 commits them itself. Jobs are registered in ``app/jobs/registry.py``.
@@ -32,6 +37,7 @@ from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 from app.core.db import database_url
+from app.jobs.locks import job_lock
 
 
 logger = logging.getLogger(__name__)
@@ -114,12 +120,16 @@ class JobLock:
         engine = create_engine(self._url or database_url(), poolclass=NullPool,
                                connect_args={"timeout": 5}, hide_parameters=True)
         connection = engine.connect().execution_options(isolation_level="AUTOCOMMIT")
-        result = connection.exec_driver_sql(
-            "SET NOCOUNT ON; DECLARE @result int; "
-            "EXEC @result = sp_getapplock @Resource = ?, @LockMode = 'Exclusive', "
-            "@LockOwner = 'Session', @LockTimeout = 0; SELECT @result",
-            (LOCK_NAME,),
-        ).scalar()
+        try:
+            result = connection.exec_driver_sql(
+                "SET NOCOUNT ON; DECLARE @result int; "
+                "EXEC @result = sp_getapplock @Resource = ?, @LockMode = 'Exclusive', "
+                "@LockOwner = 'Session', @LockTimeout = 0; SELECT @result",
+                (LOCK_NAME,),
+            ).scalar()
+        except Exception:
+            connection.close()
+            raise
         if result is not None and result >= 0:
             self._connection = connection
             return True
@@ -169,9 +179,10 @@ class Scheduler:
         self._lock_retry_seconds = lock_retry_seconds
         self._has_lock = False
         self._next_lock_try: datetime | None = None
-        now = clock()
-        self._next_run = {job.name: job.next_after(now) for job in self._jobs.values()}
-        self._catch_up = [job.name for job in self._jobs.values() if job.passed_today(now)]
+        # Planned when the application lock is first taken (audit #15), see _plan().
+        self._planned = False
+        self._next_run: dict[str, datetime] = {}
+        self._catch_up: list[str] = []
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -186,6 +197,8 @@ class Scheduler:
         self._has_lock = self._lock.acquire()
         if self._has_lock:
             logger.info("Scheduler holds the job lock; running %d jobs", len(self._jobs))
+            if not self._planned:
+                self._plan(now)
             if self._on_lock_acquired is not None:
                 try:
                     self._on_lock_acquired()
@@ -194,6 +207,23 @@ class Scheduler:
         else:
             logger.info("Another process holds the job lock; this process runs no jobs")
         return self._has_lock
+
+    def _plan(self, now: datetime) -> None:
+        """First run times and catch-up, from the moment this process first holds the lock."""
+        self._next_run = {job.name: job.next_after(now) for job in self._jobs.values()}
+        self._catch_up = [job.name for job in self._jobs.values() if job.passed_today(now)]
+        self._planned = True
+
+    def _may_go_on(self) -> bool:
+        """Checked before each job of a tick: not stopped, and the lock is still held."""
+        if self._stop.is_set():
+            return False
+        if self._lock.holds():
+            return True
+        logger.warning("The scheduler lost the job lock during a tick; the remaining jobs wait")
+        self._has_lock = False
+        self._next_lock_try = None
+        return False
 
     def _still_holds_lock(self, now: datetime) -> bool:
         """Checked before jobs run, so a dropped session cannot leave two runners."""
@@ -206,14 +236,28 @@ class Scheduler:
         return self._try_lock(now)
 
     def run_job(self, name: str) -> bool:
-        """Run one job now, unless a run of it is in progress. A failure is logged."""
+        """Run one job now. A failure of the job is logged.
+
+        Returns False, without running it, while a run of it is in progress in
+        this process or holds its per-job SQL lock elsewhere (a manual run or
+        another worker), or when that lock cannot be taken; the caller then
+        keeps the job due.
+        """
         job = self._jobs[name]
         if not job.running.acquire(blocking=False):
             return False
         try:
-            job.run()
+            with job_lock(name) as acquired:
+                if not acquired:
+                    logger.info("Job %s is running elsewhere; it stays due", name)
+                    return False
+                try:
+                    job.run()
+                except Exception:
+                    logger.exception("Job %s failed; it runs again at its next time", name)
         except Exception:
-            logger.exception("Job %s failed; it runs again at its next time", name)
+            logger.exception("Could not take the job lock of %s; it stays due", name)
+            return False
         finally:
             job.running.release()
         return True
@@ -226,7 +270,10 @@ class Scheduler:
         """Run each missed daily job once; its next run stays at its next daily time."""
         names, self._catch_up = self._catch_up, []
         ran = []
-        for name in names:
+        for index, name in enumerate(names):
+            if not self._may_go_on():
+                self._catch_up = names[index:]  # kept for the next tick that holds the lock
+                break
             if self.run_job(name):
                 ran.append(name)
                 self._next_run[name] = self._jobs[name].next_after(self._clock())
@@ -237,11 +284,17 @@ class Scheduler:
         now = self._clock()
         if not self._has_lock:
             self._try_lock(now)
-        due = [name for name, at in self._next_run.items() if at <= now]
-        if not (due or self._catch_up) or not self._still_holds_lock(now):
+        if not self._planned:
+            return []
+        any_due = any(at <= now for at in self._next_run.values())
+        if not (any_due or self._catch_up) or not self._still_holds_lock(now):
             return []
         ran = self._run_catch_up()
+        # After the catch-up, which has moved its jobs to their next daily time.
+        due = [name for name, at in self._next_run.items() if at <= now]
         for name in due:
+            if not self._may_go_on():
+                break
             if self.run_job(name):
                 ran.append(name)
                 after = self._clock()

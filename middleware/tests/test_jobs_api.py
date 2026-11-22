@@ -169,6 +169,56 @@ def test_pb15_6_run_job_while_the_scheduler_runs_it_is_409(client, headers, admi
     assert_error(response, 409, "REJECTED", "JOB_RUNNING")
 
 
+def test_audit15_scheduled_run_on_another_worker_waits_for_a_manual_run(client, headers, admin):
+    # The other worker has its own Job objects (own local lock); only the SQL job lock is shared.
+    started, finish = threading.Event(), threading.Event()
+    other_worker = Recorder()
+
+    def slow() -> None:
+        started.set()
+        finish.wait(timeout=10)
+
+    register_job(DAILY, slow, daily_at=time(0, 30))
+    sched = Scheduler([scheduler.Job(DAILY, other_worker, daily_at=time(0, 30))], lock=HeldLock())
+    responses: list = []
+    runner = threading.Thread(target=lambda: responses.append(client.post(URL.format(name=DAILY), headers=headers)))
+    runner.start()
+    try:
+        assert started.wait(timeout=5)
+        assert sched.run_job(DAILY) is False
+        assert other_worker.calls == 0
+    finally:
+        finish.set()
+        runner.join(timeout=10)
+
+    assert responses[0].status_code == 200, responses[0].text
+    assert sched.run_job(DAILY) is True
+    assert other_worker.calls == 1
+
+
+def test_audit15_manual_run_is_409_while_another_worker_runs_it_on_schedule(client, headers, admin):
+    started, finish = threading.Event(), threading.Event()
+    manual = Recorder()
+
+    def slow() -> None:
+        started.set()
+        finish.wait(timeout=10)
+
+    register_job(DAILY, manual, daily_at=time(0, 30))
+    sched = Scheduler([scheduler.Job(DAILY, slow, daily_at=time(0, 30))], lock=HeldLock())
+    runner = threading.Thread(target=sched.run_job, args=(DAILY,))
+    runner.start()
+    try:
+        assert started.wait(timeout=5)
+        response = client.post(URL.format(name=DAILY), headers=headers)
+    finally:
+        finish.set()
+        runner.join(timeout=10)
+
+    assert_error(response, 409, "REJECTED", "JOB_RUNNING")
+    assert manual.calls == 0
+
+
 def test_pb15_6_run_job_that_raises_is_503_and_stays_audited(client, db_session, headers):
     def broken() -> None:
         raise RuntimeError("job failed")
