@@ -159,9 +159,11 @@ class JobLock:
 class Scheduler:
     def __init__(self, jobs: Iterable[Job] | None = None, *, lock: JobLock | None = None,
                  clock: Callable[[], datetime] = _utc_now, tick_seconds: float = 1.0,
-                 lock_retry_seconds: float = 30.0) -> None:
+                 lock_retry_seconds: float = 30.0,
+                 on_lock_acquired: Callable[[], object] | None = None) -> None:
         self._jobs = {job.name: job for job in (registered_jobs() if jobs is None else jobs)}
         self._lock = lock or JobLock()
+        self._on_lock_acquired = on_lock_acquired
         self._clock = clock
         self._tick_seconds = tick_seconds
         self._lock_retry_seconds = lock_retry_seconds
@@ -184,6 +186,11 @@ class Scheduler:
         self._has_lock = self._lock.acquire()
         if self._has_lock:
             logger.info("Scheduler holds the job lock; running %d jobs", len(self._jobs))
+            if self._on_lock_acquired is not None:
+                try:
+                    self._on_lock_acquired()
+                except Exception:
+                    logger.exception("Startup step after taking the job lock failed")
         else:
             logger.info("Another process holds the job lock; this process runs no jobs")
         return self._has_lock
@@ -289,7 +296,9 @@ class Scheduler:
 def start_scheduler() -> Scheduler:
     """Start the scheduler with every job of ``app/jobs/registry.py``."""
     importlib.import_module("app.jobs.registry")  # registers the jobs
+    from app.jobs.sync_send import release_stale_batches
 
-    running = Scheduler()
+    # DS-05 section 5: stale SENT batches return to PENDING as soon as this process runs jobs.
+    running = Scheduler(on_lock_acquired=release_stale_batches)
     running.start()
     return running

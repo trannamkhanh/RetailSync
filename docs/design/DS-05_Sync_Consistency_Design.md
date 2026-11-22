@@ -89,7 +89,8 @@ A FAILED batch is kept for investigation. Its transactions stay linked to it, so
 ## 6. Sending and retry
 
 - One sender runs at a time, in the same process as the API. `POST /sync/run` joins or skips a cycle that is already running.
-- Eligible batches: only the oldest PENDING batch across all stores (by `created_at`) may be sent next; it is sent when its `next_retry_at` is empty or due, and while it is not due no newer batch is sent (global send gate, decided 12 Nov 2026).
+- Eligible batches: only the oldest unfinished (PENDING or SENT) batch across all stores (by `created_at`, then `sync_batch_id`) may be sent next. It is sent when it is PENDING and its `next_retry_at` is empty or due. While it is SENT (in flight, or not yet stale) or waiting for its retry, no newer batch is sent (global send gate, decided 12 Nov 2026).
+- Polling: `sync-send` runs every `min(SYNC_INTERVAL, SYNC_SEND_POLL_SECONDS)` seconds (`SYNC_SEND_POLL_SECONDS` defaults to 30, 5 to 3600), so a batch goes out at most one poll after its `next_retry_at`. Aggregation still runs every `SYNC_INTERVAL` seconds.
 - Stop the cycle on the first timeout, connection error or 5xx. HQ is treated as down, and order is preserved.
 - A FAILED batch does not block the next one.
 - Call timeout: 3 seconds.

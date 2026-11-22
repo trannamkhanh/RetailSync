@@ -77,8 +77,9 @@ Settings load from the repository root `.env`, then a working-directory `.env` i
 | `HQ_CA_FILE` | `.certs/ca.crt` | Overridden to `/certs/ca.crt` | CA bundle trusted by middleware when calling `hq-demo` |
 | `HQ_TIMEOUT_SECONDS` | `3` | Overridden to `3` | HTTP timeout (seconds) for middleware-to-HQ sync calls |
 | `HQ_JWT_SECRET` | `replace-with-a-long-random-secret` | Passed to `middleware` and `hq-demo` | Shared HS256 secret for middleware-to-HQ service JWT (`sub: rts-middleware`, `role: MIDDLEWARE`) |
-| `SYNC_INTERVAL` | `3600` | Uses `.env` | Seconds between scheduled `aggregation` + `sync-send` cycles (`3600` in prod/manual demo, `60` for auto-cycle demo) |
+| `SYNC_INTERVAL` | `3600` | Uses `.env` | Seconds between scheduled `aggregation` runs; `sync-send` runs at least this often (`3600` in prod/manual demo, `60` for auto-cycle demo) |
 | `SYNC_RETRY_BASE_SECONDS` | `60` | Uses `.env` | Base exponential backoff in seconds for failed HQ sync deliveries (`10` in demos) |
+| `SYNC_SEND_POLL_SECONDS` | `30` | Uses `.env` | `sync-send` runs every `min(SYNC_INTERVAL, SYNC_SEND_POLL_SECONDS)` seconds, so a retry goes out at most one poll after it is due (5 to 3600) |
 | `JWT_SECRET` | `replace-with-a-long-random-secret` | Uses `.env` | HS256 signing key for POS, Staff, Manager, Admin, Auditor, and HQ operator JWTs |
 | `MTLS_REQUIRED` | `false` | Overridden to `true` in `middleware` | Enforces `X-Gateway-Secret` and client certificate fingerprint check on `POST /api/v1/pos/events` |
 | `POS_GATEWAY_SECRET` | `replace-with-a-long-random-secret` | Passed to `middleware` and `pos-gateway` | Shared secret nginx injects as `X-Gateway-Secret` so POS events cannot bypass port 9443 |
@@ -259,7 +260,7 @@ When `SCHEDULER_ENABLED=true` (default in Docker), `middleware/app/jobs/registry
 | `near-expiry` | Daily at `00:30` business time (UTC+7) | Scans sellable batches against category thresholds and creates/updates `near_expiry_alert` |
 | `forecast` | Daily at `01:00` business time (UTC+7) | Trains demand model on historical sales and writes 7-day SKU forecasts |
 | `recommendation` | Daily at `02:00` business time (UTC+7) | Expires invalid `PENDING` recommendations, generates new recommendations from near-expiry alerts and forecasts, and validates them through active guardrail rules |
-| `sync-send` | Every `SYNC_INTERVAL` seconds | Sends due `PENDING` batches oldest-first to `HQ_URL` |
+| `sync-send` | Every `min(SYNC_INTERVAL, SYNC_SEND_POLL_SECONDS)` seconds | Sends due `PENDING` batches oldest-first to `HQ_URL`; waits while the oldest unfinished batch is `SENT` or not yet due |
 
 Daily jobs catch up automatically on startup if their scheduled time has already passed on the current business date, and can be triggered manually via `POST /api/v1/admin/jobs/{name}/run` with an `Admin` token.
 

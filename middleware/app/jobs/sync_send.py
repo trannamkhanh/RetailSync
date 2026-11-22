@@ -1,10 +1,12 @@
-"""The send cycle job (PB-15-3, 15-4, PB-16-1 to 16-4), run every SYNC_INTERVAL seconds.
+"""The send cycle job (PB-15-3, 15-4, PB-16-1 to 16-4).
 
+Runs every min(SYNC_INTERVAL, SYNC_SEND_POLL_SECONDS) seconds (DS-05 section 6).
 Like a router, this module owns its transactions:
 
 1. Return batches SENT for more than 60 seconds to PENDING.
-2. Take the oldest PENDING batch of any store, if its retry is due, mark it SENT
-   and commit. While it waits for its retry, nothing newer is sent.
+2. Take the oldest unfinished batch of any store; if it is PENDING and its retry
+   is due, mark it SENT and commit. While it is SENT or waits for its retry,
+   nothing newer is sent.
 3. Build and send its message; record HQ's answer in its own transaction.
 4. Repeat until no batch is due. A NACK (400, 409, 422) fails that batch and the
    cycle goes on; any other answer but an ACK backs the batch off and stops it.
@@ -45,6 +47,17 @@ class SendResult:
     error: str | None = None
 
 
+def release_stale_batches() -> int:
+    """Return batches SENT for more than 60 seconds to PENDING (DS-05 section 5).
+
+    Runs before each cycle and when the scheduler takes the job lock at startup.
+    """
+    with session_factory() as session:
+        released = sync_sender.release_stale(session, clock())
+        session.commit()
+    return released
+
+
 def run_send_cycle() -> SendResult:
     if not _cycle.acquire(blocking=False):
         return SendResult(skipped=True)
@@ -63,9 +76,7 @@ def _send_due_batches() -> SendResult:
         result.error = str(error)
         return result
 
-    with session_factory() as session:
-        result.released = sync_sender.release_stale(session, clock())
-        session.commit()
+    result.released = release_stale_batches()
 
     while True:
         with session_factory() as session:
