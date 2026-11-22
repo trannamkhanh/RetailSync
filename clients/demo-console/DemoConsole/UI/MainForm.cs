@@ -379,11 +379,15 @@ internal sealed class MainForm : Form
     /// <summary>
     /// Gives the stock pane its share of the tab, now that the container has a size.
     /// <para>
-    /// The distance used to be set in the constructor from the screen height, before
-    /// the container was laid out, so a short window (or a large font, up to 40)
-    /// pushed it past the container and made the stock pane shrink to 22 px or threw
-    /// <see cref="InvalidOperationException"/> (audit #17). It is now clamped to what
-    /// the container accepts, and skipped when both panes cannot fit.
+    /// The distance used to be set in the constructor from the screen height before
+    /// the container was laid out: on a 1080 px screen that is 486 px, and a short
+    /// window -- or a <c>FontSize</c> up to 40, which grows the header and status
+    /// lines -- gives the tab far less than that. WinForms does not refuse such a
+    /// value, it clamps it silently, so on a 300 px tab the split landed at 192 px
+    /// (the container's own maximum) instead of the 135 px the layout meant: the pane
+    /// the operator sees is decided by the container's limits, not by the share
+    /// (audit #17). The distance is now computed from the height the container
+    /// actually has, and skipped when both panes cannot fit.
     /// </para>
     /// <para>
     /// On a resize the operator's own splitter position is kept and only clamped

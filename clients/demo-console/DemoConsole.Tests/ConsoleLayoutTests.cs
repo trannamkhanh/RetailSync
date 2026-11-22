@@ -24,14 +24,73 @@ public class ConsoleLayoutTests
     }
 
     [Fact]
-    public void Audit17_the_old_fixed_distance_is_clamped_instead_of_throwing()
+    public void Audit17_the_old_screen_based_value_is_outside_the_container_range()
     {
-        // The crash: about 45% of a 1080 px screen, at least 200 px, in a short pane.
-        const int shortHeight = 240;
+        // The old code asked for about 45% of a 1080 px screen, at least 200 px, and
+        // assigned it whatever height the pane actually had. Measured on this
+        // runtime, WinForms does not refuse that: it quietly reduces it, so the split
+        // ends up wherever the container's own limits put it instead of the share the
+        // layout meant. On a 400 px tab those limits are 25 and 367, so the old
+        // 486 px request left the stock pane at 367 -- more than twice the 180 px it
+        // was supposed to take.
+        const int height = 400;
+        const int oldValue = 486;
+        using var split = new SplitContainer
+        {
+            Orientation = Orientation.Horizontal,
+            SplitterWidth = 8,
+            Size = new Size(1200, height),
+        };
+        split.Panel1MinSize = 25;
+        split.Panel2MinSize = 25;
+        var share = ConsoleLayout.PreferredStockPaneHeight(split.Height);
 
-        var distance = ConsoleLayout.SplitterDistance(shortHeight, 8, 25, 100, 486);
+        split.SplitterDistance = oldValue;
+        var afterRaw = split.Panel1.Height;
 
-        Assert.Equal(shortHeight - 100 - 8, distance);
+        split.SplitterDistance = ConsoleLayout.SplitterDistance(
+            split.Height, split.SplitterWidth, split.Panel1MinSize, split.Panel2MinSize,
+            share)!.Value;
+
+        Assert.Equal(180, share);
+        Assert.Equal(180, split.Panel1.Height);
+        Assert.NotEqual(share, afterRaw);   // the defect: the share is not what was drawn
+        Assert.Equal(367, afterRaw);        // WinForms clamped the request silently
+    }
+
+    [Fact]
+    public void Audit17_a_container_too_short_for_the_share_gets_the_most_it_can()
+    {
+        // A large font makes the tab shorter than the share the layout wants; the
+        // clamp then hands over every pixel the other pane's minimum leaves.
+        const int height = 100;
+        using var split = new SplitContainer
+        {
+            Orientation = Orientation.Horizontal,
+            SplitterWidth = 8,
+            Size = new Size(1200, height),
+        };
+        split.Panel1MinSize = 25;
+        split.Panel2MinSize = 25;
+
+        var distance = ConsoleLayout.SplitterDistance(
+            split.Height, split.SplitterWidth, split.Panel1MinSize, split.Panel2MinSize,
+            ConsoleLayout.PreferredStockPaneHeight(split.Height));
+
+        Assert.Equal(height - 25 - 8, distance);
+        Assert.True(ConsoleLayout.PreferredStockPaneHeight(height) > distance);
+    }
+
+    [Fact]
+    public void Audit17_a_negative_or_inverted_range_is_reported_not_assigned()
+    {
+        // The clamp answers None rather than passing a value WinForms would reject:
+        // a negative distance is the one assignment that does throw on this runtime.
+        Assert.Null(ConsoleLayout.SplitterDistance(50, 8, 25, 100, 200));
+
+        using var split = new SplitContainer { Orientation = Orientation.Horizontal, SplitterWidth = 8 };
+        split.Size = new Size(1200, 240);
+        Assert.Throws<ArgumentOutOfRangeException>(() => split.SplitterDistance = -5);
     }
 
     [Theory]

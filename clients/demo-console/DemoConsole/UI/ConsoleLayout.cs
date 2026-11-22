@@ -3,13 +3,18 @@ namespace DemoConsole.UI;
 /// <summary>
 /// Geometry the console can compute without a window, so it can be tested.
 /// <para>
-/// A <see cref="SplitContainer"/> throws <see cref="InvalidOperationException"/> when
-/// <c>SplitterDistance</c> is set outside
-/// <c>[Panel1MinSize, Height - Panel2MinSize - SplitterWidth]</c>, and it throws when it
-/// is set before the container has a usable size. With <c>FontSize</c> up to 40 the
-/// tab header and the status lines grow and the container gets shorter, so the old
-/// fixed distance (about 45% of the screen, at least 200 px) became larger than the
-/// container and the console crashed on start (audit #17).
+/// A <see cref="SplitContainer"/> does not reject a distance that is too large for
+/// its height: it clamps it silently. Measured on this project's runtime
+/// (net8.0-windows, .NET 8.0.33) with the panel minimums the console uses, 486 px
+/// on a 300 px tab leaves a distance of 192 -- the container's own maximum -- so
+/// the split is decided by the container's limits instead of the share the layout
+/// asked for (audit #17). A negative value is the one assignment that throws
+/// (<see cref="ArgumentOutOfRangeException"/>).
+/// </para>
+/// <para>
+/// Clamping here keeps the pane at the share the layout means, and answers None for
+/// a container where the panel minimums cannot both be met, so the caller never
+/// assigns a value WinForms might reject.
 /// </para>
 /// </summary>
 internal static class ConsoleLayout
