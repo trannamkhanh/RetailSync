@@ -79,7 +79,7 @@ public class ApiParsersTests
     }
 
     [Fact]
-    public void Hq_net_revenue_reads_as_a_number_and_as_a_numeric_string()
+    public void Audit07_net_revenue_reads_as_a_number_and_as_a_numeric_string()
     {
         // Audit #7: the DS-04 money fields are JSON numbers now. This console reads
         // one decimal, net_revenue, and must also keep reading an old recorded body
