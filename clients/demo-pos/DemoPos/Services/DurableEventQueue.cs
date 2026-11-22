@@ -40,7 +40,7 @@ public sealed class DurableEventQueue
         && (result.HttpStatus is 0 or >= 500
             || result.Code is "NO_ANSWER" or "TIMEOUT" or "NETWORK_ERROR" or "SERVICE_UNAVAILABLE");
 
-    private const int CompactThresholdBytes = 64 * 1024;
+    internal const int CompactThresholdBytes = 64 * 1024;
 
     private readonly string _path;
     private readonly string _journalLockPath;
@@ -154,6 +154,7 @@ public sealed class DurableEventQueue
         {
             using var journalLock = AcquireJournalLock();
             State state;
+            long journalLength;
             using (var file = OpenJournal())
             {
                 state = Load(file);
@@ -168,10 +169,12 @@ public sealed class DurableEventQueue
                 {
                     state.Rejected.Add(rejection);
                 }
+
+                journalLength = file.Length;
             }
 
-            // Compact while the journal lock is held, so a concurrent Enqueue cannot lose its append.
-            if (state.Pending.Count == 0)
+            // Compact while the journal lock is held, only once the journal exceeds CompactThresholdBytes.
+            if (state.Pending.Count == 0 && journalLength > CompactThresholdBytes)
             {
                 WriteSnapshot(state);
             }
@@ -183,10 +186,15 @@ public sealed class DurableEventQueue
         var temporary = _path + ".compact";
         try
         {
-            // Complete file first, then replace: a crash leaves either the old journal or this one.
-            File.WriteAllText(temporary,
-                JsonSerializer.Serialize(new JournalRecord("snapshot", Snapshot: state)) + "\n",
-                new UTF8Encoding(false));
+            // Complete and flush to disk before replacing: a crash leaves either the old journal or this one.
+            var bytes = Encoding.UTF8.GetBytes(
+                JsonSerializer.Serialize(new JournalRecord("snapshot", Snapshot: state)) + "\n");
+            using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(bytes);
+                stream.Flush(true);
+            }
+
             File.Move(temporary, _path, overwrite: true);
         }
         catch (IOException)

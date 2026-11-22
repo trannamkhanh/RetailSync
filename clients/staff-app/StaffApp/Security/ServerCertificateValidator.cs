@@ -103,16 +103,27 @@ public static class ServerCertificateValidator
             ? new[] { literal }
             : await Dns.GetHostAddressesAsync(host, cancellationToken).ConfigureAwait(false);
 
+        return await ConnectAddressesAsync(addresses, host, port, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    internal static async ValueTask<Stream> ConnectAddressesAsync(
+        IEnumerable<IPAddress> addresses,
+        string host,
+        int port,
+        CancellationToken cancellationToken,
+        Func<AddressFamily, Socket>? socketFactory = null)
+    {
         Exception? lastError = null;
         foreach (var address in addresses.OrderBy(
                      address => address.AddressFamily == AddressFamily.InterNetwork ? 0 : 1))
         {
-            var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp)
-            {
-                NoDelay = true,
-            };
+            var socket = socketFactory is null
+                ? new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp)
+                : socketFactory(address.AddressFamily);
             try
             {
+                socket.NoDelay = true;
                 await socket.ConnectAsync(new IPEndPoint(address, port), cancellationToken)
                     .ConfigureAwait(false);
                 return new NetworkStream(socket, ownsSocket: true);
@@ -121,6 +132,11 @@ public static class ServerCertificateValidator
             {
                 socket.Dispose();
                 lastError = error;
+            }
+            catch
+            {
+                socket.Dispose();
+                throw;
             }
         }
 
