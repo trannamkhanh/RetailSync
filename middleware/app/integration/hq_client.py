@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
 from pathlib import Path
+import ssl
 from typing import Literal
 
 import httpx
@@ -121,7 +122,7 @@ def send_batch(message: dict) -> HqResult:
     try:
         with httpx.Client(timeout=settings.hq_timeout_seconds, verify=tls_verify(), transport=transport) as client:
             response = client.post(url, content=payload, headers=headers)
-    except httpx.TransportError as error:
+    except (httpx.RequestError, ssl.SSLError) as error:
         return HqResult("NO_ANSWER", message=f"{type(error).__name__}: {error}"[:LAST_ERROR_LIMIT],
                         payload_bytes=len(payload))
     return _answer(response, message["batch_id"], len(payload))

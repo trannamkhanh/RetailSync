@@ -24,7 +24,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "_demo_http.ps1")
 $common = New-DemoCommonArgs -TokensPath $TokensPath -CaPath $CaPath
 
-$takenAt = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+$takenAt = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", [Globalization.CultureInfo]::InvariantCulture)
 $body = '{"store_id":"' + $StoreId + '","taken_at":"' + $takenAt + '","items":[{"sku":"SKU-0001","quantity":999},{"sku":"SKU-0004","quantity":999}]}'
 $result = Invoke-DemoApi -Method POST -Url "$($BaseUrl.TrimEnd('/'))/hq/snapshot" -TokenName $Token -Body $body @common
 if ($result.Status -eq 404) { Write-Host "Not deployed: /hq/snapshot is not on this middleware yet." }

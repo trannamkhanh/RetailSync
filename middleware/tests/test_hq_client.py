@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 import json
+import ssl
 
 import httpx
 import jwt
@@ -224,3 +225,30 @@ def test_pb15_3_settings_defaults(monkeypatch):
 def test_pb15_3_timeout_must_be_positive(value):
     with pytest.raises(ValidationError, match="hq_timeout_seconds"):
         Settings(_env_file=None, hq_timeout_seconds=value)
+
+
+@pytest.mark.parametrize("error", [httpx.TooManyRedirects("loop"), httpx.DecodingError("bad gzip"),
+                                   ssl.SSLError(1, "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed")],
+                         ids=["too-many-redirects", "decoding-error", "ssl-error"])
+def test_audit_minor_request_error_or_ssl_error_is_no_answer(monkeypatch, error):
+    def fail(request):
+        raise error
+
+    install(monkeypatch, fail)
+
+    result = send_batch(MESSAGE)
+
+    assert (result.kind, result.status, result.code) == ("NO_ANSWER", None, None)
+    assert type(error).__name__ in result.message
+
+
+def test_audit_minor_unreadable_ca_file_is_no_answer(monkeypatch, tmp_path):
+    ca_file = tmp_path / "ca.crt"
+    ca_file.write_text("-----BEGIN CERTIFICATE-----\nnot a certificate\n-----END CERTIFICATE-----\n")
+    monkeypatch.setattr(settings, "hq_ca_file", str(ca_file))
+    monkeypatch.setattr(hq_client, "transport", None)
+
+    result = send_batch(MESSAGE)
+
+    assert (result.kind, result.status, result.code) == ("NO_ANSWER", None, None)
+    assert "SSLError" in result.message

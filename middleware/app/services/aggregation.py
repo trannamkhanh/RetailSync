@@ -19,7 +19,7 @@ body sent to HQ.
 """
 
 from collections.abc import Iterable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
 
@@ -91,6 +91,11 @@ def aggregate_store(session: Session, store_id: str, now: datetime) -> str | Non
     with lock_wait_limited(session, settings.pos_lock_timeout_ms):
         if repository.count_unassigned(session, store_id) == 0:
             return None
+        # A second aggregation of the store within the same second takes the next free second (same format).
+        taken = moment
+        while session.get(SyncBatch, sync_batch_id) is not None:
+            taken += timedelta(seconds=1)
+            sync_batch_id = batch_id_for(store_id, taken)
 
         stored_moment = moment.replace(tzinfo=None)
         batch = SyncBatch(sync_batch_id=sync_batch_id, store_id=store_id,

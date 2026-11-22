@@ -470,3 +470,19 @@ def test_tst40_3_a_batch_stores_the_raw_size_of_its_transactions(db_session):
     batch = db_session.get(SyncBatch, batch_id)
     assert batch.raw_bytes == sum(len(json.dumps(body, separators=(",", ":")).encode("utf-8")) for body in expected)
     assert batch.raw_bytes > 0
+
+
+def test_audit_minor_two_aggregations_in_the_same_second_get_distinct_ids(db_session):
+    skus = [f"TEST-SKU-{_uid(5)}"]
+    store_id, pos_id = _create_store(db_session, skus)
+    moment = datetime(2026, 11, 14, 3, 4, 5, 100000, tzinfo=timezone.utc)
+    _add_transaction(db_session, store_id, pos_id, "SALE", [(skus[0], 1, Decimal("10.00"))])
+    first = aggregate_store(db_session, store_id, moment)
+    late = _add_transaction(db_session, store_id, pos_id, "SALE", [(skus[0], 2, Decimal("10.00"))])
+
+    second = aggregate_store(db_session, store_id, moment.replace(microsecond=900000))
+
+    assert first == f"SB-{store_id}-20261114030405"
+    assert second == f"SB-{store_id}-20261114030406"
+    assert len(second) <= 28
+    assert db_session.get(PosTransaction, late).sync_batch_id == second
