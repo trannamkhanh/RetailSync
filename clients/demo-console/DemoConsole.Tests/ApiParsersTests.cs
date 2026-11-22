@@ -79,6 +79,25 @@ public class ApiParsersTests
     }
 
     [Fact]
+    public void Audit07_net_revenue_reads_as_a_number_and_as_a_numeric_string()
+    {
+        // Audit #7: the DS-04 money fields are JSON numbers now. This console reads
+        // one decimal, net_revenue, and must also keep reading an old recorded body
+        // that still carries it as a numeric string.
+        var asNumber = ApiParsers.DemoBatches("""
+            {"batches":[],"totals":[{"sku":"SKU-0001","store_id":"STORE-DN1",
+              "sold_qty":5,"returned_qty":1,"net_revenue":128000.5}]}
+            """);
+        var asString = ApiParsers.DemoBatches("""
+            {"batches":[],"totals":[{"sku":"SKU-0001","store_id":"STORE-DN1",
+              "sold_qty":5,"returned_qty":1,"net_revenue":"128000.50"}]}
+            """);
+
+        Assert.Equal(128000.5m, asNumber.Totals[0].NetRevenue);
+        Assert.Equal(asNumber.Totals[0].NetRevenue, asString.Totals[0].NetRevenue);
+    }
+
+    [Fact]
     public void Empty_hq_demo_answer_is_valid()
     {
         var view = ApiParsers.DemoBatches("""{"batches":[],"totals":[]}""");

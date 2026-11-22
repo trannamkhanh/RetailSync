@@ -107,6 +107,49 @@ public class ApiParsersTests
     }
 
     [Fact]
+    public void Audit07_a_decimal_reads_the_same_as_a_number_and_as_a_string()
+    {
+        // Audit #7: the middleware now writes discount_pct and the guardrail values
+        // as JSON numbers, per DS-04. The parser must keep accepting both forms, so a
+        // server that has not been upgraded, or an old recorded body, still reads.
+        var numbers = ApiParsers.Detail("""
+            {"rec_id":11,"sku":"SKU-0006","action_type":"DISCOUNT","discount_pct":30.0,"proposed_qty":null,
+             "status":"PENDING","batch_id":"B-1033","expiry_date":"2026-11-02","reason":"Near expiry.",
+             "guardrail_results":[
+               {"rule_type":"MAX_DISCOUNT","outcome":"ADJUSTED","original_value":30.0,"adjusted_value":10.0,
+                "message":null}]}
+            """);
+        var strings = ApiParsers.Detail("""
+            {"rec_id":11,"sku":"SKU-0006","action_type":"DISCOUNT","discount_pct":"30.00","proposed_qty":null,
+             "status":"PENDING","batch_id":"B-1033","expiry_date":"2026-11-02","reason":"Near expiry.",
+             "guardrail_results":[
+               {"rule_type":"MAX_DISCOUNT","outcome":"ADJUSTED","original_value":"30.00","adjusted_value":"10.00",
+                "message":null}]}
+            """);
+
+        Assert.Equal("Discount 30% on SKU-0006, batch B-1033", numbers.Title);
+        Assert.Equal(numbers.Title, strings.Title);
+        Assert.Equal(numbers.Summary.DiscountPct, strings.Summary.DiscountPct);
+        Assert.Equal(numbers.GuardrailResults.Select(line => line.Text),
+            strings.GuardrailResults.Select(line => line.Text));
+        Assert.Equal("MAX_DISCOUNT: adjusted 30 -> 10", numbers.GuardrailResults[0].Text);
+    }
+
+    [Fact]
+    public void Audit07_a_zero_discount_is_a_number_in_both_forms()
+    {
+        var numbers = ApiParsers.Recommendations("""
+            {"items":[{"rec_id":21,"sku":"SKU-0010","action_type":"DISCOUNT","discount_pct":0.0,"status":"PENDING"}]}
+            """);
+        var strings = ApiParsers.Recommendations("""
+            {"items":[{"rec_id":21,"sku":"SKU-0010","action_type":"DISCOUNT","discount_pct":"0.00","status":"PENDING"}]}
+            """);
+
+        Assert.Equal(new[] { "0%", "0%" }, numbers.Concat(strings).Select(row => row.Level));
+        Assert.Equal(numbers[0].DiscountPct, strings[0].DiscountPct);
+    }
+
+    [Fact]
     public void Pb47_detail_without_a_batch_has_no_expiry()
     {
         var detail = ApiParsers.Detail("""
