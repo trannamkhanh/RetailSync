@@ -19,11 +19,11 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 from sqlalchemy import Engine, bindparam, delete, select, text
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
+from app.core.config import Settings, settings
 from app.domain.models import AuditLog, Product, Store, SyncBatch
 from app.integration import hq_client
 from app.jobs import scheduler, sync_send
@@ -470,17 +470,6 @@ def test_pb15_missing_ca_file_touches_no_batch(world, hq, monkeypatch):
 def test_sync15_1_the_job_runs_each_interval(world, hq):
     first = world.batch(world.store(), timedelta(hours=2))
     clock_now = [datetime(2026, 11, 14, 3, 0, tzinfo=timezone.utc)]
-
-    class HeldLock:
-        def acquire(self) -> bool:
-            return True
-
-        def holds(self) -> bool:
-            return True
-
-        def release(self) -> None:
-            pass
-
     sched = Scheduler([Job("sync-send", run_send_cycle, every_seconds=60)], lock=HeldLock(),
                       clock=lambda: clock_now[0])
 
@@ -505,6 +494,7 @@ def _registry_jobs(monkeypatch) -> dict[str, Job]:
 def test_sync15_1_with_sync_interval_60_aggregation_runs_every_60_and_sync_send_every_30(monkeypatch):
     # Workbook SYNC15-1: set SYNC_INTERVAL to 60 → a cycle runs each interval (DS-05 section 6 poll: 30 s).
     monkeypatch.setattr(settings, "sync_interval", 60)
+    monkeypatch.setattr(settings, "sync_send_poll_seconds", 30)
 
     jobs = _registry_jobs(monkeypatch)
 
@@ -513,10 +503,11 @@ def test_sync15_1_with_sync_interval_60_aggregation_runs_every_60_and_sync_send_
     assert (jobs["sync-send"].every_seconds, jobs["sync-send"].daily_at) == (30, None)
 
 
-@pytest.mark.parametrize("interval, expected", [(3600, 30), (60, 30), (10, 10)])
-def test_audit05_sync_send_polls_every_sync_send_poll_seconds(monkeypatch, interval, expected):
-    # Default poll: 30 s.
+@pytest.mark.parametrize("interval, poll, expected",
+                         [(3600, 30, 30), (60, 30, 30), (10, 30, 10), (3600, 15, 15), (10, 15, 10)])
+def test_audit05_sync_send_polls_every_sync_send_poll_seconds(monkeypatch, interval, poll, expected):
     monkeypatch.setattr(settings, "sync_interval", interval)
+    monkeypatch.setattr(settings, "sync_send_poll_seconds", poll)
 
     jobs = _registry_jobs(monkeypatch)
 
@@ -525,8 +516,20 @@ def test_audit05_sync_send_polls_every_sync_send_poll_seconds(monkeypatch, inter
     assert jobs["aggregation"].every_seconds == interval
 
 
+@pytest.mark.parametrize("value, accepted", [("4", False), ("5", True), ("3600", True), ("3601", False)])
+def test_audit05_sync_send_poll_seconds_must_be_5_to_3600(monkeypatch, value, accepted):
+    monkeypatch.setenv("SYNC_SEND_POLL_SECONDS", value)
+
+    if accepted:
+        assert Settings().sync_send_poll_seconds == int(value)
+    else:
+        with pytest.raises(ValidationError, match="sync_send_poll_seconds"):
+            Settings()
+
+
 def test_audit05_retry_is_sent_on_the_next_poll_not_after_sync_interval(world, hq, monkeypatch):
     monkeypatch.setattr(settings, "sync_interval", 3600)
+    monkeypatch.setattr(settings, "sync_send_poll_seconds", 30)
     monkeypatch.setattr(settings, "sync_retry_base_seconds", 60)
     send = _registry_jobs(monkeypatch)["sync-send"]
     batch_id = world.batch(world.store(), timedelta(hours=1))
