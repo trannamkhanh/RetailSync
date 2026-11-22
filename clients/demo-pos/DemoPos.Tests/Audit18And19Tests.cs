@@ -79,13 +79,69 @@ public sealed class Audit18And19Tests
         return method.Invoke(target, args);
     }
 
-    private static void InitializeTabsAndStopTimers(MainForm form)
+    private static void ReplaceHttpClient(object target, HttpMessageHandler handler, bool disposeHandler = false)
+    {
+        var previous = GetPrivateField<HttpClient>(target, "_http");
+        var replacement = new HttpClient(handler, disposeHandler)
+        {
+            Timeout = previous.Timeout,
+        };
+        foreach (var header in previous.DefaultRequestHeaders.Accept)
+        {
+            replacement.DefaultRequestHeaders.Accept.Add(header);
+        }
+
+        SetPrivateField(target, "_http", replacement);
+        previous.Dispose();
+    }
+
+    private static StubHttpHandler CreateDefaultMonitorHandler(Action<HttpRequestMessage>? onRequest = null) =>
+        new((req, _) =>
+        {
+            onRequest?.Invoke(req);
+            var path = req.RequestUri?.AbsolutePath ?? string.Empty;
+            if (path.EndsWith("/health", StringComparison.OrdinalIgnoreCase))
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("""{"status":"ok"}""", Encoding.UTF8, "application/json"),
+                });
+            }
+
+            if (path.Contains("/audit-logs", StringComparison.OrdinalIgnoreCase))
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("""{"items":[]}""", Encoding.UTF8, "application/json"),
+                });
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"store_id":"STORE-DN1","items":[]}""", Encoding.UTF8, "application/json"),
+            });
+        });
+
+    private static StubHttpHandler CreateDefaultGatewayHandler(Action<HttpRequestMessage>? onRequest = null) =>
+        new((req, _) =>
+        {
+            onRequest?.Invoke(req);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest)
+            {
+                Content = new StringContent("client certificate required", Encoding.UTF8, "text/plain"),
+            });
+        });
+
+    private static void StopBackgroundTimers(MainForm form)
     {
         // Stop background polling timers so tests drive async paths deterministically.
         GetPrivateField<System.Windows.Forms.Timer>(form, "_monitorTimer").Stop();
         GetPrivateField<System.Windows.Forms.Timer>(form, "_statusTimer").Stop();
         GetPrivateField<System.Windows.Forms.Timer>(form, "_queueTimer").Stop();
+    }
 
+    private static void ShowOffScreenAndRealizeTabs(MainForm form)
+    {
         // Realize WinForms handles and DataGridView bindings off-screen without flashing UI.
         form.ShowInTaskbar = false;
         form.StartPosition = FormStartPosition.Manual;
@@ -99,6 +155,85 @@ public sealed class Audit18And19Tests
 
         form.Tabs.SelectedIndex = 0;
         Application.DoEvents();
+    }
+
+    private static void WaitForIdleRefreshes(MainForm form)
+    {
+        PumpUntil(() =>
+            !GetPrivateField<bool>(form, "_statusBusy")
+            && !GetPrivateField<bool>(form, "_statusRefreshPending")
+            && !GetPrivateField<bool>(form, "_monitorBusy")
+            && !GetPrivateField<bool>(form, "_monitorRefreshPending")
+            && GetPrivateField<SemaphoreSlim>(form, "_queueGate").CurrentCount == 1);
+    }
+
+    private static void InitializeTabsAndStopTimers(MainForm form)
+    {
+        StopBackgroundTimers(form);
+
+        var startupHealthSeen = 0;
+        var startupGatewaySeen = 0;
+        var startupStockSeen = 0;
+        var expectLiveStartup = !form.IsMockMode;
+        var expectStock = false;
+        if (expectLiveStartup)
+        {
+            // Stub monitor and gateway HTTP clients BEFORE form.Show() so the Shown handler never
+            // hits real loopback ports (which can be held/slow) or races with test-installed stubs.
+            var loaded = GetPrivateField<LoadedConfig>(form, "_loaded");
+            var firstStore = loaded.Config.Terminals.FirstOrDefault()?.StoreId;
+            expectStock = firstStore is not null && loaded.StaffTokenForStore(firstStore) is not null;
+
+            var monitor = GetPrivateField<MonitorApiClient?>(form, "_monitorClient");
+            if (monitor is not null)
+            {
+                ReplaceHttpClient(
+                    monitor,
+                    CreateDefaultMonitorHandler(req =>
+                    {
+                        var path = req.RequestUri?.AbsolutePath ?? string.Empty;
+                        if (path.EndsWith("/health", StringComparison.OrdinalIgnoreCase))
+                        {
+                            Interlocked.Increment(ref startupHealthSeen);
+                        }
+                        else if (path.EndsWith("/inventory", StringComparison.OrdinalIgnoreCase))
+                        {
+                            Interlocked.Increment(ref startupStockSeen);
+                        }
+                    }),
+                    disposeHandler: true);
+            }
+
+            var gatewayProbe = GetPrivateField<GatewayProbe?>(form, "_gatewayProbe");
+            if (gatewayProbe is not null)
+            {
+                ReplaceHttpClient(
+                    gatewayProbe,
+                    CreateDefaultGatewayHandler(_ => Interlocked.Increment(ref startupGatewaySeen)),
+                    disposeHandler: true);
+            }
+        }
+
+        ShowOffScreenAndRealizeTabs(form);
+
+        // Wait until the Shown startup sequence (RefreshStatusAsync -> RefreshMonitorAsync ->
+        // DrainQueuesAsync) finishes completely before the test installs its own stubs or assertions.
+        if (expectLiveStartup)
+        {
+            PumpUntil(() =>
+                Volatile.Read(ref startupHealthSeen) > 0
+                && Volatile.Read(ref startupGatewaySeen) > 0
+                && (!expectStock || Volatile.Read(ref startupStockSeen) > 0)
+                && !GetPrivateField<bool>(form, "_statusBusy")
+                && !GetPrivateField<bool>(form, "_statusRefreshPending")
+                && !GetPrivateField<bool>(form, "_monitorBusy")
+                && !GetPrivateField<bool>(form, "_monitorRefreshPending")
+                && GetPrivateField<SemaphoreSlim>(form, "_queueGate").CurrentCount == 1);
+        }
+        else
+        {
+            WaitForIdleRefreshes(form);
+        }
     }
 
     private static LoadedConfig BuildLiveConfig(string directory, bool mock = false, bool badCa = false)
@@ -239,15 +374,7 @@ public sealed class Audit18And19Tests
                 },
             });
 
-            // Stub monitor client so post-send RefreshMonitorAsync does not hit network.
-            var monitor = GetPrivateField<MonitorApiClient>(form, "_monitorClient");
-            using var monitorHandler = new StubHttpHandler((_, _) =>
-                Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent("{\"store_id\":\"STORE-DN1\",\"items\":[]}", Encoding.UTF8, "application/json"),
-                }));
-            SetPrivateField(monitor, "_http", new HttpClient(monitorHandler));
-
+            // Monitor and gateway HTTP clients are already stubbed before Show() by InitializeTabsAndStopTimers.
             foreach (var kind in new[]
                      {
                          ScenarioKind.Conflict,
@@ -261,9 +388,8 @@ public sealed class Audit18And19Tests
                 task.GetAwaiter().GetResult();
             }
 
-            // Wait briefly in case a queued background drain ran on unmodified main.
-            Thread.Sleep(100);
-            Application.DoEvents();
+            // Wait until post-send monitor refreshes and queue gate settle with no pending background drain.
+            WaitForIdleRefreshes(form);
 
             Assert.Equal(4, handler.Bodies.Count);
             var queue = new DurableEventQueue(directory.Path, "POS-DN1-01");
@@ -298,14 +424,6 @@ public sealed class Audit18And19Tests
             liveClients["POS-DN1-01"] = new TerminalClient(
                 loaded.Config.PosBaseUrl, authority, null, "POS-DN1-01", "token-pos-1", form.RequestLog, handler);
 
-            var monitor = GetPrivateField<MonitorApiClient>(form, "_monitorClient");
-            using var monitorHandler = new StubHttpHandler((_, _) =>
-                Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent("{\"store_id\":\"STORE-DN1\",\"items\":[]}", Encoding.UTF8, "application/json"),
-                }));
-            SetPrivateField(monitor, "_http", new HttpClient(monitorHandler));
-
             // Enqueue one sale on POS-DN1-01 and begin draining while POS-DN1-01 is selected.
             var queues = GetPrivateField<Dictionary<string, DurableEventQueue>>(form, "_queues");
             queues["POS-DN1-01"].Enqueue("""{"transaction_id":"TXN-1","event_type":"SALE"}""");
@@ -331,6 +449,7 @@ public sealed class Audit18And19Tests
 
             PumpUntil(() => drainTask.IsCompleted);
             drainTask.GetAwaiter().GetResult();
+            WaitForIdleRefreshes(form);
 
             // Switching away during a pending drain must not apply the old result onto the cleared panel.
             Assert.Equal("—", outcomeLabel.Text);
@@ -386,6 +505,7 @@ public sealed class Audit18And19Tests
 
             PumpUntil(() => drainTask.IsCompleted);
             drainTask.GetAwaiter().GetResult();
+            WaitForIdleRefreshes(form);
 
             // Must NOT overwrite MOCK mode's INFO banner with the stale LIVE OK result.
             Assert.Equal("INFO", outcomeLabel.Text);
@@ -420,10 +540,11 @@ public sealed class Audit18And19Tests
                         Encoding.UTF8, "application/json"),
                 });
             });
-            SetPrivateField(monitor, "_http", new HttpClient(monitorHandler));
+            ReplaceHttpClient(monitor, monitorHandler);
 
             var refreshTask = (Task)InvokePrivate(form, "RefreshMonitorAsync")!;
             PumpUntil(() => stockStarted.Task.IsCompleted);
+            Assert.False(refreshTask.IsCompleted);
 
             // Switch to POS-DN2-01 (STORE-DN2) while STORE-DN1's request is still pending.
             form.SelectTerminal("POS-DN2-01");
@@ -438,11 +559,14 @@ public sealed class Audit18And19Tests
 
             PumpUntil(() => refreshTask.IsCompleted);
             refreshTask.GetAwaiter().GetResult();
+            WaitForIdleRefreshes(form);
 
             var stockStatus = GetPrivateField<Label>(form, "_stockStatus");
             Assert.DoesNotContain("STORE-DN1", stockStatus.Text, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("STORE-DN2", stockStatus.Text, StringComparison.OrdinalIgnoreCase);
             var stockView = GetPrivateField<BindingList<StockRow>>(form, "_stockView");
             Assert.DoesNotContain(stockView, row => row.Quantity == 11);
+            Assert.Contains(stockView, row => row.Quantity == 77);
         });
     }
 
@@ -472,10 +596,11 @@ public sealed class Audit18And19Tests
                     Content = new StringContent("""{"store_id":"STORE-DN1","items":[]}""", Encoding.UTF8, "application/json"),
                 });
             });
-            SetPrivateField(monitor, "_http", new HttpClient(monitorHandler));
+            ReplaceHttpClient(monitor, monitorHandler);
 
             var statusTask = (Task)InvokePrivate(form, "RefreshStatusAsync")!;
             PumpUntil(() => healthStarted.Task.IsCompleted);
+            Assert.False(statusTask.IsCompleted);
 
             var toggleTask = form.ToggleMockAsync();
             PumpUntil(() => toggleTask.IsCompleted);
@@ -490,10 +615,64 @@ public sealed class Audit18And19Tests
             PumpUntil(() => statusTask.IsCompleted);
             statusTask.GetAwaiter().GetResult();
 
-            // Wait for any coalesced refresh queued during ToggleMockAsync.
-            Application.DoEvents();
+            // Poll until any coalesced status refresh queued during ToggleMockAsync has settled.
+            WaitForIdleRefreshes(form);
             var middlewareStatus = GetPrivateField<ToolStripStatusLabel>(form, "_middlewareStatus");
+            var gatewayStatus = GetPrivateField<ToolStripStatusLabel>(form, "_gatewayStatus");
             Assert.Equal("Middleware: MOCK", middlewareStatus.Text);
+            Assert.Equal("Gateway: MOCK", gatewayStatus.Text);
+        });
+    }
+
+    [Fact]
+    public void Audit18_TogglingToMockDuringStartupStatusFailureDropsStaleDown()
+    {
+        OnStaThread(() =>
+        {
+            using var directory = new TemporaryDirectory();
+            var loaded = BuildLiveConfig(directory.Path, mock: false);
+            using var form = new MainForm(loaded, directory.Path);
+            StopBackgroundTimers(form);
+
+            // Install stubs BEFORE form.Show() so Shown's startup /health call is controlled here
+            // and simulates a slow/refused loopback endpoint (e.g., busy port 127.0.0.1:8443).
+            var healthStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var healthRelease = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var monitor = GetPrivateField<MonitorApiClient>(form, "_monitorClient");
+            using var monitorHandler = new StubHttpHandler((req, _) =>
+            {
+                if (req.RequestUri!.AbsolutePath.EndsWith("/health", StringComparison.OrdinalIgnoreCase))
+                {
+                    healthStarted.TrySetResult(true);
+                    return healthRelease.Task;
+                }
+
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("""{"store_id":"STORE-DN1","items":[]}""", Encoding.UTF8, "application/json"),
+                });
+            });
+            ReplaceHttpClient(monitor, monitorHandler);
+
+            var gatewayProbe = GetPrivateField<GatewayProbe>(form, "_gatewayProbe");
+            ReplaceHttpClient(gatewayProbe, CreateDefaultGatewayHandler(), disposeHandler: true);
+
+            ShowOffScreenAndRealizeTabs(form);
+            PumpUntil(() => healthStarted.Task.IsCompleted);
+
+            var toggleTask = form.ToggleMockAsync();
+            PumpUntil(() => toggleTask.IsCompleted);
+            toggleTask.GetAwaiter().GetResult();
+            Assert.True(form.IsMockMode);
+
+            // Complete the startup /health request with a connection failure after toggling to MOCK.
+            healthRelease.SetException(new HttpRequestException("Simulated refused connection on 127.0.0.1:8443"));
+
+            WaitForIdleRefreshes(form);
+            var middlewareStatus = GetPrivateField<ToolStripStatusLabel>(form, "_middlewareStatus");
+            var gatewayStatus = GetPrivateField<ToolStripStatusLabel>(form, "_gatewayStatus");
+            Assert.Equal("Middleware: MOCK", middlewareStatus.Text);
+            Assert.Equal("Gateway: MOCK", gatewayStatus.Text);
         });
     }
 
