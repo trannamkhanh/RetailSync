@@ -11,6 +11,12 @@ The plan a given SQL Server chooses is not stable enough to assert, so the test
 pins the statement text, which is what the audit found missing, and then the
 concurrency test shows that two stores selling at the same moment still do not
 deadlock or time out.
+
+The business date is fixed with ``clock.today_local``, as every other expiry
+test in this suite does. Without it the batches below expire as real time
+passes -- ``TODAY + 2`` is in the past from 2026-11-17, and from 2026-11-24 all
+three batches have expired, so the sale found nothing sellable and the test
+failed with INSUFFICIENT_STOCK through no change of ours.
 """
 
 from __future__ import annotations
@@ -26,6 +32,7 @@ import pytest
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from app.core import clock
 from app.domain.models import (
     Inventory,
     InventoryMovement,
@@ -43,6 +50,12 @@ from tests.pos_test_support import add_stock, uid
 
 TODAY = date(2026, 11, 14)
 INDEX_NAME = "ix_product_batch_fefo"
+
+
+@pytest.fixture(autouse=True)
+def business_date(monkeypatch) -> None:
+    """Fix the business date so the expiry bands never rot (review of PR #74)."""
+    monkeypatch.setattr(clock, "today_local", lambda: TODAY)
 
 
 class Recorder:
@@ -181,6 +194,10 @@ def test_audit04_two_stores_selling_at_once_neither_deadlock_nor_time_out(test_e
     barrier = Barrier(2)
     order: list[str] = []
     guard = Lock()
+    # The sale reads the same clock the fixture pinned. If an edit drops that
+    # fixture this assertion fails here, naming the cause, instead of the sale
+    # failing later with a misleading INSUFFICIENT_STOCK (review of PR #74).
+    assert clock.today_local() == TODAY
     try:
         for run in range(5):
             order.clear()
@@ -203,5 +220,28 @@ def test_audit04_two_stores_selling_at_once_neither_deadlock_nor_time_out(test_e
                     .where(ProductBatch.store_id == shop.store_id,
                            ProductBatch.sku == shop.sku))
                 assert int(in_batches) == remaining
+    finally:
+        _cleanup(test_engine, shops)
+
+
+def test_audit04_every_batch_created_by_the_fixture_is_sellable_on_the_business_date(test_engine):
+    """The bands the concurrency test sells from must stay sellable (review of PR #74).
+
+    ``_make_shop`` opens three batches at ``TODAY + 2/5/9``. The deduction takes
+    the sellable subset only, so whoever edits those offsets has to keep them at
+    or beyond the pinned business date.
+    """
+    with Session(test_engine) as session:
+        shops = [_make_shop(session, "C")]
+    try:
+        with Session(test_engine) as session:
+            expiries = list(session.scalars(
+                select(ProductBatch.expiry_date).where(
+                    ProductBatch.store_id == shops[0].store_id,
+                    ProductBatch.sku == shops[0].sku)))
+
+        assert len(expiries) == 3, expiries
+        assert all(expiry >= clock.today_local() for expiry in expiries), expiries
+        assert sum(1 for expiry in expiries if expiry == TODAY + timedelta(days=2)) == 1
     finally:
         _cleanup(test_engine, shops)
