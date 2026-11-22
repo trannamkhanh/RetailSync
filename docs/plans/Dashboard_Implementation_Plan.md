@@ -592,16 +592,21 @@ RetailSync/
 
 ---
 
-## 15. Ph? l?c � `Dashboard_Baseline_Docs_Changes.md` kh�ng n?m trong PR
+## 15. Phụ lục — `Dashboard_Baseline_Docs_Changes.md` không nằm trong PR
 
-Review c?a Ki?t ng�y 19/11 d�nh d?u `Dashboard_Baseline_Docs_Changes.md` l� **b?n cu**
-(u?c lu?ng 209 gi?, epic E9, m?c 1.8, h?n 11/12). File d� v� th? **kh�ng du?c commit**
-c�ng PR PB-49, d� b?n file k? ho?ch c�n l?i th� c�.
+Review của Kiệt ngày 19/11 đánh dấu `Dashboard_Baseline_Docs_Changes.md` là **bản cũ**
+(ước lượng 209 giờ, epic E9, mục 1.8, hạn 11/12). File đó vì thế **không được commit**
+cùng PR PB-49, dù bốn file kế hoạch còn lại thì có.
 
-L� do: n� l� b?n nh�p cho t�i li?u baseline **ngo�i repo** (Google Sheet, SRS, Database
-Design), v� kh�ng file n�o trong repo tr�ch d?n n� � n�n thi?u n� kh�ng l�m ch?t link
-n�o. Committing m?t b?n m� review d� x�c d?nh l� sai s? bi?n m?t t�i li?u nh�p l?i th?i
-th�nh ngu?n tham chi?u tr�ng c� th?m quy?n.
+Lý do: nó là bản nháp cho tài liệu baseline **ngoài repo** (Google Sheet, SRS, Database
+Design), và không file nào trong repo trích dẫn nó — nên thiếu nó không làm chết link
+nào. Committing một bản mà review đã xác định là sai sẽ biến một tài liệu nháp lỗi thời
+thành nguồn tham chiếu trông có thẩm quyền.
 
-**C?n Ki?t quy?t:** ho?c b? h?n file n�y, ho?c cung c?p b?n d� s?a; khi d� th�m l?i
-b?ng m?t commit ri�ng. N?i dung cu v?n c�n tr�n nh�nh `origin/Quang` n?u c?n d?i chi?u.
+**Khôi phục nếu cần đối chiếu:** bản 429 dòng nằm trong lịch sử của chính nhánh này, ở
+commit `44588d4`, lấy lại bằng
+`git show 44588d4:docs/plans/Dashboard_Baseline_Docs_Changes.md`. Nó **không** có trên
+`origin/Quang` hay bất kỳ nhánh remote nào; bản đầu của mục này ghi sai điều đó.
+
+**Cần Kiệt quyết:** hoặc bỏ hẳn file này, hoặc cung cấp bản đã sửa — khi đó thêm lại
+bằng một commit riêng.
