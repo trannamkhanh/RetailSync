@@ -1,4 +1,4 @@
-"""Audit #5 (request order): authenticate and validate before touching the database.
+"""Phase 8 Q5 (request order): authenticate and validate before touching the database.
 
 Two endpoints opened a pooled database connection before they knew whether the
 request was even theirs to serve:
@@ -9,9 +9,14 @@ request was even theirs to serve:
 - ``POST /hq/snapshot`` depended on ``get_db`` before reading the body, so a
   body over 1 MB -- refused without ever being applied -- still held a session.
 
-The order is now: check the bearer token, then read and check the body, then
-open the session. The observable answers do not change, so these tests pin the
-order itself: with a refused request, the database dependency must never run.
+The order is now: check the bearer token and its role, then read and check the
+body, then open the session. The observable answers do not change, so these
+tests pin the order itself: with a refused request, the database dependency must
+never run, and a token for another role must not have its body read at all.
+
+These tests are the unnumbered "Minor backend/POS" group of PR Q5, not audit
+finding #5 (Kiệt's `SYNC_SEND_POLL_SECONDS`); the `test_q5_` prefix keeps the two
+apart (review of PR #78).
 """
 
 from __future__ import annotations
@@ -67,7 +72,7 @@ def bearer(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_audit05_pos_without_a_token_never_opens_the_database(client, recorder):
+def test_q5_pos_without_a_token_never_opens_the_database(client, recorder):
     response = client.post(POS_URL, json={
         "event_type": "SALE", "transaction_id": f"TEST-TXN-{uid(8)}",
         "store_id": "TEST-Q5", "pos_id": "TEST-Q5-POS",
@@ -79,7 +84,7 @@ def test_audit05_pos_without_a_token_never_opens_the_database(client, recorder):
     assert recorder.opened == 0
 
 
-def test_audit05_pos_with_a_bad_token_never_opens_the_database(client, recorder):
+def test_q5_pos_with_a_bad_token_never_opens_the_database(client, recorder):
     response = client.post(POS_URL, headers=bearer("not-a-token"), json={
         "event_type": "SALE", "transaction_id": f"TEST-TXN-{uid(8)}",
         "store_id": "TEST-Q5", "pos_id": "TEST-Q5-POS",
@@ -91,7 +96,7 @@ def test_audit05_pos_with_a_bad_token_never_opens_the_database(client, recorder)
     assert recorder.opened == 0
 
 
-def test_audit05_a_snapshot_over_the_limit_never_opens_the_database(client, recorder, db_session):
+def test_q5_a_snapshot_over_the_limit_never_opens_the_database(client, recorder, db_session):
     account = StaffUser(username=f"TEST-hq-{uid(8)}", full_name="Audit HQ",
                         role="HQ_OPERATOR", store_id=None)
     db_session.add(account)
@@ -104,4 +109,57 @@ def test_audit05_a_snapshot_over_the_limit_never_opens_the_database(client, reco
 
     assert response.status_code == 413, response.text
     assert response.json()["code"] == "PAYLOAD_TOO_LARGE"
+    assert recorder.opened == 0
+
+
+def test_q5_a_non_hq_token_is_403_without_reading_the_body(client, recorder, db_session):
+    """A Staff token must be refused by role, not by a 1 MB size check.
+
+    The size limit is enforced while the body is read, so a non-HQ caller had its
+    whole body read and was told 413 -- the wrong reason, and work done for a
+    request that was never allowed (review of PR #78).
+    """
+    account = StaffUser(username=f"TEST-staff-{uid(8)}", full_name="Q5 staff",
+                        role="STORE_STAFF", store_id=None)
+    db_session.add(account)
+    db_session.commit()
+    token = create_token(account.username, "Staff")
+
+    response = client.post(SNAPSHOT_URL, headers={**bearer(token),
+                                                  "Content-Type": "application/json"},
+                           content=b"x" * (MAX_SNAPSHOT_BYTES + 1))
+
+    assert response.status_code == 403, response.text
+    assert response.json()["code"] == "FORBIDDEN"
+    assert recorder.opened == 0
+
+
+def test_q5_a_small_body_from_a_non_hq_token_is_still_403(client, recorder, db_session):
+    """The role check does not depend on the size, and the DB is still untouched."""
+    account = StaffUser(username=f"TEST-staff-{uid(8)}", full_name="Q5 staff",
+                        role="STORE_STAFF", store_id=None)
+    db_session.add(account)
+    db_session.commit()
+    token = create_token(account.username, "Staff")
+
+    response = client.post(SNAPSHOT_URL, headers={**bearer(token),
+                                                  "Content-Type": "application/json"},
+                           content=b'{"store_id":"TEST-Q5"}')
+
+    assert response.status_code == 403, response.text
+    assert recorder.opened == 0
+
+
+def test_q5_an_admin_token_is_403_too(client, recorder, db_session):
+    account = StaffUser(username=f"TEST-admin-{uid(8)}", full_name="Q5 admin",
+                        role="ADMIN", store_id=None)
+    db_session.add(account)
+    db_session.commit()
+    token = create_token(account.username, "Admin")
+
+    response = client.post(SNAPSHOT_URL, headers={**bearer(token),
+                                                 "Content-Type": "application/json"},
+                           content=b"x" * (MAX_SNAPSHOT_BYTES + 1))
+
+    assert response.status_code == 403, response.text
     assert recorder.opened == 0

@@ -77,7 +77,7 @@ def sprint_backlog(tmp_path, openpyxl) -> Path:
     return tmp_path / "backlog.xlsx"
 
 
-def test_audit05_the_retest_row_is_printed(metrics, cases, tmp_path, capsys):
+def test_q5_the_retest_row_is_printed(metrics, cases, tmp_path, capsys):
     openpyxl = pytest.importorskip("openpyxl")
     backlog = sprint_backlog(tmp_path, openpyxl)
     assert metrics.main(["--cases", str(cases), "--backlog", str(backlog)]) == 0
@@ -88,7 +88,7 @@ def test_audit05_the_retest_row_is_printed(metrics, cases, tmp_path, capsys):
     assert "PB-20 (unknown, tester Cross tester): 4 pass, 2 fail" in printed
 
 
-def test_audit05_the_retest_row_is_counted_in_the_summary(metrics, cases, tmp_path, capsys):
+def test_q5_the_retest_row_is_counted_in_the_summary(metrics, cases, tmp_path, capsys):
     openpyxl = pytest.importorskip("openpyxl")
     backlog = sprint_backlog(tmp_path, openpyxl)
     metrics.main(["--cases", str(cases), "--backlog", str(backlog)])
@@ -98,7 +98,7 @@ def test_audit05_the_retest_row_is_counted_in_the_summary(metrics, cases, tmp_pa
     assert "Re-test Status across 1 sheet(s): 10 pass, 0 fail, 0 not implemented, 0 skipped of 10" in printed
 
 
-def test_audit05_a_sheet_without_a_retest_row_is_still_fine(metrics, tmp_path, capsys):
+def test_q5_a_sheet_without_a_retest_row_is_still_fine(metrics, tmp_path, capsys):
     openpyxl = pytest.importorskip("openpyxl")
     path = make_workbook(openpyxl, tmp_path / "cases.xlsx", {
         "PB-30 alerts": ((5, 5, 0, 0, 0), None),
@@ -112,7 +112,7 @@ def test_audit05_a_sheet_without_a_retest_row_is_still_fine(metrics, tmp_path, c
     assert "No sheet has a Re-test Status row yet." in printed
 
 
-def test_audit05_a_failed_retest_still_counts_as_a_failed_sheet(metrics, tmp_path, capsys):
+def test_q5_a_failed_retest_still_counts_as_a_failed_sheet(metrics, tmp_path, capsys):
     openpyxl = pytest.importorskip("openpyxl")
     path = make_workbook(openpyxl, tmp_path / "cases.xlsx", {
         "PB-40 sync": ((4, 4, 0, 0, 0), (4, 2, 2, 0, 0)),
@@ -123,3 +123,42 @@ def test_audit05_a_failed_retest_still_counts_as_a_failed_sheet(metrics, tmp_pat
     printed = capsys.readouterr().out
     assert "Sheets with failed cases (a GitHub issue each):" in printed
     assert "  PB-40 sync" in printed
+
+
+def test_q5_a_sheet_that_passed_its_retest_is_not_listed_as_failed(metrics, cases, tmp_path, capsys):
+    """The reviewer's finding: PB-10 failed once and passed the re-test.
+
+    ``Re-test Status`` is the later run, so it decides. Counting a sheet as
+    outstanding because its *first* pass had failures asks for a GitHub issue
+    that nobody should open (review of PR #78).
+    """
+    openpyxl = pytest.importorskip("openpyxl")
+    backlog = sprint_backlog(tmp_path, openpyxl)
+
+    metrics.main(["--cases", str(cases), "--backlog", str(backlog)])
+    printed = capsys.readouterr().out
+
+    assert "PB-10 (Sprint 3, tester Cross tester): 8 pass, 2 fail" in printed
+    assert "    Re-test Status: 10 pass, 0 fail" in printed
+    # PB-20 has no re-test row and still fails, so it is the only outstanding one.
+    assert "Sheets with failed cases (a GitHub issue each):" in printed
+    assert "  PB-20 stock" in printed
+    assert "  PB-10 auth" not in printed
+
+
+def test_q5_the_failed_list_comes_from_the_latest_count_row(metrics, tmp_path, capsys):
+    """``failed_sheets`` picks the re-test row when there is one."""
+    openpyxl = pytest.importorskip("openpyxl")
+    path = make_workbook(openpyxl, tmp_path / "cases.xlsx", {
+        "PB-50 fixed": ((3, 1, 2, 0, 0), (3, 3, 0, 0, 0)),
+        "PB-51 broken": ((3, 3, 0, 0, 0), (3, 1, 2, 0, 0)),
+        "PB-52 no retest": ((3, 2, 1, 0, 0), None),
+        "PB-53 clean": ((3, 3, 0, 0, 0), (3, 3, 0, 0, 0)),
+    })
+    backlog = sprint_backlog(tmp_path, openpyxl)
+
+    metrics.main(["--cases", str(path), "--backlog", str(backlog)])
+    printed = capsys.readouterr().out
+
+    listed = [line.strip() for line in printed.splitlines() if line.startswith("  PB-")]
+    assert listed == ["PB-51 broken", "PB-52 no retest"]

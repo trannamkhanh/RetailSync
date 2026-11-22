@@ -50,11 +50,16 @@ async def read_snapshot_body(request: Request,
                              claims: dict = Depends(bearer_claims)) -> SnapshotBody:
     """The body, read after the token check and before the database session.
 
-    ``claims`` is only here to order the token check first; FastAPI resolves
-    dependencies in declaration order, so a snapshot over the limit is answered
-    413 without ``get_db`` ever opening a session (audit #5).
+    The token's role is checked here too (review of PR #78): a valid token for
+    another role is refused with the same 403 `require_role` would give, before
+    the stream is read. Without this, a 1 MB body from a Staff token was read in
+    full and answered 413 instead of 403, which is both more work and the wrong
+    reason. This is only an ordering check: `require_role("HQ")` still compares
+    the token against the account in the database, so a token claiming HQ for an
+    account that is not an HQ operator is still refused.
     """
-    _ = claims
+    if claims.get("role") != "HQ":
+        raise ApiError(403, "FORBIDDEN", "This account may not perform this action.")
     return await _read_limited(request)
 
 
@@ -69,10 +74,11 @@ async def receive_hq_snapshot(body: SnapshotBody = Depends(read_snapshot_body),
     body over 1 MB is refused with 413 ``PAYLOAD_TOO_LARGE`` and is not audited
     (DS-04).
 
-    The order is deliberate (audit #5): the bearer token is checked, then the
-    body is read and its size enforced, then the account is looked up, and only
-    for an accepted body does the request take a pooled connection. A refused
-    request therefore never holds one.
+    The order is deliberate (review of PR #78): the bearer token is checked and
+    its role refused if it is not HQ, then the body is read and its size
+    enforced, then the account is looked up, and only for an accepted body does
+    the request take a pooled connection. A refused request therefore never
+    holds one, and never has its body read.
 
     The audit row is written in the request's own transaction, which the router
     commits before the rejection is raised, so it is kept even though the call

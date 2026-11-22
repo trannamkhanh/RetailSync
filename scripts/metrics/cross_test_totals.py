@@ -127,6 +127,22 @@ def _retest_line(label: str, counts: dict[str, int]) -> str:
     return f"{label}Re-test Status: {_line('', counts)}"
 
 
+def failed_sheets(sheets: list[dict]) -> list[str]:
+    """Sheets that still have a failed case, by their own latest count row.
+
+    ``Re-test Status`` is the later run, so where a sheet has one it decides:
+    a case that failed the first pass and passed the re-test is fixed, not
+    outstanding, and listing it would ask for a GitHub issue nobody should open
+    (review of PR #78). A sheet without a re-test row is judged by ``Status``.
+    """
+    outstanding: list[str] = []
+    for item in sheets:
+        counted = item["retest"] if item["retest"] is not None else item["status"]
+        if counted["fail"]:
+            outstanding.append(item["sheet"])
+    return outstanding
+
+
 def print_report(sheets: list[dict]) -> None:
     per_sprint: dict[str, dict[str, int]] = {}
     per_sprint_retest: dict[str, dict[str, int]] = {}
@@ -157,12 +173,11 @@ def print_report(sheets: list[dict]) -> None:
     else:
         print("No sheet has a Re-test Status row yet.")
 
-    failed = [item["sheet"] for item in sheets
-              if item["status"]["fail"] or (item["retest"] or {}).get("fail", 0)]
+    outstanding = failed_sheets(sheets)
     print()
-    if failed:
+    if outstanding:
         print("Sheets with failed cases (a GitHub issue each):")
-        for title in failed:
+        for title in outstanding:
             print(f"  {title}")
     else:
         print("No failed cases.")
