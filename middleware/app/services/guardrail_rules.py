@@ -99,14 +99,15 @@ def update_rule(session: Session, rule_id: int, threshold: Decimal, is_active: b
         ApiError(422, "VALIDATION_ERROR"): the threshold does not fit the rule type,
             or it would break the tightening rule.
     """
-    rule = repository.get_rule(session, rule_id)
+    rules = repository.list_rules_for_update(session)
+    rule = next((item for item in rules if item.rule_id == rule_id), None)
     if rule is None:
         raise ApiError(404, "NOT_FOUND", f"Guardrail rule {rule_id} does not exist.")
     if threshold == 0:
         # A JSON -0 reaches us as Decimal("-0.0"); store it as plain 0.
         threshold = Decimal("0")
     _validate_threshold(rule.rule_type, threshold)
-    _check_tightening(repository.list_rules(session), rule, threshold, is_active)
+    _check_tightening(rules, rule, threshold, is_active)
 
     old_threshold, old_active = rule.threshold, rule.is_active
     rule.threshold = threshold

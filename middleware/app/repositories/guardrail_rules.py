@@ -18,6 +18,20 @@ def list_rules(session: Session) -> list[GuardrailRule]:
     ))
 
 
+def list_rules_for_update(session: Session) -> list[GuardrailRule]:
+    """Lock all guardrail rules in primary-key order until the transaction ends.
+
+    Uses ``UPDLOCK, HOLDLOCK`` so parallel rule updates serialize without
+    deadlocking and preserve DS-07's category tightening invariant.
+    """
+    return list(session.scalars(
+        select(GuardrailRule)
+        .with_hint(GuardrailRule.__table__, "WITH (UPDLOCK, HOLDLOCK)")
+        .order_by(GuardrailRule.rule_id)
+        .execution_options(populate_existing=True)
+    ))
+
+
 def get_rule(session: Session, rule_id: int) -> GuardrailRule | None:
     return session.get(GuardrailRule, rule_id)
 
