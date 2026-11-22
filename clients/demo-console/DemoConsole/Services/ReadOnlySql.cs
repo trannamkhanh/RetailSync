@@ -170,7 +170,22 @@ public sealed class ReadOnlySql
         finally
         {
             // Nothing is ever written; rolling back makes that hold even by mistake.
-            await transaction.RollbackAsync().ConfigureAwait(false);
+            // When the connection itself failed, RollbackAsync throws a second
+            // exception and hides the one that says what went wrong (audit #17), so
+            // the rollback is attempted only on a live connection and its own
+            // failure is swallowed once the original error is already on its way.
+            if (connection.State == System.Data.ConnectionState.Open)
+            {
+                try
+                {
+                    await transaction.RollbackAsync().ConfigureAwait(false);
+                }
+                catch (Exception error) when (error is SqlException or InvalidOperationException)
+                {
+                    // Keep the original exception; the transaction is gone with the
+                    // connection anyway, so nothing can be committed.
+                }
+            }
         }
     }
 }

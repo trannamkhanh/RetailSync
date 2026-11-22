@@ -107,6 +107,10 @@ public static class ServerCertificateValidator
         foreach (var address in addresses.OrderBy(
                      address => address.AddressFamily == AddressFamily.InterNetwork ? 0 : 1))
         {
+            // The stream owns the socket only once it is handed back successfully;
+            // until then every exit -- including an exception type this code did not
+            // list -- has to dispose it, or a cancelled handshake leaks a handle per
+            // attempt (review of PR #79).
             var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp)
             {
                 NoDelay = true,
@@ -115,12 +119,24 @@ public static class ServerCertificateValidator
             {
                 await socket.ConnectAsync(new IPEndPoint(address, port), cancellationToken)
                     .ConfigureAwait(false);
-                return new NetworkStream(socket, ownsSocket: true);
+                var stream = new NetworkStream(socket, ownsSocket: true);
+                socket = null!;
+                return stream;
+            }
+            catch (OperationCanceledException error)
+            {
+                // The caller stopped waiting: trying the next address would only
+                // sleep through another cancellation.
+                lastError = error;
+                throw;
             }
             catch (Exception error) when (error is SocketException or IOException)
             {
-                socket.Dispose();
                 lastError = error;
+            }
+            finally
+            {
+                socket?.Dispose();
             }
         }
 
