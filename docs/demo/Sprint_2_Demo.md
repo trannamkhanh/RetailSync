@@ -25,8 +25,8 @@ docker compose up -d --force-recreate --wait middleware pos-gateway
 dotnet build clients/demo-pos/DemoPos/DemoPos.csproj -c Debug
 
 # 5. Chạy smoke check hai lần liên tiếp, cả hai phải PASS
-docker compose run --rm --volume "${PWD}:/repo" --workdir /repo middleware python scripts/demo/sprint2_smoke.py
-docker compose run --rm --volume "${PWD}:/repo" --workdir /repo middleware python scripts/demo/sprint2_smoke.py
+docker compose run --rm --no-deps --volume "${PWD}:/repo" --workdir /repo middleware python scripts/demo/sprint2_smoke.py
+docker compose run --rm --no-deps --volume "${PWD}:/repo" --workdir /repo middleware python scripts/demo/sprint2_smoke.py
 
 # 6. Chạy smoke hai lần làm tồn kho giảm, nên reset lại lần cuối để demo bắt đầu từ 40/25/15
 powershell -ExecutionPolicy Bypass -File scripts/demo/reset_demo_db.ps1

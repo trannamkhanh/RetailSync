@@ -94,8 +94,8 @@ def bearer_claims(credentials: HTTPAuthorizationCredentials | None = Depends(_be
     Routers that want to refuse a bad token before they take a pooled connection
     declare this dependency ahead of ``get_db``: FastAPI resolves dependencies in
     the order they are declared, so a missing or invalid token is answered 401
-    without opening a session (audit #5). ``require_role`` uses it too, and the
-    per-request dependency cache means the token is decoded once.
+    without opening a session (audit minor, POS/API group). ``require_role`` uses
+    it too, and the per-request dependency cache means the token is decoded once.
     """
     if credentials is None:
         raise _unauthorized()

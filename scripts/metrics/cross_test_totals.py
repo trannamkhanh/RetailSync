@@ -4,13 +4,14 @@ Reads every ``PB-*`` sheet of ``GROUP_08_Test case.xlsx``, takes the Status and
 Re-test Status counts (TOTAL, PASS, FAIL, Not Implemented, SKIPPED) that the
 four cross-testers fill in, maps each sheet to its sprint through the sprint
 backlog of ``C1SE_24_RetailSync_Sprint_Backlog_v1.4.xlsx``, and prints the
-totals per sprint and per backlog item for the report. Since audit #5 the
-Re-test Status row is printed and counted too: a case that failed and was then
-fixed shows a FAIL under Status and a PASS under Re-test Status, and a report
-that only counted Status would still call it a failure.
+totals per sprint and per backlog item for the report. Since the minor POS/API
+group the Re-test Status row is printed and counted too, and it decides the
+outstanding list: a case that failed and was then fixed shows a FAIL under Status
+and a PASS under Re-test Status, and a report that only counted Status would still
+call it a failure.
 
-Sheets with a FAIL count in Status or in Re-test Status are listed, because
-every failed case needs a GitHub issue.
+Sheets whose later count row still has a FAIL are listed, because every failed
+case that is not fixed needs a GitHub issue.
 
 Run it with any Python that has openpyxl (``pip install openpyxl``), from the
 repository root:

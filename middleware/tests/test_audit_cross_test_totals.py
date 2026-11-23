@@ -1,4 +1,4 @@
-"""Audit #5: scripts/metrics/cross_test_totals.py reports Re-test Status too.
+"""Audit minor (POS/API group): scripts/metrics/cross_test_totals.py reports Re-test Status too.
 
 The workbook has two count rows per sheet: ``Status`` (what the first pass did)
 and ``Re-test Status`` (what the second pass did). The script read both but only
@@ -77,7 +77,7 @@ def sprint_backlog(tmp_path, openpyxl) -> Path:
     return tmp_path / "backlog.xlsx"
 
 
-def test_q5_the_retest_row_is_printed(metrics, cases, tmp_path, capsys):
+def test_audit_minor_the_retest_row_is_printed(metrics, cases, tmp_path, capsys):
     openpyxl = pytest.importorskip("openpyxl")
     backlog = sprint_backlog(tmp_path, openpyxl)
     assert metrics.main(["--cases", str(cases), "--backlog", str(backlog)]) == 0
@@ -88,7 +88,7 @@ def test_q5_the_retest_row_is_printed(metrics, cases, tmp_path, capsys):
     assert "PB-20 (unknown, tester Cross tester): 4 pass, 2 fail" in printed
 
 
-def test_q5_the_retest_row_is_counted_in_the_summary(metrics, cases, tmp_path, capsys):
+def test_audit_minor_the_retest_row_is_counted_in_the_summary(metrics, cases, tmp_path, capsys):
     openpyxl = pytest.importorskip("openpyxl")
     backlog = sprint_backlog(tmp_path, openpyxl)
     metrics.main(["--cases", str(cases), "--backlog", str(backlog)])
@@ -98,7 +98,7 @@ def test_q5_the_retest_row_is_counted_in_the_summary(metrics, cases, tmp_path, c
     assert "Re-test Status across 1 sheet(s): 10 pass, 0 fail, 0 not implemented, 0 skipped of 10" in printed
 
 
-def test_q5_a_sheet_without_a_retest_row_is_still_fine(metrics, tmp_path, capsys):
+def test_audit_minor_a_sheet_without_a_retest_row_is_still_fine(metrics, tmp_path, capsys):
     openpyxl = pytest.importorskip("openpyxl")
     path = make_workbook(openpyxl, tmp_path / "cases.xlsx", {
         "PB-30 alerts": ((5, 5, 0, 0, 0), None),
@@ -112,7 +112,7 @@ def test_q5_a_sheet_without_a_retest_row_is_still_fine(metrics, tmp_path, capsys
     assert "No sheet has a Re-test Status row yet." in printed
 
 
-def test_q5_a_failed_retest_still_counts_as_a_failed_sheet(metrics, tmp_path, capsys):
+def test_audit_minor_a_failed_retest_still_counts_as_a_failed_sheet(metrics, tmp_path, capsys):
     openpyxl = pytest.importorskip("openpyxl")
     path = make_workbook(openpyxl, tmp_path / "cases.xlsx", {
         "PB-40 sync": ((4, 4, 0, 0, 0), (4, 2, 2, 0, 0)),
@@ -125,7 +125,8 @@ def test_q5_a_failed_retest_still_counts_as_a_failed_sheet(metrics, tmp_path, ca
     assert "  PB-40 sync" in printed
 
 
-def test_q5_a_sheet_that_passed_its_retest_is_not_listed_as_failed(metrics, cases, tmp_path, capsys):
+def test_audit_minor_a_sheet_that_passed_its_retest_is_not_listed_as_failed(
+        metrics, cases, tmp_path, capsys):
     """The reviewer's finding: PB-10 failed once and passed the re-test.
 
     ``Re-test Status`` is the later run, so it decides. Counting a sheet as
@@ -146,7 +147,7 @@ def test_q5_a_sheet_that_passed_its_retest_is_not_listed_as_failed(metrics, case
     assert "  PB-10 auth" not in printed
 
 
-def test_q5_the_failed_list_comes_from_the_latest_count_row(metrics, tmp_path, capsys):
+def test_audit_minor_the_failed_list_comes_from_the_latest_count_row(metrics, tmp_path, capsys):
     """``failed_sheets`` picks the re-test row when there is one."""
     openpyxl = pytest.importorskip("openpyxl")
     path = make_workbook(openpyxl, tmp_path / "cases.xlsx", {

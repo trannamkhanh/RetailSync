@@ -23,7 +23,7 @@ and leaves the database as it was.
 
 Run it in the middleware image from the repository root:
 
-    docker compose run --rm --volume "${PWD}:/repo" --workdir /repo middleware python scripts/metrics/near_expiry_accuracy.py --db RTS_DB_TEST
+    docker compose run --rm --no-deps --volume "${PWD}:/repo" --workdir /repo middleware python scripts/metrics/near_expiry_accuracy.py --db RTS_DB_TEST
 
 The job runs for the dataset's store only, as one per-store transaction of the
 daily job. Exit 1 when any alert is missed or false, so the report can cite a

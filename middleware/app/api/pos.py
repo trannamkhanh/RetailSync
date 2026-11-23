@@ -73,8 +73,8 @@ def bounded_lock_waits(claims: dict[str, Any] = Depends(bearer_claims),
 
     The bearer token is checked first, so a request with a missing or invalid
     token never takes a connection or runs the ``SET LOCK_TIMEOUT`` statements
-    (audit #5); the per-request dependency cache means the token is decoded once.
-    ``claims`` is only here to order that check, not read.
+    (audit minor, POS/API group); the per-request dependency cache means the token
+    is decoded once. ``claims`` is only here to order that check, not read.
 
     Yields the restore function: the route calls it before it commits or rolls
     back. On a 401, 403 or error raised before that, it runs here instead,

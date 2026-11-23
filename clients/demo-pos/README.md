@@ -63,7 +63,7 @@ Kết quả: `.certs/ca.crt`, `.certs/server.crt|key`, và 6 cặp `.certs/pos/P
 ```powershell
 docker compose build middleware
 docker compose run --rm --no-deps --volume "${PWD}:/repo:ro" --workdir /repo middleware python scripts/register_pos_certificates.py
-docker compose run --rm --volume "${PWD}:/repo" --workdir /repo middleware python scripts/issue_demo_tokens.py
+docker compose run --rm --no-deps --volume "${PWD}:/repo" --workdir /repo middleware python scripts/issue_demo_tokens.py
 ```
 
 Lệnh đăng ký đọc `DB_NAME` trong `.env`; nếu đổi database demo, **phải chạy lại lệnh này**.

@@ -1,4 +1,4 @@
-"""Phase 8 Q5 (minor, stock query): one statement, `?sku=` filtered in SQL.
+"""Audit minor (POS/API group, stock query): one statement, `?sku=` filtered in SQL.
 
 ``stock_lines`` read every batch of the store and then kept the requested SKU
 from the dictionary in Python, so a single-SKU lookup on a large store read every
@@ -12,7 +12,7 @@ no stock row still answers quantity 0).
 
 The name carries no audit number: this is the unnumbered "Minor backend/POS"
 group of PR Q5, not audit finding #5, which is Kiệt's `SYNC_SEND_POLL_SECONDS`
-work and lives in `test_sync_sender.py` under `test_q5_*` (review of PR #78).
+work and lives in `test_sync_sender.py` under `test_audit05_*` (review of PR #78).
 """
 
 from __future__ import annotations
@@ -83,7 +83,7 @@ class StatementCounter:
             self.statements.append(" ".join(statement.split()))
 
 
-def test_q5_one_sku_is_one_statement_however_big_the_store(db_session):
+def test_audit_minor_one_sku_is_one_statement_however_big_the_store(db_session):
     shop = make_shop(db_session)
     for index in range(30):
         extra = f"TEST-SKU-X{index:02d}{uid(3)}"
@@ -102,7 +102,7 @@ def test_q5_one_sku_is_one_statement_however_big_the_store(db_session):
     assert (lines[0][0], lines[0][1]) == (shop.sku_a, 5)
 
 
-def test_q5_the_whole_store_is_one_statement(db_session):
+def test_audit_minor_the_whole_store_is_one_statement(db_session):
     shop = make_shop(db_session)
 
     with StatementCounter(db_session) as counter:
@@ -112,7 +112,7 @@ def test_q5_the_whole_store_is_one_statement(db_session):
     assert [(line[0], line[1]) for line in lines] == [(shop.sku_a, 5), (shop.sku_b, 7)]
 
 
-def test_q5_one_sku_does_not_read_another_skus_batches(db_session):
+def test_audit_minor_one_sku_does_not_read_another_skus_batches(db_session):
     shop = make_shop(db_session)
 
     with StatementCounter(db_session) as counter:
@@ -125,7 +125,7 @@ def test_q5_one_sku_does_not_read_another_skus_batches(db_session):
     assert "dbo.product" in statement.lower()
 
 
-def test_q5_the_single_sku_answer_matches_the_list_answer(db_session):
+def test_audit_minor_the_single_sku_answer_matches_the_list_answer(db_session):
     shop = make_shop(db_session)
 
     listed = {line[0]: line for line in stock_query.stock_lines(db_session, shop.store_id)}
@@ -136,7 +136,7 @@ def test_q5_the_single_sku_answer_matches_the_list_answer(db_session):
     assert [tuple(batch[1:]) for batch in single[2]] == [(TODAY + timedelta(days=2), 7)]
 
 
-def test_q5_a_catalogue_sku_without_stock_still_returns_zero(db_session):
+def test_audit_minor_a_catalogue_sku_without_stock_still_returns_zero(db_session):
     shop = make_shop(db_session)
     empty_sku = f"TEST-SKU-E{uid(4)}"
     db_session.add(Product(sku=empty_sku, barcode=f"BC-{empty_sku}", name="No stock",
@@ -147,7 +147,7 @@ def test_q5_a_catalogue_sku_without_stock_still_returns_zero(db_session):
         (empty_sku, 0, [])]
 
 
-def test_q5_a_sold_out_sku_keeps_its_inventory_row(db_session):
+def test_audit_minor_a_sold_out_sku_keeps_its_inventory_row(db_session):
     """The batch filter is in the JOIN, so a line with no batches still appears."""
     shop = make_shop(db_session)
     db_session.execute(
@@ -163,7 +163,7 @@ def test_q5_a_sold_out_sku_keeps_its_inventory_row(db_session):
     assert listed[shop.sku_a] == single
 
 
-def test_q5_an_unknown_sku_is_still_404(db_session):
+def test_audit_minor_an_unknown_sku_is_still_404(db_session):
     shop = make_shop(db_session)
 
     with pytest.raises(Exception) as raised:
@@ -172,7 +172,7 @@ def test_q5_an_unknown_sku_is_still_404(db_session):
     assert getattr(raised.value, "status", None) == 404
 
 
-def test_q5_the_quantity_and_its_batches_come_from_the_same_read(db_session, monkeypatch):
+def test_audit_minor_the_quantity_and_its_batches_come_from_the_same_read(db_session, monkeypatch):
     """A sale between the old two SELECTs could disagree; one statement cannot.
 
     The old code called ``list_store_stock`` and ``list_store_batches``

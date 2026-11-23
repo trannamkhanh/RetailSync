@@ -3,7 +3,7 @@
 Run it in the middleware container, against the running demo stack, from the
 repository root:
 
-    docker compose run --rm --volume "${PWD}:/repo" --workdir /repo ^
+    docker compose run --rm --no-deps --volume "${PWD}:/repo" --workdir /repo ^
         middleware python scripts/demo/sprint2_smoke.py
 
 It talks to the real ports: Staff, Admin and Auditor through the middleware on

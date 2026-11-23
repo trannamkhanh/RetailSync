@@ -8,7 +8,7 @@ batch for each store. The generator leaves inventory, batches and movements alon
 From the repository root in PowerShell, with the demo database migrated and seeded:
 
 ```powershell
-docker compose run --rm --volume "${PWD}:/repo" --workdir /repo/tools/history-generator --env PYTHONPATH=/repo/middleware --env PYTHONDONTWRITEBYTECODE=1 middleware python -m history_generator --database RTS_DB_DEMO --days 90 --seed 42
+docker compose run --rm --no-deps --volume "${PWD}:/repo" --workdir /repo/tools/history-generator --env PYTHONPATH=/repo/middleware --env PYTHONDONTWRITEBYTECODE=1 middleware python -m history_generator --database RTS_DB_DEMO --days 90 --seed 42
 ```
 
 The window ends before today's business date. Pass `--as-of YYYY-MM-DD` to pin
@@ -16,8 +16,12 @@ that date. The same catalogue, active terminals, date, days and seed reproduce
 the same transaction data. A reload replaces the tool's history for those stores
 in one transaction.
 
-Run the SQL Server tests after migrating `RTS_DB_TEST`:
+Run the SQL Server tests after migrating `RTS_DB_TEST`. The tests need
+`TEST_DB_NAME` to be exactly `RTS_DB_TEST`: the loader accepts only `RTS_DB_DEMO` or
+`RTS_DB_TEST`, and the suite refuses anything else rather than write to a database
+it did not expect. Pass it explicitly, because `--no-deps` means the `migrate`
+service does not run first and the database the tests use is the one you name:
 
 ```powershell
-docker compose run --rm --volume "${PWD}:/repo" --workdir /repo/tools/history-generator --env PYTHONPATH=/repo/middleware:/repo/tools/history-generator --env PYTHONDONTWRITEBYTECODE=1 middleware sh -c 'pip install -q -r /repo/middleware/requirements-dev.txt && python -m pytest -p no:cacheprovider -p tests.conftest -q tests'
+docker compose run --rm --no-deps --volume "${PWD}:/repo" --workdir /repo/tools/history-generator --env PYTHONPATH=/repo/middleware:/repo/tools/history-generator --env PYTHONDONTWRITEBYTECODE=1 --env TEST_DB_NAME=RTS_DB_TEST middleware sh -c 'pip install -q -r /repo/middleware/requirements-dev.txt && python -m pytest -p no:cacheprovider -p tests.conftest -q tests'
 ```

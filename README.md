@@ -257,7 +257,7 @@ The HQ demo tests run against `RTS_HQ_TEST`, never `RTS_HQ`:
 
 ```powershell
 docker compose run --rm -e HQ_DB_NAME=RTS_HQ_TEST migrate
-docker compose run --rm -e HQ_DB_NAME=RTS_HQ_TEST --volume "${PWD}/hq-demo:/app" --workdir /app hq-demo sh -c 'pip install -q -r requirements-dev.txt && python -m pytest -p no:cacheprovider -q'
+docker compose run --rm --no-deps -e HQ_DB_NAME=RTS_HQ_TEST --volume "${PWD}/hq-demo:/app" --workdir /app hq-demo sh -c 'pip install -q -r requirements-dev.txt && python -m pytest -p no:cacheprovider -q'
 ```
 
 ## Working rules
@@ -370,7 +370,7 @@ whole repository: the tests read `database/seed` and `scripts`, which are
 outside `middleware/`.
 
 ```powershell
-docker compose run --rm --volume "${PWD}:/repo" --workdir /repo/middleware --env PYTHONDONTWRITEBYTECODE=1 middleware sh -c 'pip install -q -r requirements-dev.txt && python -m pytest -p no:cacheprovider -q'
+docker compose run --rm --no-deps --volume "${PWD}:/repo" --workdir /repo/middleware --env PYTHONDONTWRITEBYTECODE=1 --env TEST_DB_NAME=RTS_DB_TEST --env DB_NAME=RTS_DB_NOWRITE middleware sh -c 'pip install -q -r requirements-dev.txt && python -m pytest -p no:cacheprovider -q'
 ```
 
 Integration contract: import `get_db`, `SessionLocal`, and `Base` from

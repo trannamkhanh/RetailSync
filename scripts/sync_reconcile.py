@@ -16,7 +16,7 @@ opening are listed and not checked by rule 1. The script only reads.
 
 Run it in the middleware image from the repository root:
 
-    docker compose run --rm --volume "${PWD}:/repo" --workdir /repo middleware python scripts/sync_reconcile.py --db RTS_DB_DEMO --hq-db RTS_HQ
+    docker compose run --rm --no-deps --volume "${PWD}:/repo" --workdir /repo middleware python scripts/sync_reconcile.py --db RTS_DB_DEMO --hq-db RTS_HQ
 
 It refuses RTS_DB, the development database, unless ``--allow-dev`` is given.
 """
