@@ -21,7 +21,10 @@ public sealed class AutomaticSales
 
     private readonly Random _random;
 
-    public AutomaticSales(IReadOnlyList<ProductConfig> catalogue, int seed)
+    private readonly Func<ProductConfig, decimal> _priceSelector;
+
+    public AutomaticSales(IReadOnlyList<ProductConfig> catalogue, int seed,
+                          Func<ProductConfig, decimal>? priceSelector = null)
     {
         if (catalogue is null)
         {
@@ -35,6 +38,7 @@ public sealed class AutomaticSales
 
         _catalogue = catalogue;
         _random = new Random(seed);
+        _priceSelector = priceSelector ?? (static product => product.UnitPrice);
         Seed = seed;
     }
 
@@ -56,7 +60,7 @@ public sealed class AutomaticSales
             {
                 Sku = product.Sku,
                 Quantity = _random.Next(1, MostQuantityPerItem + 1),
-                UnitPrice = product.UnitPrice,
+                UnitPrice = _priceSelector(product),
             });
         }
 

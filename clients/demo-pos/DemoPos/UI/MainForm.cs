@@ -17,6 +17,9 @@ public sealed class MainForm : Form
     private readonly RequestLog _requestLog = new();
     private readonly Dictionary<string, List<TxnRecord>> _historyByPos = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, TerminalClient> _liveClients = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, PosDiscountClient> _discountClients = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, PosDiscountBook> _liveDiscountsByPos = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, PosDiscountBook> _mockDiscountsByPos = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ClientCertificateInfo> _certificates = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, TerminalRow> _terminalRows = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ProductConfig> _productConfigs;
@@ -32,6 +35,7 @@ public sealed class MainForm : Form
     private readonly System.Windows.Forms.Timer _monitorTimer = new() { Interval = 2000 };
     private readonly System.Windows.Forms.Timer _statusTimer = new() { Interval = 5000 };
     private readonly System.Windows.Forms.Timer _queueTimer = new() { Interval = 5000 };
+    private readonly System.Windows.Forms.Timer _discountTimer = new() { Interval = DiscountPollIntervalMs };
     private readonly System.Windows.Forms.Timer _autoTimer = new();
     private readonly CheckBox _autoToggle = new();
     private readonly NumericUpDown _autoInterval = new();
@@ -40,10 +44,12 @@ public sealed class MainForm : Form
     private readonly Dictionary<string, DateTime> _retryAfter = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _queueGate = new(1, 1);
     private readonly ToolStripStatusLabel _queueStatus = new();
+    private readonly ToolStripStatusLabel _discountStatus = new();
 
     private X509Certificate2? _authority;
     private MonitorApiClient? _monitorClient;
     private GatewayProbe? _gatewayProbe;
+    private CancellationTokenSource? _discountCts = new();
     private bool _mockMode;
     private bool _busy;
     private bool _autoSending;
@@ -53,11 +59,15 @@ public sealed class MainForm : Form
     private bool _monitorRefreshPending;
     private bool _statusBusy;
     private bool _statusRefreshPending;
+    private bool _discountBusy;
+    private bool _discountRefreshPending;
     private bool _closing;
     private bool? _linkUp;
     private int _modeEpoch;
     private int _terminalEpoch;
     private Font? _terminalBoldFont;
+    private Font? _gridStrikeoutFont;
+    private Font? _gridDiscountBoldFont;
     private PendingRequest? _pendingRetry;
 
     private readonly ComboBox _terminalCombo = new();
@@ -137,6 +147,7 @@ public sealed class MainForm : Form
         }
 
         ApplyMode();
+        ApplyCurrentDiscountsToUi();
         RefreshProducts();
         UpdateCartTotal();
         RefreshLogView();
@@ -144,6 +155,7 @@ public sealed class MainForm : Form
         _monitorTimer.Start();
         _statusTimer.Start();
         _queueTimer.Start();
+        _discountTimer.Start();
 
         Shown += async (_, _) =>
         {
@@ -152,6 +164,7 @@ public sealed class MainForm : Form
                 return;
             }
 
+            var discountTask = RefreshDiscountsAsync();
             await RefreshStatusAsync();
             if (_closing || IsDisposed)
             {
@@ -165,9 +178,17 @@ public sealed class MainForm : Form
             }
 
             await DrainQueuesAsync();
+            if (_closing || IsDisposed)
+            {
+                return;
+            }
+
+            await discountTask;
         };
         FormClosing += OnFormClosing;
     }
+
+    public const int DiscountPollIntervalMs = 60_000;
 
     internal TabControl Tabs => _tabs;
 
@@ -221,6 +242,18 @@ public sealed class MainForm : Form
 
     internal int HistoryCount => _historyView.Count;
 
+    internal IReadOnlyList<TxnRecord> CurrentHistory => _historyView;
+
+    internal MockPosBackend MockBackend => _mockBackend;
+
+    internal Func<DateTime> UtcClock { get; set; } = () => DateTime.UtcNow;
+
+    internal Func<DateTime> LocalClock { get; set; } = () => DateTime.Now;
+
+    internal Func<TerminalConfig, HttpMessageHandler>? DiscountHandlerFactory { get; set; }
+
+    internal string DiscountStatusText => _discountStatus.Text ?? string.Empty;
+
     internal Action<string, string>? WarningPresenter { get; set; }
 
     internal Func<TxnRecord, (bool Confirmed, string Sku, int Quantity)>? ReturnPrompt { get; set; }
@@ -252,7 +285,14 @@ public sealed class MainForm : Form
             var epoch = _modeEpoch;
             _config.UseMock = true;
             ApplyMode();
+            ApplyCurrentDiscountsToUi();
             _resultPanel.ShowInfo("Đang ở chế độ MOCK — dữ liệu không đến middleware.");
+            await RefreshDiscountsAsync();
+            if (_closing || IsDisposed || !_mockMode || _modeEpoch != epoch)
+            {
+                return;
+            }
+
             await RefreshMonitorAsync();
             if (_closing || IsDisposed || !_mockMode || _modeEpoch != epoch)
             {
@@ -287,7 +327,9 @@ public sealed class MainForm : Form
         var liveEpoch = _modeEpoch;
         _config.UseMock = false;
         ApplyMode();
+        ApplyCurrentDiscountsToUi();
         _resultPanel.ShowInfo("Đang ở chế độ LIVE — mọi request đi vào middleware thật.");
+        var discountTask = RefreshDiscountsAsync();
         await RefreshMonitorAsync();
         if (_closing || IsDisposed || _mockMode || _modeEpoch != liveEpoch)
         {
@@ -295,6 +337,12 @@ public sealed class MainForm : Form
         }
 
         await RefreshStatusAsync();
+        if (_closing || IsDisposed || _mockMode || _modeEpoch != liveEpoch)
+        {
+            return;
+        }
+
+        await discountTask;
     }
 
     private void BuildUi()
@@ -350,6 +398,7 @@ public sealed class MainForm : Form
         _statusStrip.SizingGrip = false;
         _middlewareStatus.Text = "Middleware: —";
         _gatewayStatus.Text = "Gateway: —";
+        _discountStatus.Text = "Giảm giá: —";
         _queueStatus.Text = "Chờ gửi: 0 · Bị từ chối: 0 · Link: —";
         _filesStatus.Text = "CA: — · tokens: —";
         _modeStatus.Text = "LIVE";
@@ -361,6 +410,8 @@ public sealed class MainForm : Form
             _middlewareStatus,
             new ToolStripSeparator(),
             _gatewayStatus,
+            new ToolStripSeparator(),
+            _discountStatus,
             new ToolStripSeparator(),
             _queueStatus,
             new ToolStripSeparator(),
@@ -408,10 +459,11 @@ public sealed class MainForm : Form
         productLayout.Controls.Add(search, 0, 0);
 
         ConfigureGrid(_productGrid);
-        AddColumn(_productGrid, nameof(ProductRow.Sku), "SKU", 70);
-        AddColumn(_productGrid, nameof(ProductRow.Name), "Tên", 210);
-        AddColumn(_productGrid, nameof(ProductRow.Barcode), "Barcode", 110);
-        AddColumn(_productGrid, nameof(ProductRow.UnitPriceText), "Giá", 70);
+        AddColumn(_productGrid, nameof(ProductRow.Sku), "SKU", 68);
+        AddColumn(_productGrid, nameof(ProductRow.Name), "Tên", 195);
+        AddColumn(_productGrid, nameof(ProductRow.Barcode), "Barcode", 105);
+        AddColumn(_productGrid, nameof(ProductRow.OriginalPriceText), "Giá gốc", 65);
+        AddColumn(_productGrid, nameof(ProductRow.UnitPriceText), "Giá", 80);
         _productGrid.DataSource = _productView;
         productLayout.Controls.Add(_productGrid, 0, 1);
 
@@ -428,11 +480,12 @@ public sealed class MainForm : Form
         cartLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         ConfigureGrid(_cartGrid);
         _cartGrid.ReadOnly = false;
-        AddColumn(_cartGrid, nameof(CartItem.Sku), "SKU", 70, readOnly: true);
-        AddColumn(_cartGrid, nameof(CartItem.Name), "Tên", 170, readOnly: true);
-        AddColumn(_cartGrid, nameof(CartItem.Quantity), "SL", 45, readOnly: false);
-        AddColumn(_cartGrid, nameof(CartItem.UnitPrice), "Đơn giá", 70, readOnly: true);
-        AddColumn(_cartGrid, nameof(CartItem.LineTotal), "Thành tiền", 80, readOnly: true);
+        AddColumn(_cartGrid, nameof(CartItem.Sku), "SKU", 68, readOnly: true);
+        AddColumn(_cartGrid, nameof(CartItem.Name), "Tên", 150, readOnly: true);
+        AddColumn(_cartGrid, nameof(CartItem.Quantity), "SL", 42, readOnly: false);
+        AddColumn(_cartGrid, nameof(CartItem.ListPriceText), "Giá gốc", 65, readOnly: true);
+        AddColumn(_cartGrid, nameof(CartItem.UnitPrice), "Đơn giá", 68, readOnly: true, format: "N0");
+        AddColumn(_cartGrid, nameof(CartItem.LineTotal), "Thành tiền", 78, readOnly: true, format: "N0");
         _cartGrid.DataSource = _cart;
         cartLayout.Controls.Add(_cartGrid, 0, 0);
 
@@ -568,7 +621,8 @@ public sealed class MainForm : Form
         }
 
         var seed = Environment.TickCount;
-        _autoSales = new AutomaticSales(_config.Products, seed);
+        _autoSales = new AutomaticSales(_config.Products, seed,
+            product => ResolveSalePrice(product.Sku, product.UnitPrice));
         _autoSeed.Text = $"Seed: {seed}";
         _autoTimer.Interval = (int)_autoInterval.Value * 1000;
         _autoTimer.Start();
@@ -803,9 +857,11 @@ public sealed class MainForm : Form
         _searchBox.TextChanged += (_, _) => RefreshProducts();
         _addButton.Click += (_, _) => AddSelectedProduct();
         _productGrid.CellDoubleClick += (_, _) => AddSelectedProduct();
+        _productGrid.DataBindingComplete += (_, _) => UpdateProductGridDiscountStyles();
         _clearButton.Click += (_, _) => ClearCart();
         _payButton.Click += async (_, _) => await PayCoreAsync();
         _cartGrid.CellEndEdit += (_, _) => OnCartEdited();
+        _cartGrid.DataBindingComplete += (_, _) => UpdateCartGridDiscountStyles();
         _cartGrid.DataError += (_, _) => { };
         _resultPanel.RetryRequested += async (_, _) => await RetryAsync();
         _historyGrid.SelectionChanged += (_, _) => UpdateHistoryButtons();
@@ -821,6 +877,7 @@ public sealed class MainForm : Form
         _monitorTimer.Tick += async (_, _) => await RefreshMonitorAsync();
         _statusTimer.Tick += async (_, _) => await RefreshStatusAsync();
         _queueTimer.Tick += async (_, _) => await DrainQueuesAsync();
+        _discountTimer.Tick += async (_, _) => await RefreshDiscountsAsync();
         _autoToggle.CheckedChanged += (_, _) => OnAutomaticToggled();
         _autoInterval.ValueChanged += (_, _) => _autoTimer.Interval = (int)_autoInterval.Value * 1000;
         _autoTimer.Tick += async (_, _) => await AutomaticTickAsync();
@@ -854,6 +911,8 @@ public sealed class MainForm : Form
             _terminalRows[terminal.PosId] = row;
             _terminalsView.Add(row);
             _historyByPos[terminal.PosId] = new List<TxnRecord>();
+            _liveDiscountsByPos[terminal.PosId] = new PosDiscountBook();
+            _mockDiscountsByPos[terminal.PosId] = new PosDiscountBook();
         }
 
         if (_terminalCombo.Items.Count > 0)
@@ -907,6 +966,8 @@ public sealed class MainForm : Form
         UpdateTerminalHighlight();
         UpdateHistoryButtons();
         ApplyMode();
+        ApplyCurrentDiscountsToUi();
+        _ = RefreshDiscountsAsync();
         _ = RefreshMonitorAsync();
     }
 
@@ -950,6 +1011,291 @@ public sealed class MainForm : Form
         {
             _productView.Add(product);
         }
+
+        UpdateProductGridDiscountStyles();
+    }
+
+    private PosDiscountBook? CurrentDiscountBook =>
+        CurrentTerminal is { } terminal
+            ? (_mockMode ? _mockDiscountsByPos.GetValueOrDefault(terminal.PosId)
+                         : _liveDiscountsByPos.GetValueOrDefault(terminal.PosId))
+            : null;
+
+    private decimal ResolveSalePrice(string sku, decimal listPrice)
+    {
+        EvictExpiredDiscountsIfNeeded();
+        return CurrentDiscountBook is { } book
+            ? book.PriceFor(sku, listPrice, UtcClock())
+            : listPrice;
+    }
+
+    private void EvictExpiredDiscountsIfNeeded()
+    {
+        if (_closing || IsDisposed || CurrentDiscountBook is not { } book)
+        {
+            return;
+        }
+
+        if (book.EvictIfExpired(UtcClock()))
+        {
+            ApplyCurrentDiscountsToUi();
+        }
+    }
+
+    private void ApplyCurrentDiscountsToUi()
+    {
+        if (_closing || IsDisposed)
+        {
+            return;
+        }
+
+        var utcNow = UtcClock();
+        var book = CurrentDiscountBook;
+        if (_mockMode && CurrentTerminal is { } mockTerminal && book is not null)
+        {
+            var mockList = _mockBackend.GetDiscounts(mockTerminal.StoreId, utcNow);
+            book.ApplySuccess(mockList, utcNow, LocalClock());
+        }
+
+        foreach (var product in _allProducts)
+        {
+            if (book is not null && book.TryGetDiscount(product.Sku, utcNow, out var discount) && discount is not null)
+            {
+                product.DiscountedPrice = discount.DiscountedPrice;
+                product.DiscountPct = discount.DiscountPct;
+            }
+            else
+            {
+                product.DiscountedPrice = null;
+                product.DiscountPct = null;
+            }
+        }
+
+        _productView.ResetBindings();
+        UpdateProductGridDiscountStyles();
+
+        if (book is null)
+        {
+            _discountStatus.Text = "Giảm giá: —";
+            _discountStatus.ForeColor = Color.FromArgb(70, 70, 70);
+            return;
+        }
+
+        _discountStatus.Text = book.FormatStatusText(utcNow, _mockMode);
+        _discountStatus.ForeColor = book.LastFetchFailed
+            ? Color.FromArgb(199, 119, 0)
+            : _mockMode
+                ? Color.FromArgb(199, 119, 0)
+                : Color.FromArgb(30, 122, 52);
+    }
+
+    private void EnsureDiscountGridFonts()
+    {
+        var baseFont = _productGrid.DefaultCellStyle.Font ?? _productGrid.Font;
+        _gridStrikeoutFont ??= new Font(baseFont, FontStyle.Strikeout);
+        _gridDiscountBoldFont ??= new Font(baseFont, FontStyle.Bold);
+    }
+
+    private void UpdateProductGridDiscountStyles()
+    {
+        if (_closing || IsDisposed || _productGrid.Columns.Count == 0)
+        {
+            return;
+        }
+
+        var origIndex = FindColumnIndex(_productGrid, nameof(ProductRow.OriginalPriceText));
+        var priceIndex = FindColumnIndex(_productGrid, nameof(ProductRow.UnitPriceText));
+        if (origIndex < 0 || priceIndex < 0)
+        {
+            return;
+        }
+
+        EnsureDiscountGridFonts();
+        foreach (DataGridViewRow row in _productGrid.Rows)
+        {
+            if (row.DataBoundItem is not ProductRow product)
+            {
+                continue;
+            }
+
+            row.Cells[origIndex].Style.Font = product.HasDiscount ? _gridStrikeoutFont : null;
+            row.Cells[origIndex].Style.ForeColor = product.HasDiscount
+                ? Color.FromArgb(130, 130, 130)
+                : Color.Empty;
+            row.Cells[priceIndex].Style.Font = product.HasDiscount ? _gridDiscountBoldFont : null;
+            row.Cells[priceIndex].Style.ForeColor = product.HasDiscount
+                ? Color.FromArgb(30, 122, 52)
+                : Color.Empty;
+        }
+    }
+
+    private void UpdateCartGridDiscountStyles()
+    {
+        if (_closing || IsDisposed || _cartGrid.Columns.Count == 0)
+        {
+            return;
+        }
+
+        var origIndex = FindColumnIndex(_cartGrid, nameof(CartItem.ListPriceText));
+        var priceIndex = FindColumnIndex(_cartGrid, nameof(CartItem.UnitPrice));
+        if (origIndex < 0 || priceIndex < 0)
+        {
+            return;
+        }
+
+        EnsureDiscountGridFonts();
+        foreach (DataGridViewRow row in _cartGrid.Rows)
+        {
+            if (row.DataBoundItem is not CartItem item)
+            {
+                continue;
+            }
+
+            row.Cells[origIndex].Style.Font = item.HasDiscount ? _gridStrikeoutFont : null;
+            row.Cells[origIndex].Style.ForeColor = item.HasDiscount
+                ? Color.FromArgb(130, 130, 130)
+                : Color.Empty;
+            row.Cells[priceIndex].Style.Font = item.HasDiscount ? _gridDiscountBoldFont : null;
+            row.Cells[priceIndex].Style.ForeColor = item.HasDiscount
+                ? Color.FromArgb(30, 122, 52)
+                : Color.Empty;
+        }
+    }
+
+    private static int FindColumnIndex(DataGridView grid, string propertyName)
+    {
+        for (var i = 0; i < grid.Columns.Count; i++)
+        {
+            if (string.Equals(grid.Columns[i].DataPropertyName, propertyName, StringComparison.Ordinal))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private PosDiscountClient? TryGetDiscountClient(TerminalConfig terminal)
+    {
+        if (_discountClients.TryGetValue(terminal.PosId, out var existing))
+        {
+            return existing;
+        }
+
+        var token = _loaded.TokenForTerminal(terminal);
+        if (token is null)
+        {
+            return null;
+        }
+
+        if (DiscountHandlerFactory is not null)
+        {
+            _authority ??= ServerCertificateValidator.LoadAuthority(_loaded.Paths.CaCertificate);
+            var injected = new PosDiscountClient(_config.PosBaseUrl, _authority, null,
+                terminal.PosId, token, _requestLog, DiscountHandlerFactory(terminal));
+            _discountClients[terminal.PosId] = injected;
+            return injected;
+        }
+
+        if (!_certificates.TryGetValue(terminal.PosId, out var info) || !info.IsUsable)
+        {
+            return null;
+        }
+
+        _authority ??= ServerCertificateValidator.LoadAuthority(_loaded.Paths.CaCertificate);
+        var client = new PosDiscountClient(_config.PosBaseUrl, _authority, info.Certificate,
+            terminal.PosId, token, _requestLog);
+        _discountClients[terminal.PosId] = client;
+        return client;
+    }
+
+    internal async Task RefreshDiscountsAsync()
+    {
+        if (_closing || IsDisposed || CurrentTerminal is not { } terminal)
+        {
+            return;
+        }
+
+        if (_discountBusy)
+        {
+            _discountRefreshPending = true;
+            return;
+        }
+
+        _discountBusy = true;
+        var wasMock = _mockMode;
+        var modeEpoch = _modeEpoch;
+        var terminalPosId = terminal.PosId;
+        var terminalEpoch = _terminalEpoch;
+        try
+        {
+            var utcNow = UtcClock();
+            var localNow = LocalClock();
+            if (_mockMode)
+            {
+                var mockList = _mockBackend.GetDiscounts(terminal.StoreId, utcNow);
+                _mockDiscountsByPos[terminal.PosId].ApplySuccess(mockList, utcNow, localNow);
+                ApplyCurrentDiscountsToUi();
+                return;
+            }
+
+            var client = TryGetDiscountClient(terminal);
+            if (client is null)
+            {
+                _liveDiscountsByPos[terminal.PosId].ApplyFailure("Missing certificate or POS token.", utcNow);
+                ApplyCurrentDiscountsToUi();
+                return;
+            }
+
+            var cancellationToken = _discountCts?.Token ?? CancellationToken.None;
+            var result = await client.FetchAsync(cancellationToken);
+            if (_closing || IsDisposed || cancellationToken.IsCancellationRequested
+                || _mockMode != wasMock || _modeEpoch != modeEpoch)
+            {
+                return;
+            }
+
+            var book = _liveDiscountsByPos[terminalPosId];
+            if (result.IsSuccess && result.Data is { } fetched)
+            {
+                book.ApplySuccess(fetched, UtcClock(), LocalClock());
+            }
+            else
+            {
+                book.ApplyFailure(result.Error ?? $"HTTP {result.HttpStatus}", UtcClock());
+            }
+
+            if (_terminalEpoch == terminalEpoch
+                && string.Equals(CurrentTerminal?.PosId, terminalPosId, StringComparison.OrdinalIgnoreCase))
+            {
+                ApplyCurrentDiscountsToUi();
+            }
+        }
+        catch (OperationCanceledException) when (_closing || IsDisposed || _discountCts?.IsCancellationRequested == true)
+        {
+            // Form closing or disposed while discount fetch was in flight.
+        }
+        catch (Exception error)
+        {
+            if (!_closing && !IsDisposed && _mockMode == wasMock && _modeEpoch == modeEpoch)
+            {
+                _liveDiscountsByPos[terminalPosId].ApplyFailure(error.Message, UtcClock());
+                if (_terminalEpoch == terminalEpoch
+                    && string.Equals(CurrentTerminal?.PosId, terminalPosId, StringComparison.OrdinalIgnoreCase))
+                {
+                    ApplyCurrentDiscountsToUi();
+                }
+            }
+        }
+        finally
+        {
+            _discountBusy = false;
+            if (_discountRefreshPending && !_closing && !IsDisposed)
+            {
+                _discountRefreshPending = false;
+                _ = RefreshDiscountsAsync();
+            }
+        }
     }
 
     private void AddSelectedProduct()
@@ -965,11 +1311,13 @@ public sealed class MainForm : Form
 
     private void AddToCart(ProductRow product, int quantity)
     {
+        var unitPrice = ResolveSalePrice(product.Sku, product.UnitPrice);
         var existing = _cart.FirstOrDefault(item =>
             string.Equals(item.Sku, product.Sku, StringComparison.OrdinalIgnoreCase));
         if (existing is not null)
         {
             existing.Quantity += quantity;
+            existing.UnitPrice = unitPrice;
             _cart.ResetBindings();
         }
         else
@@ -978,11 +1326,13 @@ public sealed class MainForm : Form
             {
                 Sku = product.Sku,
                 Name = product.Name,
-                UnitPrice = product.UnitPrice,
+                ListPrice = product.UnitPrice,
+                UnitPrice = unitPrice,
                 Quantity = quantity,
             });
         }
 
+        UpdateCartGridDiscountStyles();
         UpdateCartTotal();
         _resultPanel.Clear();
     }
@@ -1950,6 +2300,7 @@ public sealed class MainForm : Form
         var modeEpoch = _modeEpoch;
         try
         {
+            EvictExpiredDiscountsIfNeeded();
             _clockStatus.Text = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
             _filesStatus.Text = $"CA: {(File.Exists(_loaded.Paths.CaCertificate) ? "OK" : "thiếu")} · " +
                                 $"tokens: {(File.Exists(_loaded.Paths.TokensFile) ? $"{_loaded.Tokens.Count} khóa" : "thiếu")}";
@@ -2197,16 +2548,22 @@ public sealed class MainForm : Form
     }
 
     private static void AddColumn(DataGridView grid, string property, string header,
-                                  int fillWeight, bool readOnly = true)
+                                  int fillWeight, bool readOnly = true, string? format = null)
     {
-        grid.Columns.Add(new DataGridViewTextBoxColumn
+        var column = new DataGridViewTextBoxColumn
         {
             DataPropertyName = property,
             HeaderText = header,
             FillWeight = fillWeight,
             ReadOnly = readOnly,
             SortMode = DataGridViewColumnSortMode.NotSortable,
-        });
+        };
+        if (format is not null)
+        {
+            column.DefaultCellStyle.Format = format;
+        }
+
+        grid.Columns.Add(column);
     }
 
     private void OnFormClosing(object? sender, FormClosingEventArgs e)
@@ -2225,6 +2582,7 @@ public sealed class MainForm : Form
             _monitorTimer.Dispose();
             _statusTimer.Dispose();
             _queueTimer.Dispose();
+            _discountTimer.Dispose();
         }
 
         base.Dispose(disposing);
@@ -2232,6 +2590,10 @@ public sealed class MainForm : Form
         {
             _terminalBoldFont?.Dispose();
             _terminalBoldFont = null;
+            _gridStrikeoutFont?.Dispose();
+            _gridStrikeoutFont = null;
+            _gridDiscountBoldFont?.Dispose();
+            _gridDiscountBoldFont = null;
         }
     }
 
@@ -2241,6 +2603,20 @@ public sealed class MainForm : Form
         _monitorTimer.Stop();
         _statusTimer.Stop();
         _queueTimer.Stop();
+        _discountTimer.Stop();
+        if (_discountCts is not null)
+        {
+            _discountCts.Cancel();
+            _discountCts.Dispose();
+            _discountCts = null;
+        }
+
+        foreach (var client in _discountClients.Values)
+        {
+            client.Dispose();
+        }
+
+        _discountClients.Clear();
         foreach (var client in _liveClients.Values)
         {
             client.Dispose();

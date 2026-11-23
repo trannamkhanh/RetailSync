@@ -47,7 +47,19 @@ public sealed class ProductRow
 
     public decimal UnitPrice { get; init; }
 
-    public string UnitPriceText => UnitPrice.ToString("N0");
+    public decimal? DiscountedPrice { get; set; }
+
+    public decimal? DiscountPct { get; set; }
+
+    public bool HasDiscount => DiscountedPrice is { } discounted && discounted < UnitPrice;
+
+    public decimal EffectivePrice => DiscountedPrice ?? UnitPrice;
+
+    public string OriginalPriceText => HasDiscount ? UnitPrice.ToString("N0") : string.Empty;
+
+    public string UnitPriceText => HasDiscount && DiscountPct is { } pct
+        ? $"{EffectivePrice:N0} (-{pct:0.##}%)"
+        : EffectivePrice.ToString("N0");
 
     public string SearchText => $"{Sku} {Name} {Barcode}";
 }
@@ -58,7 +70,13 @@ public sealed class CartItem
 
     public required string Name { get; init; }
 
-    public required decimal UnitPrice { get; init; }
+    public decimal ListPrice { get; init; }
+
+    public required decimal UnitPrice { get; set; }
+
+    public bool HasDiscount => ListPrice > 0 && UnitPrice < ListPrice;
+
+    public string ListPriceText => HasDiscount ? ListPrice.ToString("N0") : string.Empty;
 
     public int Quantity { get; set; }
 
