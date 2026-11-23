@@ -69,6 +69,7 @@ def _process_sale(session: Session, event: PosEvent, principal: Principal) -> di
         event.event_type,
         event.original_transaction_id,
         payload_hash,
+        event.timestamp,
     )
     if not claimed:
         return _duplicate_result(session, event.store_id, event.transaction_id)

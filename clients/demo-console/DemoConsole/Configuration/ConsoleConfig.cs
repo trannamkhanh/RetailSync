@@ -11,6 +11,12 @@ public sealed class ConsoleConfig
     public string SqlServer { get; set; } = "127.0.0.1,14333";
     public string Database { get; set; } = "RTS_DB_DEMO";
     public int RefreshSeconds { get; set; } = 3;
+    /// <summary>
+    /// PB-49: the Dashboard has its own, slower timer. It aggregates a range, so
+    /// refreshing it every <see cref="RefreshSeconds"/> would send a heavy query on
+    /// every tick of the other four tabs.
+    /// </summary>
+    public int DashboardRefreshSeconds { get; set; } = 30;
     public int HighlightSeconds { get; set; } = 15;
     public float FontSize { get; set; } = 13;
     public List<StoreSetting> Stores { get; set; } = new();

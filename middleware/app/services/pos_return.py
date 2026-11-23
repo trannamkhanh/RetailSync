@@ -79,6 +79,7 @@ def process_return(session: Session, event: PosEvent, principal: Principal) -> d
         event.event_type,
         original_id,
         payload_hash,
+        event.timestamp,
     )
     if not claimed:
         return _duplicate_result(session, event.store_id, event.transaction_id)

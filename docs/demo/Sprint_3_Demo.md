@@ -299,6 +299,42 @@ Lưu ý cho bước 1 và 2:
   bước 2 dùng tăng ngưỡng.
 - Bước 3 chạy trên máy A, cần middleware nhận kết nối từ IP máy S (mục 3) và PB-35 đã merge.
 
+### Màn 7: Doanh thu (tab Doanh thu, PB-49)
+
+| Bước | Ai | Thao tác | Thấy gì | Script dự phòng |
+|---|---|---|---|---|
+| 1 | Kiệt | Mở tab **Doanh thu**, phạm vi **Toàn hệ thống**, mốc **Ngày** | **Ba biểu đồ**: đường doanh thu theo ngày, tròn tỷ lệ theo danh mục, cột so sánh 3 cửa hàng; KPI "Doanh thu thuần" và số giao dịch; badge chất lượng thời gian xanh (đủ tin cậy) hoặc cam khi có giao dịch chưa tin cậy | `curl` (bên dưới) |
+| 2 | Kiệt | Đổi phạm vi sang một cửa hàng | Đường và tròn chỉ còn cửa hàng đó; **cột vẫn so sánh cả 3 cửa hàng** vì phạm vi so sánh độc lập với phạm vi xem | `store_id=STORE-DN1` |
+| 3 | Kiệt | Đổi mốc sang **Tuần** | Biểu đồ ít điểm hơn, tổng không đổi (cùng khoảng thời gian) | `bucket=week` |
+| 4 | Kiệt | Nhấn **Làm mới** | Dòng trạng thái "Làm mới lúc HH:mm:ss. Không có lỗi." | `GET /dashboard/revenue` |
+
+Lưu ý cho màn 7:
+
+- Tab này tự làm mới mỗi **30 giây**, không phải 3 giây như bốn tab kia. Bấm **Làm mới**
+  nếu muốn số liệu ngay sau khi bán.
+- Số liệu 90 ngày là **lịch sử mô phỏng** do `tools/history-generator` sinh ra, không phải
+  giao dịch thật của buổi demo; nói rõ điều này khi trình bày.
+- **Ba biểu đồ dùng chung một khoảng thời gian** nhưng không cùng phạm vi: đường và tròn theo
+  phạm vi xem, cột theo tập so sánh. Đây là chủ ý của thiết kế (§6.3), không phải lỗi — nói rõ
+  khi người xem thắc mắc vì sao đổi cửa hàng mà cột không đổi.
+- Danh mục có doanh thu ròng **âm** không vẽ được trên biểu đồ tròn (âm không phải một phần của
+  tổng); nó được ghi tên trong dòng chú thích dưới biểu đồ tròn.
+- Badge chất lượng thời gian đọc `occurred_at` so với `created_at`: `ON_TIME` lệch không quá
+  300 giây, `BACKFILL` nhận bù trong 30 ngày, `SUSPECT_FUTURE`/`SUSPECT_OLD` là hai nhóm
+  nghi ngờ, `unknown` là giao dịch lưu trước migration 004. `BACKFILL` vẫn tin cậy; ba nhóm
+  còn lại thì không, và badge nói rõ bao nhiêu phần trăm.
+- Chỉ Admin: tab dùng token `admin`, không có bộ chọn vai trò.
+- Lệnh dự phòng khi bảng điều khiển lỗi:
+
+```powershell
+# curl.exe chạy được trên Windows PowerShell 5.1; -SkipCertificateCheck thì không
+# (chỉ có từ PowerShell 7). CA phát triển được tin cậy tường minh.
+curl.exe --ssl-no-revoke --cacert .certs/ca.crt `
+  -H "Authorization: Bearer $env:ADMIN_TOKEN" `
+  "https://localhost:8443/api/v1/dashboard/revenue?from=2026-08-22T00:00:00Z&to=2026-11-20T00:00:00Z&bucket=day"
+```
+
+
 ## 5. Dự phòng (Demo_Plan mục 5)
 
 | Sự cố | Làm gì | Ai |

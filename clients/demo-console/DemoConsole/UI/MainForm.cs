@@ -50,6 +50,7 @@ internal sealed class MainForm : Form
     private FeatureState _snapshotFeature = FeatureState.Unknown;
     private FeatureState _nearExpiryFeature = FeatureState.Unknown;
     private FeatureState _forecastFeature = FeatureState.Unknown;
+    private FeatureState _dashboardFeature = FeatureState.Unknown;
     private string _hqMode = "chưa đặt từ bảng điều khiển (HQ demo khởi động ở ONLINE)";
 
     // Tab 1
@@ -86,6 +87,16 @@ internal sealed class MainForm : Form
     private readonly DataGridView _alertGrid;
     private readonly DataGridView _forecastGrid;
     private readonly Label _forecastEmpty;
+
+    // Tab 5 (PB-49): revenue dashboard, with its own slower timer.
+    private readonly Label _dashboardStatus;
+    private readonly DashboardTab _dashboard;
+    private readonly System.Windows.Forms.Timer _dashboardTimer = new();
+    private readonly Func<DateTime> _utcNow = () => DateTime.UtcNow;
+    private bool _dashboardRefreshing;
+    // Set when a refresh is asked for while one is running, so the request is run once
+    // afterwards instead of being dropped.
+    private bool _dashboardRefreshPending;
 
     // Window
     private readonly Label _resultLine;
@@ -308,6 +319,15 @@ internal sealed class MainForm : Form
         jobs.Controls.Add(_forecastGrid, 0, 5);
         tabs.TabPages.Add(Page("Job", _jobStatus, jobs));
 
+        // --- Tab 5: revenue dashboard (PB-49) -------------------------------
+        // Its own timer: see DashboardRefreshSeconds. It is deliberately absent from
+        // the 3-second RefreshAllAsync list, which would fire a range aggregate on
+        // every tick of the other four tabs.
+        _dashboardStatus = StatusLine();
+        _dashboard = new DashboardTab(_config.MiddlewareBaseUrl, _utcNow, _font);
+        _dashboard.RefreshRequested += RefreshDashboardAsync;
+        tabs.TabPages.Add(Page("Doanh thu", _dashboardStatus, _dashboard));
+
         Controls.Add(tabs);
         Controls.Add(_resultLine);
         Controls.Add(_headerLine);
@@ -315,6 +335,8 @@ internal sealed class MainForm : Form
         UpdateFeatureControls();
         _timer.Interval = _config.RefreshSeconds * 1000;
         _timer.Tick += async (_, _) => await RefreshAllAsync();
+        _dashboardTimer.Interval = Math.Max(1, _config.DashboardRefreshSeconds) * 1000;
+        _dashboardTimer.Tick += async (_, _) => await RefreshDashboardAsync();
         Shown += async (_, _) =>
         {
             ApplyStockSplit();
@@ -324,6 +346,12 @@ internal sealed class MainForm : Form
             {
                 _timer.Start();
             }
+
+            await RefreshDashboardAsync();
+            if (!Gone)
+            {
+                _dashboardTimer.Start();
+            }
         };
         Resize += (_, _) => ApplyStockSplit();
         FormClosing += (_, _) =>
@@ -331,6 +359,7 @@ internal sealed class MainForm : Form
             _closing = true;
             _pending.Close();
             _timer.Stop();
+            _dashboardTimer.Stop();
         };
         // FormClosed does not run when the form is disposed without being closed,
         // so the cleanup lives in Dispose as well (review of PR #79).
@@ -361,6 +390,8 @@ internal sealed class MainForm : Form
         _pending.Close();
         _timer.Stop();
         _timer.Dispose();
+        _dashboardTimer.Stop();
+        _dashboardTimer.Dispose();
         _api.Dispose();
         _authority?.Dispose();
         _authority = null;
@@ -497,6 +528,192 @@ internal sealed class MainForm : Form
             status.Text = $"Làm mới lúc {time}. Lỗi gần nhất: {error}";
             status.ForeColor = Theme.Error;
         }
+    }
+
+    /// <summary>
+    /// The Dashboard's own refresh, on its own timer. It keeps the last good chart
+    /// when a call fails, so a transient error does not blank the demo screen.
+    ///
+    /// A request that arrives while one is in flight is remembered and run once when
+    /// the current one finishes. The tab asks for a refresh whenever the scope or the
+    /// period changes, and those controls are live during a refresh, so dropping the
+    /// request would leave the chart on the previous filter until the timer fired.
+    /// </summary>
+    private async Task RefreshDashboardAsync()
+    {
+        if (_dashboardRefreshing || Gone)
+        {
+            _dashboardRefreshPending = true;
+            return;
+        }
+
+        _dashboardRefreshing = true;
+        _dashboard.SetBusy(true);
+        try
+        {
+            // Probe once: the answer is stable for the life of this window, so an
+            // already-answering route no longer costs an extra GET every 30 seconds.
+            // A route that answers 404 stays disabled until the console is reopened,
+            // which matches the other tabs' "open again after the merge" rule.
+            if (_dashboardFeature == FeatureState.Unknown)
+            {
+                _dashboardFeature = Merge(_dashboardFeature, await ProbeDashboardAsync());
+            }
+
+            // The window may have closed while the probe was in flight; drawing now
+            // would touch disposed controls (audit #17, the guard every other tab
+            // refresh in this form uses).
+            if (Gone)
+            {
+                return;
+            }
+
+            if (_dashboardFeature == FeatureState.NotDeployed)
+            {
+                _dashboard.SetAvailable(false, FeatureAvailability.Reason("Doanh thu", _dashboardFeature));
+                _dashboardStatus.Text = FeatureAvailability.Reason("Doanh thu", _dashboardFeature);
+                _dashboardStatus.ForeColor = Theme.Warn;
+                return;
+            }
+
+            if (_dashboard.ScopeChoices == 0)
+            {
+                var stores = await _api.GetDashboardStoresAsync();
+                if (Gone)
+                {
+                    return;
+                }
+
+                if (stores.IsSuccess)
+                {
+                    try
+                    {
+                        _dashboard.SetStores(ApiParsers.DashboardStores(stores.Body));
+                    }
+                    catch (FormatException error)
+                    {
+                        _dashboardStatus.Text = $"Danh sách cửa hàng: không đọc được câu trả lời: {error.Message}";
+                        _dashboardStatus.ForeColor = Theme.Warn;
+                    }
+                }
+            }
+
+            var (fromUtc, toUtc) = _dashboard.Window();
+            var storeId = _dashboard.SelectedStoreId;
+
+            // The three charts share one interval. The line and the pie follow the view
+            // scope; the bar follows the comparison set, which is the caller's whole
+            // scope unless a selection narrows it, so it is requested with no ids.
+            var line = _api.GetDashboardRevenueAsync(fromUtc, toUtc, storeId, _dashboard.Period);
+            var pie = _api.GetDashboardCategoryAsync(fromUtc, toUtc, storeId);
+            var bar = _api.GetDashboardStoresRevenueAsync(fromUtc, toUtc, null);
+            await Task.WhenAll(line, pie, bar);
+
+            var answer = await line;
+            if (Gone)
+            {
+                return;
+            }
+
+            // Only a 404 means the route is missing; any other failure keeps the tab.
+            _dashboardFeature = FeatureAvailability.FromAction(answer, _dashboardFeature);
+
+            var time = LocalTime(DateTime.UtcNow);
+            if (answer.IsSuccess)
+            {
+                try
+                {
+                    _dashboard.Show(ApiParsers.DashboardRevenue(answer.Body));
+                }
+                catch (FormatException error)
+                {
+                    _dashboard.ShowError(answer);
+                    _dashboardStatus.Text = $"Làm mới lúc {time}. Không đọc được câu trả lời: {error.Message}";
+                    _dashboardStatus.ForeColor = Theme.Error;
+                    return;
+                }
+
+                // A missing pie or bar is a partial failure: the status line must say
+                // so instead of claiming "Không có lỗi" while a chart is stale.
+                var partial = new List<string>();
+                TryShow(answer2 => _dashboard.ShowCategories(
+                    ApiParsers.DashboardCategoryRevenue(answer2.Body)), await pie, partial);
+                TryShow(answer3 => _dashboard.ShowStores(
+                    ApiParsers.DashboardStoreRevenue(answer3.Body)), await bar, partial);
+
+                if (partial.Count == 0)
+                {
+                    _dashboardStatus.Text = $"Làm mới lúc {time}. Không có lỗi.";
+                    _dashboardStatus.ForeColor = Theme.Ok;
+                }
+                else
+                {
+                    _dashboardStatus.Text = $"Làm mới lúc {time}. Một phần chưa tải được: " +
+                                            string.Join("; ", partial);
+                    _dashboardStatus.ForeColor = Theme.Warn;
+                }
+            }
+            else
+            {
+                _dashboard.ShowError(answer);
+                _dashboardStatus.Text = $"Làm mới lúc {time}. Lỗi gần nhất: {answer.Summary}";
+                _dashboardStatus.ForeColor = Theme.Error;
+            }
+        }
+        catch (Exception exception)
+        {
+            _dashboardStatus.Text = $"Lỗi gần nhất: {exception.Message}";
+            _dashboardStatus.ForeColor = Theme.Error;
+        }
+        finally
+        {
+            _dashboard.SetBusy(false);
+            _dashboardRefreshing = false;
+            UpdateFeatureControls();
+        }
+
+        // Run the queued request, if a filter changed while this one was in flight.
+        // The flag is cleared first so a further change during the follow-up queues
+        // its own run rather than being folded into this one.
+        if (_dashboardRefreshPending)
+        {
+            _dashboardRefreshPending = false;
+            await RefreshDashboardAsync();
+        }
+    }
+
+    /// <summary>
+    /// Feeds one extra chart from its own answer. A failure there must not blank the
+    /// other two charts or the KPI, so it is recorded for the status line and the last
+    /// good chart stays.
+    /// </summary>
+    private void TryShow(Action<ApiResult> show, ApiResult answer, List<string> problems)
+    {
+        if (!answer.IsSuccess)
+        {
+            _dashboard.ShowPartialError(answer.Summary);
+            problems.Add(answer.Summary);
+            return;
+        }
+
+        try
+        {
+            show(answer);
+        }
+        catch (FormatException error)
+        {
+            var summary = $"không đọc được câu trả lời: {error.Message}";
+            _dashboard.ShowPartialError(summary);
+            problems.Add(summary);
+        }
+    }
+
+    /// <summary>GET a valid Dashboard route: 404 when the four routes are not deployed.</summary>
+    private async Task<FeatureState> ProbeDashboardAsync()
+    {
+        var now = DateTime.UtcNow;
+        var probe = await _api.GetDashboardRevenueAsync(now.AddDays(-1), now, null, "day");
+        return FeatureAvailability.FromProbe(probe);
     }
 
     private async Task<string?> RefreshStockAsync()
@@ -834,6 +1051,9 @@ internal sealed class MainForm : Form
             _forecastFeature == FeatureState.NotDeployed ? "Dự báo: chưa có job forecast (404, chờ PB-22/23); mở lại bảng điều khiển sau khi merge." : null,
         }.Where(text => text is not null);
         _jobFeatureLine.Text = string.Join("   ", jobReasons);
+
+        _dashboard?.SetAvailable(_dashboardFeature != FeatureState.NotDeployed,
+            FeatureAvailability.Reason("Doanh thu", FeatureState.NotDeployed));
     }
 
     // --- Actions --------------------------------------------------------------
