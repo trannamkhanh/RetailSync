@@ -64,5 +64,5 @@ docker compose run --rm --no-deps --volume "${PWD}:/repo" --workdir /repo/tools/
 Run the network-free tests from the repository root:
 
 ```powershell
-docker compose run --rm --volume "${PWD}:/repo" --workdir /repo/tools/pos-simulator --env PYTHONPATH=/repo/middleware:/repo/tools/pos-simulator --env PYTHONDONTWRITEBYTECODE=1 middleware sh -c 'pip install -q -r requirements.txt -r /repo/middleware/requirements-dev.txt && python -m pytest -p no:cacheprovider -q'
+docker compose run --rm --no-deps --volume "${PWD}:/repo" --workdir /repo/tools/pos-simulator --env PYTHONPATH=/repo/middleware:/repo/tools/pos-simulator --env PYTHONDONTWRITEBYTECODE=1 middleware sh -c 'pip install -q -r requirements.txt -r /repo/middleware/requirements-dev.txt && python -m pytest -p no:cacheprovider -q'
 ```

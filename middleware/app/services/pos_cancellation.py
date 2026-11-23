@@ -25,11 +25,12 @@ def process_cancellation(session: Session, event: PosEvent, principal: Principal
     if original_id is None:
         raise ApiError(422, "INVALID_EVENT", "original_transaction_id is required for CANCELLATION.")
     # One locked read answers both questions the old code asked separately
-    # (audit #5): an unknown sale is 404 ORIGINAL_SALE_NOT_FOUND before the
-    # FK-bearing claim row is inserted, which is where DS-04 puts that check, and
-    # the row comes back with its sold and returned quantities. The update lock
-    # is held until this transaction ends, so the second lock_original_sale the
-    # old code took after the claim was re-reading a row it already held.
+    # (audit minor, POS/API group): an unknown sale is 404
+    # ORIGINAL_SALE_NOT_FOUND before the FK-bearing claim row is inserted, which is
+    # where DS-04 puts that check, and the row comes back with its sold and
+    # returned quantities. The update lock is held until this transaction ends, so
+    # the second lock_original_sale the old code took after the claim was
+    # re-reading a row it already held.
     sale = lock_original_sale(session, event.store_id, original_id)
     payload_hash = content_hash("CANCELLATION", event.store_id, event.pos_id, original_id, [])
     if not claim_transaction(session, event.transaction_id, event.store_id, event.pos_id,

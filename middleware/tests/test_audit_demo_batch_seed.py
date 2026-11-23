@@ -1,4 +1,4 @@
-"""Audit #5 (seed): the demo batch ids cannot overflow batch_id varchar(30).
+"""Audit minor (POS/API group, seed): the demo batch ids cannot overflow batch_id varchar(30).
 
 ``database/seed/003_demo_batches.sql`` built ``B-`` + store_id + sku + ``-1`` for
 every inventory row of the three demo stores that had no batch. The seed files
@@ -72,7 +72,7 @@ def clean_demo_batches(db_session):
     db_session.flush()
 
 
-def test_q5_a_long_sku_in_a_demo_store_does_not_break_the_seed(db_session):
+def test_audit_minor_a_long_sku_in_a_demo_store_does_not_break_the_seed(db_session):
     """The audited failure: varchar(30) overflow, SQL 2628, on a migrate.sh re-run."""
     prepare(db_session, {("STORE-DN1", LONG_SKU): 5})
 
@@ -85,7 +85,7 @@ def test_q5_a_long_sku_in_a_demo_store_does_not_break_the_seed(db_session):
     assert db_session.get(Inventory, ("STORE-DN1", LONG_SKU)).quantity == 5
 
 
-def test_q5_every_generated_batch_id_fits_the_column(db_session):
+def test_audit_minor_every_generated_batch_id_fits_the_column(db_session):
     prepare(db_session, {(store, sku): 7
                          for store in DEMO_STORES for sku in CATALOGUE_SKUS[:3]})
     run_seed(db_session)
@@ -97,7 +97,7 @@ def test_q5_every_generated_batch_id_fits_the_column(db_session):
     assert all(len(batch_id) <= 30 for batch_id in ids), ids
 
 
-def test_q5_the_nine_catalogue_skus_are_still_split(db_session):
+def test_audit_minor_the_nine_catalogue_skus_are_still_split(db_session):
     stock = {(store, sku): 10 for store in DEMO_STORES for sku in CATALOGUE_SKUS}
     prepare(db_session, stock)
 
@@ -110,7 +110,7 @@ def test_q5_the_nine_catalogue_skus_are_still_split(db_session):
         assert sum(batch.quantity for batch in batches) == quantity
 
 
-def test_q5_a_second_run_is_still_a_no_op(db_session):
+def test_audit_minor_a_second_run_is_still_a_no_op(db_session):
     prepare(db_session, {("STORE-DN2", "SKU-0004"): 9})
     run_seed(db_session)
     first = sorted((batch.batch_id, batch.quantity) for batch in db_session.scalars(

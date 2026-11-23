@@ -157,7 +157,7 @@ Data reduction and success rate of these runs: [Sync_Metrics.md](Sync_Metrics.md
 4. After the simulator exits, trigger a sync cycle and reconcile `RTS_DB_DEMO` against `RTS_HQ`:
    ```powershell
    powershell -ExecutionPolicy Bypass -File scripts/demo/sync_run.ps1
-   docker compose run --rm --volume "${PWD}:/repo" --workdir /repo middleware python scripts/sync_reconcile.py --db RTS_DB_DEMO --hq-db RTS_HQ
+   docker compose run --rm --no-deps --volume "${PWD}:/repo" --workdir /repo middleware python scripts/sync_reconcile.py --db RTS_DB_DEMO --hq-db RTS_HQ
    ```
 
 ### Observed Output
@@ -343,7 +343,7 @@ restore seeded stock.
    ```powershell
    powershell -ExecutionPolicy Bypass -File scripts/demo/sync_run.ps1
    docker compose run --rm --no-deps --volume "${PWD}:/repo:ro" --workdir /repo middleware python scripts/demo/pb13_ledger_check.py
-   docker compose run --rm --volume "${PWD}:/repo" --workdir /repo middleware python scripts/sync_reconcile.py --db RTS_DB_DEMO --hq-db RTS_HQ
+   docker compose run --rm --no-deps --volume "${PWD}:/repo" --workdir /repo middleware python scripts/sync_reconcile.py --db RTS_DB_DEMO --hq-db RTS_HQ
    ```
 
 ### Observed Output

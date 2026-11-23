@@ -3,7 +3,7 @@
 JWT_SECRET comes from the environment or the repository .env. Run it in the
 middleware image, or with Python and middleware/requirements.txt installed:
 
-    docker compose run --rm --volume "${PWD}:/repo" --workdir /repo middleware python scripts/issue_demo_tokens.py
+    docker compose run --rm --no-deps --volume "${PWD}:/repo" --workdir /repo middleware python scripts/issue_demo_tokens.py
 """
 
 import json
