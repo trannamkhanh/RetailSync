@@ -24,6 +24,19 @@ info:
       transaction stored before `occurred_at` existed falls back to its received time. Time
       ranges are half-open `[from, to)`. Dashboard buckets are aligned to the store's
       business day (UTC+7 by default); `/audit-logs` keeps the received time.
+    Active discounts (PB-50), shared by `/staff/discounts` and `/pos/discounts`:
+    - An active discount is a recommendation with `action_type = DISCOUNT` and `status = ACCEPTED`
+      of an active store; `decided_at` comes from its staff decision. With a batch, the batch
+      still has stock (`quantity > 0`) and `expiry_date` is today or later (business date,
+      UTC+7). Without a batch (SKU level), the business date of `decided_at` is today.
+      REJECTED, PENDING, GENERATED, BLOCKED and EXPIRED recommendations never count.
+    - `discount_pct` is the value stored at decision time, already after the guardrails; rules
+      changed later apply from the next recommendation job, not to accepted discounts.
+    - `discounted_price = floor(list_price * (1 - discount_pct / 100) / 100) * 100`, rounded
+      down to 100 VND, with `list_price = product.unit_price`. Only the Middleware computes it,
+      so the POS and the Staff App show the same number.
+    - "Same Middleware" means the same database: every store in it belongs to this Middleware.
+      A caller whose own store is inactive gets an empty list.
 servers:
   - url: https://middleware.retailsync.local/api/v1
     description: Regional Middleware (reachable only over the private WAN)
@@ -163,6 +176,40 @@ paths:
                 $ref: '#/components/schemas/Error'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+
+  /pos/discounts:
+    get:
+      tags: [POS]
+      summary: Active discounts of the terminal's store
+      description: |
+        PB-50. The store is the one of the caller's `pos_terminal` row, never a query parameter
+        (a `store_id` parameter is ignored). One entry per SKU: the highest `discount_pct` when
+        several discounts are active (batch and SKU level). Read-only, not audited.
+        403 `FORBIDDEN` when the token has no `pos_id`, the terminal is unknown or not ACTIVE,
+        the client certificate is not the terminal's, or the token's `store_id` is not the
+        terminal's store. The POS gateway forwards this path for GET only.
+      operationId: getPosDiscounts
+      x-roles: [POS]
+      security:
+        - mutualTLS: []
+          bearerAuth: []
+      responses:
+        '200':
+          description: Active discounts, possibly empty
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PosDiscountList'
+              example:
+                business_date: '2026-11-23'
+                items:
+                  - sku: SKU-0001
+                    discount_pct: 30.0
+                    discounted_price: 22400.0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /stores/{store_id}/inventory:
     get:
@@ -418,6 +465,49 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /staff/discounts:
+    get:
+      tags: [Staff]
+      summary: Active discounts of the caller's store, or of every store
+      description: |
+        PB-50. `own` lists the caller's store; `all` adds the other active stores of this
+        Middleware, own store first, then by distance (haversine, ties by `store_id`). Inside
+        a store, items are ordered by `sku`, then `expiry_date`. One item per store, SKU and
+        batch: the highest `discount_pct`, then the latest `decided_at`.
+        `sold_at_discount` is true when the store has at least one SALE line with status OK for
+        the SKU on today's business date, after `decided_at` (sale time is
+        `pos_transaction.effective_at`), with `unit_price` below the list price. Read-only,
+        not audited. A caller without a store gets 403.
+      operationId: listStaffDiscounts
+      x-roles: [Staff, Manager]
+      parameters:
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [own, all]
+            default: own
+      responses:
+        '200':
+          description: Active discounts, possibly empty
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/StaffDiscount'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/ValidationError'
 
@@ -1935,3 +2025,56 @@ components:
             included, sorted by revenue descending and then by store id.
           items:
             $ref: '#/components/schemas/DashboardStoreRevenue'
+
+    StaffDiscount:
+      type: object
+      required: [store_id, store_name, distance_km, sku, name, batch_id, expiry_date,
+                 discount_pct, list_price, discounted_price, decided_at, sold_at_discount]
+      properties:
+        store_id:
+          type: string
+        store_name:
+          type: string
+        distance_km:
+          type: [number, 'null']
+          description: Null for the caller's own store, else rounded to 2 decimals
+        sku:
+          type: string
+        name:
+          type: string
+        batch_id:
+          type: [string, 'null']
+          description: Null for a SKU-level discount
+        expiry_date:
+          type: [string, 'null']
+          format: date
+        discount_pct:
+          type: number
+        list_price:
+          type: number
+        discounted_price:
+          type: number
+        decided_at:
+          type: string
+          format: date-time
+        sold_at_discount:
+          type: boolean
+    PosDiscountList:
+      type: object
+      required: [business_date, items]
+      properties:
+        business_date:
+          type: string
+          format: date
+        items:
+          type: array
+          items:
+            type: object
+            required: [sku, discount_pct, discounted_price]
+            properties:
+              sku:
+                type: string
+              discount_pct:
+                type: number
+              discounted_price:
+                type: number

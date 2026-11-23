@@ -73,6 +73,8 @@ DASHBOARD_STORES = ("GET", "/api/v1/dashboard/stores")
 DASHBOARD_REVENUE = ("GET", "/api/v1/dashboard/revenue")
 DASHBOARD_BY_CATEGORY = ("GET", "/api/v1/dashboard/revenue-by-category")
 DASHBOARD_BY_STORE = ("GET", "/api/v1/dashboard/revenue-by-store")
+STAFF_DISCOUNTS = ("GET", "/api/v1/staff/discounts")
+POS_DISCOUNTS = ("GET", "/api/v1/pos/discounts")
 
 # Expected status for every protected route on main, by caller.
 #                  POS  Staff  Manager  HQ   Admin  Auditor  no token
@@ -99,6 +101,8 @@ MATRIX = {
     DASHBOARD_REVENUE:     (403, 403, 200, 403, 200, 200,   401),
     DASHBOARD_BY_CATEGORY: (403, 403, 200, 403, 200, 200,   401),
     DASHBOARD_BY_STORE:    (403, 403, 200, 403, 200, 200,   401),
+    STAFF_DISCOUNTS:       (403, 200, 200, 403, 403, 403,   401),
+    POS_DISCOUNTS:         (200, 403, 403, 403, 403, 403,   401),
 }
 CALLERS = [*ROLES, None]
 
@@ -227,6 +231,8 @@ REQUESTS: dict[tuple[str, str], Callable[[TestClient, dict], object]] = {
         DASHBOARD_BY_CATEGORY[1], params=DASHBOARD_WINDOW, headers=headers),
     DASHBOARD_BY_STORE: lambda client, headers: client.get(
         DASHBOARD_BY_STORE[1], params=DASHBOARD_WINDOW, headers=headers),
+    STAFF_DISCOUNTS: lambda client, headers: client.get(STAFF_DISCOUNTS[1], headers=headers),
+    POS_DISCOUNTS: lambda client, headers: client.get(POS_DISCOUNTS[1], headers=headers),
 }
 
 
@@ -356,6 +362,8 @@ def test_matrix_allows_exactly_the_ds04_roles():
         DASHBOARD_REVENUE: {"Admin", "Auditor", "Manager"},
         DASHBOARD_BY_CATEGORY: {"Admin", "Auditor", "Manager"},
         DASHBOARD_BY_STORE: {"Admin", "Auditor", "Manager"},
+        STAFF_DISCOUNTS: {"Staff", "Manager"},
+        POS_DISCOUNTS: {"POS"},
     }
 
 

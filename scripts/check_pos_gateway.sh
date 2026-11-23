@@ -4,7 +4,8 @@
 # event route gets the middleware's 401 UNAUTHORIZED, while one the gateway
 # refuses gets nginx's 404. Paths with "..", "." or encoded characters must be
 # refused, or forwarded as /api/v1/pos/events; nothing else may reach the
-# middleware. Run it in the middleware image, which has curl with OpenSSL,
+# middleware. GET /api/v1/pos/discounts (PB-50) is forwarded too, GET only.
+# Run it in the middleware image, which has curl with OpenSSL,
 # from the repository root with pos-gateway running:
 #
 #     docker compose run --rm --no-deps --volume "${PWD}:/repo:ro" --workdir /repo --entrypoint bash middleware scripts/check_pos_gateway.sh
@@ -52,6 +53,11 @@ probe POST /api/v1/audit-logs refused
 probe POST /api/v1/health refused
 probe GET /api/v1/pos/events refused
 probe PUT /api/v1/pos/events refused
+probe GET /api/v1/pos/discounts forwarded
+probe POST /api/v1/pos/discounts refused
+probe PUT /api/v1/pos/discounts refused
+probe GET /api/v1/pos/discounts/ refused
+probe GET /api/v1/pos/discounts/../events refused
 
 if [ "$failures" -ne 0 ]; then
     echo "$failures gateway check(s) failed"
