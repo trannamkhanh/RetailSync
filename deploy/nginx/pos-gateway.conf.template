@@ -5,7 +5,8 @@
 # POS terminals connect here with TLS 1.2 or 1.3 and a client certificate issued
 # by the development CA. nginx completes the handshake, then answers 400 to a
 # connection without a valid certificate, so nothing reaches the middleware.
-# Only POST /api/v1/pos/events is forwarded; anything else gets 404.
+# Only POST /api/v1/pos/events and GET /api/v1/pos/discounts (PB-50) are
+# forwarded; anything else gets 404.
 
 server {
     listen 9443 ssl;
@@ -35,6 +36,23 @@ server {
         proxy_ssl_protocols           TLSv1.2 TLSv1.3;
 
         # Set on every request, replacing anything the client sent.
+        proxy_set_header X-Client-Cert    $ssl_client_escaped_cert;
+        proxy_set_header X-Gateway-Secret "${POS_GATEWAY_SECRET}";
+        proxy_set_header Host             $host;
+        proxy_set_header X-Forwarded-For  $remote_addr;
+    }
+
+    location = /api/v1/pos/discounts {
+        if ($request_method != GET) {
+            return 404;
+        }
+
+        proxy_pass https://middleware:8443/api/v1/pos/discounts;
+        proxy_ssl_verify              on;
+        proxy_ssl_trusted_certificate /certs/ca.crt;
+        proxy_ssl_name                middleware;
+        proxy_ssl_protocols           TLSv1.2 TLSv1.3;
+
         proxy_set_header X-Client-Cert    $ssl_client_escaped_cert;
         proxy_set_header X-Gateway-Secret "${POS_GATEWAY_SECRET}";
         proxy_set_header Host             $host;
