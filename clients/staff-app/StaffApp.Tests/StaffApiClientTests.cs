@@ -45,6 +45,8 @@ public class StaffApiClientTests
         await client.GetAlertsAsync();
         await client.GetRecommendationsAsync();
         await client.GetRecommendationAsync(42);
+        await client.GetDiscountsAsync(allStores: false);
+        await client.GetDiscountsAsync(allStores: true);
 
         Assert.Equal(new[]
         {
@@ -53,7 +55,9 @@ public class StaffApiClientTests
             "https://10.0.0.5:8443/api/v1/near-expiry-alerts",
             "https://10.0.0.5:8443/api/v1/recommendations",
             "https://10.0.0.5:8443/api/v1/recommendations/42",
-        }, handler.Requests.Select(request => request.Url));
+            "https://10.0.0.5:8443/api/v1/staff/discounts?scope=own",
+            "https://10.0.0.5:8443/api/v1/staff/discounts?scope=all",
+        },handler.Requests.Select(request => request.Url));
         Assert.All(handler.Requests, request =>
         {
             Assert.Equal(HttpMethod.Get, request.Method);
@@ -99,6 +103,17 @@ public class StaffApiClientTests
 
         Assert.True(result.IsUnreachable);
         Assert.Contains("Could not connect", result.Message);
+    }
+
+    [Fact]
+    public async Task Pb46_5_timeout_is_status_0_with_a_vietnamese_message()
+    {
+        var (client, _) = Create(_ => throw new OperationCanceledException());
+
+        var result = await client.GetDiscountsAsync(allStores: false);
+
+        Assert.True(result.IsUnreachable);
+        Assert.Equal("không có phản hồi sau 10 giây", result.Message);
     }
 
     [Fact]

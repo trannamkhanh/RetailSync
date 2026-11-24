@@ -15,7 +15,7 @@ public sealed record TokenInfo(string Subject, string Role, string? StoreId, Dat
         var parts = token.Split('.');
         if (parts.Length != 3)
         {
-            throw new ConfigurationException("The token is not a JWT (header.payload.signature).");
+            throw new ConfigurationException("Token không phải JWT (header.payload.signature).");
         }
 
         try
@@ -24,7 +24,7 @@ public sealed record TokenInfo(string Subject, string Role, string? StoreId, Dat
             var root = document.RootElement;
             var subject = root.TryGetProperty("sub", out var sub) && sub.ValueKind == JsonValueKind.String
                 ? sub.GetString()!
-                : throw new ConfigurationException("The token has no 'sub' claim.");
+                : throw new ConfigurationException("Token không có claim 'sub'.");
             var role = root.TryGetProperty("role", out var value) && value.ValueKind == JsonValueKind.String
                 ? value.GetString()!
                 : string.Empty;
@@ -38,7 +38,7 @@ public sealed record TokenInfo(string Subject, string Role, string? StoreId, Dat
         }
         catch (Exception error) when (error is JsonException or FormatException or ArgumentException)
         {
-            throw new ConfigurationException("The token payload cannot be read.", error);
+            throw new ConfigurationException("Không đọc được phần payload của token.", error);
         }
     }
 

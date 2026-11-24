@@ -26,39 +26,49 @@ public sealed record AlertLine(long AlertId, string BatchId, string Sku, DateOnl
                                int DaysToExpiry, string AlertType)
 {
     /// <summary>The Urgency column of DS-08 screen 2.</summary>
-    public string Urgency => AlertType == "EXPIRED" || DaysToExpiry < 0
-        ? "EXPIRED"
-        : DaysToExpiry <= 1 ? "Today or tomorrow" : "Soon";
+    public string Urgency => IsExpired ? "Đã hết hạn" : DaysToExpiry <= 1 ? "Hôm nay hoặc mai" : "Sắp hết hạn";
+
+    public bool IsExpired => AlertType == "EXPIRED" || DaysToExpiry < 0;
 }
 
 /// <summary>GET /recommendations (DS-04 RecommendationSummary).</summary>
 public record RecommendationLine(long RecId, string Sku, string ActionType, decimal? DiscountPct, int? ProposedQty,
                                  string Status)
 {
+    /// <summary>The Hành động column: a Vietnamese label for the known codes, an unknown code as sent.
+    /// Only the display changes; <c>ActionType</c> keeps the API value.</summary>
+    public string ActionLabel => ActionType switch
+    {
+        "DISCOUNT" => "Giảm giá",
+        "CLEARANCE" => "Thanh lý",
+        "REDISTRIBUTION" => "Điều chuyển",
+        _ => ActionType,
+    };
+
     /// <summary>The Level column of DS-08 screen 3: a percentage for DISCOUNT, units otherwise.
     /// Numbers use the invariant culture, so 12.5 never shows as "12,5" on a vi-VN machine.</summary>
     public string Level => ActionType == "DISCOUNT"
         ? DiscountPct is { } pct ? pct.ToString("0.##", CultureInfo.InvariantCulture) + "%" : "-"
-        : ProposedQty is { } qty ? (qty == 1 ? "1 unit" : $"{qty} units") : "-";
+        : ProposedQty is { } qty ? $"{qty} đơn vị" : "-";
 }
 
 /// <summary>GET /recommendations/{rec_id} (DS-04 RecommendationDetail).</summary>
 public sealed record RecommendationDetail(RecommendationLine Summary, string? BatchId, DateOnly? ExpiryDate,
                                           string Reason, IReadOnlyList<GuardrailLine> GuardrailResults)
 {
-    /// <summary>The detail title of DS-08, for example "Discount 50% on SKU-0001, batch B-1033".</summary>
+    /// <summary>The detail title of DS-08, for example "Giảm 50% SKU-0001, lô B-1033".</summary>
     public string Title
     {
         get
         {
             var action = Summary.ActionType switch
             {
-                "DISCOUNT" => $"Discount {Summary.Level} on {Summary.Sku}",
-                "CLEARANCE" => $"Clearance of {Summary.Level} of {Summary.Sku}",
-                "REDISTRIBUTION" => $"Redistribute {Summary.Level} of {Summary.Sku}",
+                "DISCOUNT" => $"Giảm {Summary.Level} {Summary.Sku}",
+                "CLEARANCE" => $"Thanh lý {Summary.Level} {Summary.Sku}",
+                "REDISTRIBUTION" => $"Điều chuyển {Summary.Level} {Summary.Sku}",
                 _ => $"{Summary.ActionType} {Summary.Sku}",
             };
-            return BatchId is null ? action : $"{action}, batch {BatchId}";
+            return BatchId is null ? action : $"{action}, lô {BatchId}";
         }
     }
 }
@@ -66,19 +76,26 @@ public sealed record RecommendationDetail(RecommendationLine Summary, string? Ba
 public sealed record GuardrailLine(string RuleType, string Outcome, decimal? OriginalValue, decimal? AdjustedValue,
                                    string? Message)
 {
-    /// <summary>"MIN_SHELF_LIFE: passed" or "MAX_DISCOUNT: adjusted 60 -> 50 (message)".</summary>
+    /// <summary>"MIN_SHELF_LIFE: đạt" or "MAX_DISCOUNT: điều chỉnh 60 -> 50 (message)"; the rule type
+    /// and the server message stay as sent.</summary>
     public string Text
     {
         get
         {
             var text = Outcome == "ADJUSTED"
                 ? string.Create(CultureInfo.InvariantCulture,
-                    $"{RuleType}: adjusted {OriginalValue:0.##} -> {AdjustedValue:0.##}")
-                : $"{RuleType}: {Outcome.ToLowerInvariant()}";
+                    $"{RuleType}: điều chỉnh {OriginalValue:0.##} -> {AdjustedValue:0.##}")
+                : $"{RuleType}: {Outcome switch { "PASSED" => "đạt", "BLOCKED" => "chặn", _ => Outcome }}";
             return string.IsNullOrWhiteSpace(Message) ? text : $"{text} ({Message})";
         }
     }
 }
+
+/// <summary>GET /staff/discounts (DS-04 StaffDiscount, PB-50). <c>DistanceKm</c> is null for the
+/// caller's own store; <c>BatchId</c> and <c>ExpiryDate</c> are null for a SKU-level discount.</summary>
+public sealed record DiscountLine(string StoreId, string StoreName, double? DistanceKm, string Sku, string Name,
+                                  string? BatchId, DateOnly? ExpiryDate, decimal DiscountPct, decimal ListPrice,
+                                  decimal DiscountedPrice, DateTimeOffset DecidedAt, bool SoldAtDiscount);
 
 /// <summary>POST /recommendations/{rec_id}/decision, 200 answer.</summary>
 public sealed record DecisionResult(long RecId, string Status, DateTimeOffset DecidedAt);

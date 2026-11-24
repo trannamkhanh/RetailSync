@@ -15,19 +15,19 @@ public class ErrorHandlingTests
     [InlineData(ApiArea.Decision)]
     public void Stf46_5_401_shows_token_invalid_or_expired_on_every_screen(ApiArea area)
     {
-        Assert.Equal("Token invalid or expired", UserMessages.For(Answer(401), area).Text);
+        Assert.Equal("Token không hợp lệ hoặc đã hết hạn", UserMessages.For(Answer(401), area).Text);
     }
 
     [Fact]
     public void Stf46_3_unknown_barcode_shows_product_not_found()
     {
-        Assert.Equal("Product not found", UserMessages.For(Answer(404, "NOT_FOUND"), ApiArea.Lookup).Text);
+        Assert.Equal("Không tìm thấy sản phẩm", UserMessages.For(Answer(404, "NOT_FOUND"), ApiArea.Lookup).Text);
     }
 
     [Fact]
     public void Pb46_403_shows_the_role_message()
     {
-        Assert.Equal("This role cannot use this function", UserMessages.For(Answer(403), ApiArea.Alerts).Text);
+        Assert.Equal("Vai trò này không dùng được chức năng này", UserMessages.For(Answer(403), ApiArea.Alerts).Text);
     }
 
     [Fact]
@@ -35,7 +35,7 @@ public class ErrorHandlingTests
     {
         var message = UserMessages.For(Answer(409, "ALREADY_DECIDED"), ApiArea.Decision);
 
-        Assert.Equal(("Already decided", true), (message.Text, message.Refresh));
+        Assert.Equal(("Đề xuất đã được quyết định", true), (message.Text, message.Refresh));
     }
 
     [Theory]
@@ -45,7 +45,7 @@ public class ErrorHandlingTests
     {
         var message = UserMessages.For(Answer(status, code), ApiArea.Decision);
 
-        Assert.Equal(("No longer valid", true), (message.Text, message.Refresh));
+        Assert.Equal(("Đề xuất không còn hiệu lực", true), (message.Text, message.Refresh));
     }
 
     [Fact]
@@ -56,7 +56,7 @@ public class ErrorHandlingTests
 
         Assert.True(message.CanRetry);
         Assert.False(message.Refresh);
-        Assert.Contains("Cannot reach the server", message.Text);
+        Assert.Contains("Không kết nối được máy chủ", message.Text);
     }
 
     [Fact]

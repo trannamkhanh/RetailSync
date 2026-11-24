@@ -14,7 +14,7 @@ public static class ServerCertificateValidator
         if (!File.Exists(path))
         {
             throw new ConfigurationException(
-                $"Missing CA certificate: {path}\nCopy ca.crt from the server (.certs/ca.crt) next to the app or set CaCertificatePath.");
+                $"Thiếu chứng chỉ CA: {path}\nHãy chép ca.crt từ máy chủ (.certs/ca.crt) vào cạnh ứng dụng hoặc đặt CaCertificatePath.");
         }
 
         try
@@ -27,7 +27,7 @@ public static class ServerCertificateValidator
             if (constraints is null || !constraints.CertificateAuthority)
             {
                 authority.Dispose();
-                throw new ConfigurationException($"The certificate is not a CA certificate: {path}");
+                throw new ConfigurationException($"Chứng chỉ này không phải chứng chỉ CA: {path}");
             }
 
             return authority;
@@ -38,7 +38,7 @@ public static class ServerCertificateValidator
         }
         catch (Exception error)
         {
-            throw new ConfigurationException($"Could not read the CA certificate: {path}", error);
+            throw new ConfigurationException($"Không đọc được chứng chỉ CA: {path}", error);
         }
     }
 
@@ -140,6 +140,6 @@ public static class ServerCertificateValidator
             }
         }
 
-        throw new HttpRequestException($"Could not connect to {host}:{port}.", lastError);
+        throw new HttpRequestException($"Không kết nối được {host}:{port}.", lastError);
     }
 }

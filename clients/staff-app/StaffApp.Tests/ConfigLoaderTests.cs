@@ -75,7 +75,7 @@ public sealed class ConfigLoaderTests : IDisposable
 
         var error = Assert.Throws<ConfigurationException>(() => ConfigLoader.Load(_folder));
 
-        Assert.Contains("Missing token file", error.Message);
+        Assert.Contains("Thiếu file token", error.Message);
     }
 
     [Fact]
@@ -92,7 +92,7 @@ public sealed class ConfigLoaderTests : IDisposable
     [Theory]
     [InlineData("""{"BaseUrl":"http://localhost:8443/api/v1"}""", "https")]
     [InlineData("""{"FontSize":40}""", "FontSize")]
-    [InlineData("""{"BaseUrl":""", "not valid JSON")]
+    [InlineData("""{"BaseUrl":""", "không phải JSON hợp lệ")]
     public void Pb46_bad_settings_are_refused(string local, string expected)
     {
         Settings();

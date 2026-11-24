@@ -48,7 +48,7 @@ public class ApiParsersTests
                "days_to_expiry":4,"alert_type":"NEAR_EXPIRY"}]}
             """);
 
-        Assert.Equal(new[] { "EXPIRED", "Today or tomorrow", "Soon" }, alerts.Select(alert => alert.Urgency));
+        Assert.Equal(new[] { "Đã hết hạn", "Hôm nay hoặc mai", "Sắp hết hạn" }, alerts.Select(alert => alert.Urgency));
         Assert.Equal(new long[] { 3, 7, 9 }, alerts.Select(alert => alert.AlertId));
     }
 
@@ -63,7 +63,7 @@ public class ApiParsersTests
               {"rec_id":14,"sku":"SKU-0009","action_type":"DISCOUNT","discount_pct":12.5,"status":"PENDING"}]}
             """);
 
-        Assert.Equal(new[] { "50%", "8 units", "10 units", "12.5%" }, rows.Select(row => row.Level));
+        Assert.Equal(new[] { "50%", "8 đơn vị", "10 đơn vị", "12.5%" }, rows.Select(row => row.Level));
         Assert.All(rows, row => Assert.Equal("PENDING", row.Status));
     }
 
@@ -78,12 +78,25 @@ public class ApiParsersTests
             var guardrail = new GuardrailLine("MAX_DISCOUNT", "ADJUSTED", 60.25m, 50m, null);
 
             Assert.Equal("12.5%", line.Level);
-            Assert.Equal("MAX_DISCOUNT: adjusted 60.25 -> 50", guardrail.Text);
+            Assert.Equal("MAX_DISCOUNT: điều chỉnh 60.25 -> 50", guardrail.Text);
         }
         finally
         {
             CultureInfo.CurrentCulture = previous;
         }
+    }
+
+    [Theory]
+    [InlineData("DISCOUNT", "Giảm giá")]
+    [InlineData("CLEARANCE", "Thanh lý")]
+    [InlineData("REDISTRIBUTION", "Điều chuyển")]
+    [InlineData("MARKDOWN", "MARKDOWN")]
+    public void Pb46_5_action_column_shows_a_vietnamese_label_and_keeps_the_code(string code, string label)
+    {
+        var line = ApiParsers.Recommendations(
+            $$"""{"items":[{"rec_id":1,"sku":"SKU-0001","action_type":"{{code}}","discount_pct":null,"proposed_qty":null,"status":"PENDING"}]}""")[0];
+
+        Assert.Equal((code, label), (line.ActionType, line.ActionLabel));
     }
 
     [Fact]
@@ -99,10 +112,10 @@ public class ApiParsersTests
                 "message":"capped at 50"}]}
             """);
 
-        Assert.Equal("Discount 50% on SKU-0006, batch B-1033", detail.Title);
+        Assert.Equal("Giảm 50% SKU-0006, lô B-1033", detail.Title);
         Assert.Equal(new DateOnly(2026, 11, 2), detail.ExpiryDate);
         Assert.StartsWith("Batch B-1033 expires", detail.Reason);
-        Assert.Equal(new[] { "MIN_SHELF_LIFE: passed", "MAX_DISCOUNT: adjusted 60 -> 50 (capped at 50)" },
+        Assert.Equal(new[] { "MIN_SHELF_LIFE: đạt", "MAX_DISCOUNT: điều chỉnh 60 -> 50 (capped at 50)" },
             detail.GuardrailResults.Select(line => line.Text));
     }
 
@@ -127,12 +140,12 @@ public class ApiParsersTests
                 "message":null}]}
             """);
 
-        Assert.Equal("Discount 30% on SKU-0006, batch B-1033", numbers.Title);
+        Assert.Equal("Giảm 30% SKU-0006, lô B-1033", numbers.Title);
         Assert.Equal(numbers.Title, strings.Title);
         Assert.Equal(numbers.Summary.DiscountPct, strings.Summary.DiscountPct);
         Assert.Equal(numbers.GuardrailResults.Select(line => line.Text),
             strings.GuardrailResults.Select(line => line.Text));
-        Assert.Equal("MAX_DISCOUNT: adjusted 30 -> 10", numbers.GuardrailResults[0].Text);
+        Assert.Equal("MAX_DISCOUNT: điều chỉnh 30 -> 10", numbers.GuardrailResults[0].Text);
     }
 
     [Fact]
@@ -158,8 +171,20 @@ public class ApiParsersTests
             """);
 
         Assert.Null(detail.ExpiryDate);
-        Assert.Equal("Redistribute 10 units of SKU-0008", detail.Title);
+        Assert.Equal("Điều chuyển 10 đơn vị SKU-0008", detail.Title);
         Assert.Empty(detail.GuardrailResults);
+    }
+
+    [Fact]
+    public void Pb46_5_clearance_title_uses_the_same_name_as_the_action_column()
+    {
+        var detail = ApiParsers.Detail("""
+            {"rec_id":14,"sku":"SKU-0001","action_type":"CLEARANCE","proposed_qty":14,"status":"PENDING",
+             "batch_id":"B-1042","expiry_date":"2026-11-25","reason":"Near expiry.","guardrail_results":[]}
+            """);
+
+        Assert.Equal("Thanh lý 14 đơn vị SKU-0001, lô B-1042", detail.Title);
+        Assert.StartsWith(detail.Summary.ActionLabel, detail.Title);
     }
 
     [Fact]

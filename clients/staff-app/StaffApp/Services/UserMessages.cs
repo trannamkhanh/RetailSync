@@ -10,30 +10,32 @@ public enum ApiArea
     Recommendations,
     Detail,
     Decision,
+    Discounts,
 }
 
 /// <summary>A failed call as the user sees it. <c>CanRetry</c> offers Retry; <c>Refresh</c> reloads the list.</summary>
 public sealed record UserMessage(string Text, bool CanRetry, bool Refresh);
 
-/// <summary>Maps a failed answer to the DS-08 messages ("Token invalid or expired", "Already decided" ...).</summary>
+/// <summary>Maps a failed answer to the DS-08 messages, in Vietnamese ("Token không hợp lệ hoặc đã hết hạn" ...).</summary>
 public static class UserMessages
 {
-    public const string TokenInvalid = "Token invalid or expired";
-    public const string Forbidden = "This role cannot use this function";
-    public const string ProductNotFound = "Product not found";
-    public const string AlreadyDecided = "Already decided";
-    public const string NoLongerValid = "No longer valid";
-    public const string NoStores = "No stores available for lookup";
-    public const string NoStock = "No store has this product in stock";
-    public const string NoAlerts = "No near-expiry alerts";
-    public const string NoRecommendations = "No recommendations to process";
-    public const string InvalidBarcode = "Enter a barcode of 1 to 30 letters, digits or '-'";
+    public const string TokenInvalid = "Token không hợp lệ hoặc đã hết hạn";
+    public const string Forbidden = "Vai trò này không dùng được chức năng này";
+    public const string ProductNotFound = "Không tìm thấy sản phẩm";
+    public const string AlreadyDecided = "Đề xuất đã được quyết định";
+    public const string NoLongerValid = "Đề xuất không còn hiệu lực";
+    public const string NoStores = "Không có cửa hàng nào để tra cứu";
+    public const string NoStock = "Không cửa hàng nào còn hàng sản phẩm này";
+    public const string NoAlerts = "Không có cảnh báo cận hạn";
+    public const string NoRecommendations = "Không có đề xuất cần xử lý";
+    public const string NoDiscounts = "Không có giảm giá đang áp dụng.";
+    public const string InvalidBarcode = "Nhập mã vạch từ 1 đến 30 ký tự: chữ, số hoặc '-'";
 
     public static UserMessage For(ApiResult result, ApiArea area)
     {
         if (result.IsUnreachable)
         {
-            return new UserMessage($"Cannot reach the server ({result.Message}). Check the network and press Retry.",
+            return new UserMessage($"Không kết nối được máy chủ ({result.Message}). Kiểm tra mạng rồi bấm Thử lại.",
                 CanRetry: true, Refresh: false);
         }
 
@@ -46,14 +48,14 @@ public static class UserMessages
             409 when result.Code == "ALREADY_DECIDED" => new UserMessage(AlreadyDecided, false, true),
             409 when result.Code == "RECOMMENDATION_EXPIRED" => new UserMessage(NoLongerValid, false, true),
             422 when area == ApiArea.Lookup => new UserMessage(InvalidBarcode, false, false),
-            >= 500 => new UserMessage($"Server error (HTTP {result.Status}). Press Retry.", true, false),
+            >= 500 => new UserMessage($"Lỗi máy chủ (HTTP {result.Status}). Bấm Thử lại.", true, false),
             _ => new UserMessage(Describe(result), false, false),
         };
     }
 
     /// <summary>A parse failure of a 2xx answer: the server does not follow DS-04.</summary>
     public static UserMessage Unexpected(FormatException error) =>
-        new($"Unexpected answer from the server: {error.Message}", CanRetry: true, Refresh: false);
+        new($"Máy chủ trả lời không đúng định dạng: {error.Message}", CanRetry: true, Refresh: false);
 
     private static string Describe(ApiResult result)
     {

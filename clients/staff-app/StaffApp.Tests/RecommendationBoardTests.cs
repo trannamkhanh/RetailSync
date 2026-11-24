@@ -29,7 +29,7 @@ public class RecommendationBoardTests
 
         Assert.Equal((true, false), (outcome.Removed, outcome.Refresh));
         Assert.Equal(new long[] { 12 }, board.Rows.Select(row => row.RecId));
-        Assert.Contains("ACCEPTED", outcome.Message);
+        Assert.Equal("Đề xuất 11: ACCEPTED", outcome.Message);
     }
 
     [Fact]
@@ -43,8 +43,8 @@ public class RecommendationBoardTests
     }
 
     [Theory]
-    [InlineData(409, "ALREADY_DECIDED", "Already decided")]
-    [InlineData(409, "RECOMMENDATION_EXPIRED", "No longer valid")]
+    [InlineData(409, "ALREADY_DECIDED", "Đề xuất đã được quyết định")]
+    [InlineData(409, "RECOMMENDATION_EXPIRED", "Đề xuất không còn hiệu lực")]
     public void Stf47_5_a_conflict_shows_the_message_and_asks_for_a_refresh(int status, string code, string text)
     {
         var board = Board();

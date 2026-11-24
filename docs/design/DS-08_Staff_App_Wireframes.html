@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="vi">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -39,77 +39,97 @@ ul { margin:6px 0; padding-left:20px; }
 <body>
 <main>
 <h1>DS-08: Staff App Wireframes</h1>
-<p class="note">Approved, 1 Nov 2026. WinForms client of the Staff API (PB-46, PB-47). Traces to FR04, FR07, FR08; UC.04, UC.07, UC.08. Sample data is illustrative.</p>
+<p class="note">Approved, 1 Nov 2026; updated 24 Nov 2026 (PB-46-5, PB-50-3): the UI is in Vietnamese and has a fourth tab, Giảm giá. WinForms client of the Staff API (PB-46, PB-47, PB-50). Traces to FR04, FR07, FR08; UC.04, UC.07, UC.08. Sample data is illustrative.</p>
 
 <h2>Common rules</h2>
 <ul>
-<li>One window with three tabs. The title bar shows the store and staff name from the pre-issued token.</li>
-<li>All calls are asynchronous; the status bar shows loading, errors and the last refresh time.</li>
-<li>401 shows "Token invalid or expired"; 403 shows "This role cannot use this function"; connection errors keep the screen and offer Retry.</li>
+<li>One window with four tabs: Tra cứu, Cảnh báo cận hạn, Đề xuất, Giảm giá. The title bar shows the store and the staff account from the pre-issued token.</li>
+<li>Every label, button, status line and message the app writes itself is in Vietnamese. API codes (<code>ALREADY_DECIDED</code> ...), guardrail rule types (names the Admin configures), product names from the database and the recommendation reason and messages sent by the server stay as sent.</li>
+<li>Numbers and dates use fixed formats on every machine: thousands separator "," (32,000 VND), decimal point "." (12.5%), dates dd/MM/yyyy.</li>
+<li>All calls are asynchronous; the status bar shows loading, errors and the last refresh time ("Cập nhật lúc …").</li>
+<li>401 shows "Token không hợp lệ hoặc đã hết hạn"; 403 shows "Vai trò này không dùng được chức năng này"; a connection error keeps the screen, shows "Không kết nối được máy chủ (…). Kiểm tra mạng rồi bấm Thử lại." and offers Thử lại.</li>
 </ul>
 
-<h2>Screen 1: Lookup (barcode and nearby stores)</h2>
+<h2>Screen 1: Tra cứu (barcode and nearby stores)</h2>
 <p class="note">PB-31, PB-35, PB-46. Calls <code>GET /products/barcode/{barcode}</code> and <code>GET /products/barcode/{barcode}/stock</code>.</p>
 <div class="window">
-  <div class="title"><span>RetailSync Staff App</span><span>STORE-DN1 | Staff: Lan</span></div>
-  <div class="tabs"><div class="tab on">Lookup</div><div class="tab">Near-expiry alerts</div><div class="tab">Recommendations</div></div>
+  <div class="title"><span>RetailSync Staff App</span><span>STORE-DN1 | Nhân viên: staff_dn1</span></div>
+  <div class="tabs"><div class="tab on">Tra cứu</div><div class="tab">Cảnh báo cận hạn</div><div class="tab">Đề xuất</div><div class="tab">Giảm giá</div></div>
   <div class="body">
-    <div class="row"><div class="input">Scan or enter barcode</div><div class="btn main">Search</div></div>
+    <div class="row"><div class="input">Quét hoặc nhập mã vạch</div><div class="btn main">Tìm</div></div>
     <div class="cols">
-      <div class="box"><b>Product</b>Fresh milk 1L<br>SKU-0001 | Dairy | 32,000 VND<br>In this store: 40</div>
-      <div class="box"><b>Batches in this store</b>
-        <div class="wrap"><table><tr><th>Batch</th><th>Expiry</th><th>Qty</th></tr><tr><td>B-1042</td><td>05/11/2026</td><td>12</td></tr><tr><td>B-1077</td><td>20/11/2026</td><td>28</td></tr></table></div>
+      <div class="box"><b>Sản phẩm</b>Fresh milk 1L<br>SKU-0001 | Dairy | 32,000 VND<br>Tại cửa hàng này: 40</div>
+      <div class="box"><b>Các lô tại cửa hàng này</b>
+        <div class="wrap"><table><tr><th>Lô</th><th>HSD</th><th>SL</th></tr><tr><td>B-1042</td><td>05/11/2026</td><td>12</td></tr><tr><td>B-1077</td><td>20/11/2026</td><td>28</td></tr></table></div>
       </div>
     </div>
-    <b>Nearby stores (nearest first)</b>
-    <div class="wrap"><table><tr><th>Store</th><th>Distance</th><th>Quantity</th></tr><tr><td>Son Tra</td><td>1.8 km</td><td>0</td></tr><tr><td>Thanh Khe</td><td>4.4 km</td><td>18</td></tr></table></div>
+    <b>Cửa hàng lân cận (gần nhất trước)</b>
+    <div class="wrap"><table><tr><th>Cửa hàng</th><th>Khoảng cách</th><th>Số lượng</th></tr><tr><td>Cửa hàng Sơn Trà</td><td>1.8 km</td><td>0</td></tr><tr><td>Cửa hàng Thanh Khê</td><td>4.4 km</td><td>18</td></tr></table></div>
   </div>
-  <div class="status">Updated 09:15:02</div>
+  <div class="status">Cập nhật lúc 09:15:02</div>
 </div>
-<p class="note">Empty states: "Product not found", "No stores available for lookup", "No store has this product in stock".</p>
+<p class="note">Empty states: "Không tìm thấy sản phẩm", "Không có cửa hàng nào để tra cứu", "Không cửa hàng nào còn hàng sản phẩm này".</p>
 
-<h2>Screen 2: Near-expiry alerts</h2>
-<p class="note">PB-34, PB-46. Calls <code>GET /near-expiry-alerts</code>. EXPIRED first, then fewest days left. Read-only.</p>
+<h2>Screen 2: Cảnh báo cận hạn</h2>
+<p class="note">PB-34, PB-46. Calls <code>GET /near-expiry-alerts</code>. Expired first, then fewest days left. Read-only.</p>
 <div class="window">
-  <div class="title"><span>RetailSync Staff App</span><span>STORE-DN1 | Staff: Lan</span></div>
-  <div class="tabs"><div class="tab">Lookup</div><div class="tab on">Near-expiry alerts</div><div class="tab">Recommendations</div></div>
+  <div class="title"><span>RetailSync Staff App</span><span>STORE-DN1 | Nhân viên: staff_dn1</span></div>
+  <div class="tabs"><div class="tab">Tra cứu</div><div class="tab on">Cảnh báo cận hạn</div><div class="tab">Đề xuất</div><div class="tab">Giảm giá</div></div>
   <div class="body">
-    <div class="row"><span>3 open alerts</span><div class="btn">Refresh</div></div>
+    <div class="row"><span>3 cảnh báo đang mở</span><div class="btn">Làm mới</div></div>
     <div class="wrap"><table>
-      <tr><th>Urgency</th><th>Product</th><th>Batch</th><th>Expiry</th><th>Days left</th><th>Qty</th></tr>
-      <tr><td><b>EXPIRED</b></td><td>Yogurt 100g</td><td>B-0998</td><td>31/10/2026</td><td>-1</td><td>6</td></tr>
-      <tr><td>Today or tomorrow</td><td>Tofu 300g</td><td>B-1033</td><td>02/11/2026</td><td>1</td><td>14</td></tr>
-      <tr><td>Soon</td><td>Fresh milk 1L</td><td>B-1042</td><td>05/11/2026</td><td>4</td><td>12</td></tr>
+      <tr><th>Mức độ</th><th>Sản phẩm</th><th>Lô</th><th>HSD</th><th>Còn (ngày)</th><th>SL</th></tr>
+      <tr><td><b>Đã hết hạn</b></td><td>SKU-0005</td><td>B-0998</td><td>31/10/2026</td><td>-1</td><td>6</td></tr>
+      <tr><td>Hôm nay hoặc mai</td><td>SKU-0006</td><td>B-1033</td><td>02/11/2026</td><td>1</td><td>14</td></tr>
+      <tr><td>Sắp hết hạn</td><td>SKU-0001</td><td>B-1042</td><td>05/11/2026</td><td>4</td><td>12</td></tr>
     </table></div>
   </div>
-  <div class="status">Updated 09:15:40</div>
+  <div class="status">Cập nhật lúc 09:15:40</div>
 </div>
-<p class="note">Empty state: "No near-expiry alerts".</p>
+<p class="note">Empty state: "Không có cảnh báo cận hạn".</p>
 
-<h2>Screen 3: Recommendations</h2>
+<h2>Screen 3: Đề xuất</h2>
 <p class="note">PB-32, PB-33, PB-47. Calls <code>GET /recommendations</code>, <code>GET /recommendations/{rec_id}</code> and <code>POST /recommendations/{rec_id}/decision</code>.</p>
 <div class="window">
-  <div class="title"><span>RetailSync Staff App</span><span>STORE-DN1 | Staff: Lan</span></div>
-  <div class="tabs"><div class="tab">Lookup</div><div class="tab">Near-expiry alerts</div><div class="tab on">Recommendations</div></div>
+  <div class="title"><span>RetailSync Staff App</span><span>STORE-DN1 | Nhân viên: staff_dn1</span></div>
+  <div class="tabs"><div class="tab">Tra cứu</div><div class="tab">Cảnh báo cận hạn</div><div class="tab on">Đề xuất</div><div class="tab">Giảm giá</div></div>
   <div class="body">
     <div class="cols">
       <div class="wrap"><table>
-        <tr><th>Action</th><th>Product</th><th>Level</th></tr>
-        <tr class="sel"><td>DISCOUNT</td><td>Tofu 300g</td><td>50%</td></tr>
-        <tr><td>CLEARANCE</td><td>Bread 400g</td><td>8 units</td></tr>
-        <tr><td>REDISTRIBUTION</td><td>Rice 5kg</td><td>10 units</td></tr>
+        <tr><th>Hành động</th><th>Sản phẩm</th><th>Mức</th></tr>
+        <tr class="sel"><td>Giảm giá</td><td>SKU-0006</td><td>50%</td></tr>
+        <tr><td>Thanh lý</td><td>SKU-0007</td><td>8 đơn vị</td></tr>
+        <tr><td>Điều chuyển</td><td>SKU-0008</td><td>10 đơn vị</td></tr>
       </table></div>
-      <div class="box"><b>Details</b>
-        Discount 50% on Tofu 300g, batch B-1033<br>Expiry 02/11/2026<br>
-        <b style="margin-top:6px">Reason</b>Batch B-1033 expires in 1 day(s); 10 of 14 units may not sell in time.
-        <b style="margin-top:6px">Guardrails</b>MIN_SHELF_LIFE: passed<br>MAX_DISCOUNT: passed<br>MIN_PRICE: passed
-        <div class="row" style="margin-top:10px;margin-bottom:0"><div class="btn main">Accept</div><div class="btn">Reject</div></div>
+      <div class="box"><b>Chi tiết</b>
+        Giảm 50% SKU-0006, lô B-1033<br>HSD 02/11/2026<br>
+        <b style="margin-top:6px">Lý do</b>Batch B-1033 expires in 1 day(s); 10 of 14 units may not sell in time.
+        <b style="margin-top:6px">Quy tắc kiểm soát</b>MIN_SHELF_LIFE: đạt<br>MAX_DISCOUNT: đạt<br>MIN_PRICE: đạt
+        <div class="row" style="margin-top:10px;margin-bottom:0"><div class="btn main">Chấp nhận</div><div class="btn">Từ chối</div></div>
       </div>
     </div>
   </div>
-  <div class="status">Updated 09:16:05</div>
+  <div class="status">Cập nhật lúc 09:16:05</div>
 </div>
-<p class="note">Accept and Reject ask for confirmation, because a decision is final. On success the row leaves the list. 409 <code>ALREADY_DECIDED</code> shows "Already decided"; <code>RECOMMENDATION_EXPIRED</code> shows "No longer valid"; both refresh the list. Empty state: "No recommendations to process".</p>
+<p class="note">Chấp nhận and Từ chối ask for confirmation ("Quyết định không thể thay đổi."), because a decision is final. On success the row leaves the list. 409 <code>ALREADY_DECIDED</code> shows "Đề xuất đã được quyết định"; <code>RECOMMENDATION_EXPIRED</code> shows "Đề xuất không còn hiệu lực"; both refresh the list. Hành động shows Giảm giá, Thanh lý or Điều chuyển for <code>DISCOUNT</code>, <code>CLEARANCE</code>, <code>REDISTRIBUTION</code>, and an unknown code as sent. Empty state: "Không có đề xuất cần xử lý". A recommendation without a batch shows "Không theo lô"; one without guardrail results shows "Không có quy tắc nào áp dụng".</p>
+<p><b>Chấp nhận = giảm giá áp dụng từ hôm nay; nhân viên đổi nhãn trên kệ, giá trên POS tự cập nhật.</b></p>
+
+<h2>Screen 4: Giảm giá (active discounts)</h2>
+<p class="note">PB-50. Calls <code>GET /staff/discounts?scope=own</code> (Cửa hàng của tôi, the default) or <code>?scope=all</code> (Tất cả cửa hàng). Read-only. Own store first, then the nearest stores; one row per store, product and batch. The rules for an active discount are in DS-04.</p>
+<div class="window">
+  <div class="title"><span>RetailSync Staff App</span><span>STORE-DN1 | Nhân viên: staff_dn1</span></div>
+  <div class="tabs"><div class="tab">Tra cứu</div><div class="tab">Cảnh báo cận hạn</div><div class="tab">Đề xuất</div><div class="tab on">Giảm giá</div></div>
+  <div class="body">
+    <div class="row"><span>( ) Cửa hàng của tôi</span><span>(•) Tất cả cửa hàng</span><div class="btn">Làm mới</div></div>
+    <div class="wrap"><table>
+      <tr><th>Cửa hàng</th><th>Khoảng cách</th><th>Sản phẩm</th><th>Lô</th><th>HSD</th><th>Giảm</th><th>Giá</th><th>Từ lúc</th><th>Đã bán giá giảm</th></tr>
+      <tr><td>Cửa hàng Hải Châu (tôi)</td><td></td><td>Fresh milk 1L (SKU-0001)</td><td>B-STORE-DN1-SKU-0001-1</td><td>25/11/2026</td><td>30%</td><td>22,400 VND</td><td>23/11 14:29</td><td>Có</td></tr>
+      <tr><td>Cửa hàng Sơn Trà</td><td>1.72 km</td><td>Yogurt 100g (SKU-0002)</td><td>(SKU)</td><td></td><td>10%</td><td>6,300 VND</td><td>23/11 14:29</td><td>Chưa</td></tr>
+    </table></div>
+  </div>
+  <div class="status">Cập nhật lúc 14:35:10</div>
+</div>
+<p class="note">"(tôi)" marks the caller's store; Khoảng cách is empty for it. Lô shows "(SKU)" for a discount without a batch, and HSD is then empty. Giá is the discounted price the POS sells at. Từ lúc is the decision time in local time. Đã bán giá giảm is Có when the store sold the product below its list price today after the decision, otherwise Chưa. Empty state: "Không có giảm giá đang áp dụng."; errors as in the common rules.</p>
 </main>
 </body>
 </html>
