@@ -29,7 +29,7 @@ public class RecommendationBoardTests
 
         Assert.Equal((true, false), (outcome.Removed, outcome.Refresh));
         Assert.Equal(new long[] { 12 }, board.Rows.Select(row => row.RecId));
-        Assert.Equal("Đề xuất 11: ACCEPTED", outcome.Message);
+        Assert.Equal("Đề xuất 11: đã chấp nhận", outcome.Message);
     }
 
     [Fact]
@@ -40,6 +40,15 @@ public class RecommendationBoardTests
         board.Apply(11, Ok("REJECTED"));
 
         Assert.DoesNotContain(board.Rows, row => row.RecId == 11);
+    }
+
+    [Theory]
+    [InlineData("ACCEPTED", "Đề xuất 11: đã chấp nhận")]
+    [InlineData("REJECTED", "Đề xuất 11: đã từ chối")]
+    [InlineData("ON_HOLD", "Đề xuất 11: ON_HOLD")]
+    public void Pb46_5_decision_status_shows_in_vietnamese_and_an_unknown_one_as_sent(string status, string text)
+    {
+        Assert.Equal(text, Board().Apply(11, Ok(status)).Message);
     }
 
     [Theory]

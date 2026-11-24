@@ -62,8 +62,10 @@ public sealed class MainForm : Form
     private bool _alertsLoaded;
     private bool _recommendationsLoaded;
     private bool _discountsLoaded;
-    // The header cell draws its text inside borders and margins that its padding does not count.
+    // A cell draws its text inside borders and margins that its padding does not count.
     private const int HeaderSlack = 12;
+    // Cửa hàng and Sản phẩm wrap onto two lines, so the nine columns fit 1280 px at 125 % scaling.
+    private static readonly int[] WrappedDiscountColumns = { 0, 2 };
 
     public MainForm(LoadedConfig config, StaffApiClient api)
     {
@@ -197,6 +199,13 @@ public sealed class MainForm : Form
         {
             column.SortMode = DataGridViewColumnSortMode.NotSortable;  // no room kept for a sort arrow
         }
+
+        foreach (var index in WrappedDiscountColumns)
+        {
+            _discounts.Columns[index].DefaultCellStyle.WrapMode = DataGridViewTriState.True;
+        }
+
+        _discounts.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells;
 
         var layout = Column(header, _discountsEmpty, _discounts);
         layout.RowStyles[2] = new RowStyle(SizeType.Percent, 100);
@@ -422,8 +431,10 @@ public sealed class MainForm : Form
             var header = DiscountRows.TwoLineWidth(column.HeaderText,
                 text => TextRenderer.MeasureText(text, style.Font ?? _discounts.Font).Width)
                 + style.Padding.Horizontal + HeaderSlack;
-            column.MinimumWidth = Math.Max(header,
-                column.GetPreferredWidth(DataGridViewAutoSizeColumnMode.AllCellsExceptHeader, true));
+            var cells = WrappedDiscountColumns.Contains(column.Index)
+                ? TwoLineCellWidth(column)
+                : column.GetPreferredWidth(DataGridViewAutoSizeColumnMode.AllCellsExceptHeader, true);
+            column.MinimumWidth = Math.Max(header, cells);
             // Share the spare width in the same proportion, so no column is pushed past the grid.
             column.FillWeight = column.MinimumWidth;
         }
@@ -432,6 +443,16 @@ public sealed class MainForm : Form
         _discountsEmpty.Text = lines.Count == 0 ? UserMessages.NoDiscounts : string.Empty;
         Done(all ? "Đã tải giảm giá của tất cả cửa hàng." : "Đã tải giảm giá của cửa hàng.");
     }
+
+    /// <summary>The width that shows every cell of a wrapping column in at most two lines.</summary>
+    private int TwoLineCellWidth(DataGridViewColumn column) =>
+        _discounts.Rows.Cast<DataGridViewRow>()
+            .Select(row => row.Cells[column.Index])
+            .Select(cell => DiscountRows.TwoLineWidth(cell.FormattedValue?.ToString() ?? string.Empty,
+                    text => TextRenderer.MeasureText(text, cell.InheritedStyle.Font ?? _discounts.Font).Width)
+                + cell.InheritedStyle.Padding.Horizontal + HeaderSlack)
+            .DefaultIfEmpty(0)
+            .Max();
 
     private void BindRecommendations()
     {
