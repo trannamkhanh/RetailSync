@@ -25,7 +25,9 @@ public sealed class MockPosBackend : IPosBackend
     private readonly RequestLog? _log;
     private readonly Dictionary<string, Dictionary<string, int>> _stock = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, MockTransaction> _transactions = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, PosDiscountList> _discountsByStore = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<AuditEntry> _audit = new();
+    private PosDiscountList? _defaultDiscounts;
     private long _nextAuditId = 1;
 
     public MockPosBackend(AppConfig config, RequestLog? log = null)
@@ -87,6 +89,32 @@ public sealed class MockPosBackend : IPosBackend
 
     public IReadOnlyList<AuditRow> GetAudit(int limit = 20) =>
         _audit.Take(limit).Select(entry => AuditRow.From(entry)).ToList();
+
+    public PosDiscountList GetDiscounts(string storeId, DateTime? utcNow = null)
+    {
+        if (_discountsByStore.TryGetValue(storeId, out var storeDiscounts))
+        {
+            return storeDiscounts;
+        }
+
+        return _defaultDiscounts
+               ?? new PosDiscountList(PosDiscounts.CurrentBusinessDate(utcNow), Array.Empty<PosDiscountItem>());
+    }
+
+    public void SetDiscounts(PosDiscountList discounts) =>
+        _defaultDiscounts = discounts ?? throw new ArgumentNullException(nameof(discounts));
+
+    public void SetDiscounts(string storeId, PosDiscountList discounts)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(storeId);
+        _discountsByStore[storeId] = discounts ?? throw new ArgumentNullException(nameof(discounts));
+    }
+
+    public void ClearDiscounts()
+    {
+        _defaultDiscounts = null;
+        _discountsByStore.Clear();
+    }
 
     private PosResult Process(PosEvent posEvent)
     {
