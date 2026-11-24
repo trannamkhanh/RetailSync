@@ -29,7 +29,12 @@ public sealed class RecommendationBoard
             string status;
             try
             {
-                status = ApiParsers.Decision(result.Body).Status;
+                status = ApiParsers.Decision(result.Body).Status switch
+                {
+                    "ACCEPTED" => "đã chấp nhận",
+                    "REJECTED" => "đã từ chối",
+                    var other => other,  // an unknown status shows as sent
+                };
             }
             catch (FormatException)
             {
