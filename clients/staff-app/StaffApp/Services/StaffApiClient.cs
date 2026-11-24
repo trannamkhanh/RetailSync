@@ -80,7 +80,7 @@ public sealed class StaffApiClient : IDisposable
         }
         catch (OperationCanceledException)
         {
-            return new ApiResult(0, string.Empty, $"no answer within {Timeout.TotalSeconds:0} s", string.Empty);
+            return new ApiResult(0, string.Empty, $"không có phản hồi sau {Timeout.TotalSeconds:0} giây", string.Empty);
         }
         catch (HttpRequestException error)
         {

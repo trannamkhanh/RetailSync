@@ -14,6 +14,23 @@ public static class DiscountRows
     public static readonly string[] Columns =
         { "Cửa hàng", "Khoảng cách", "Sản phẩm", "Lô", "HSD", "Giảm", "Giá", "Từ lúc", "Đã bán giá giảm" };
 
+    /// <summary>
+    /// The narrowest text width that shows <paramref name="header"/> in at most two lines, breaking at
+    /// one space: the smaller of the widest line over every split, or the whole header when it has
+    /// one word. <paramref name="measure"/> gives the width of a text.
+    /// </summary>
+    public static int TwoLineWidth(string header, Func<string, int> measure)
+    {
+        var words = header.Split(' ');
+        var best = measure(header);
+        for (var i = 1; i < words.Length; i++)
+        {
+            best = Math.Min(best, Math.Max(measure(string.Join(' ', words[..i])), measure(string.Join(' ', words[i..]))));
+        }
+
+        return best;
+    }
+
     /// <summary>The nine cells of one line; <paramref name="zone"/> is the time zone of "Từ lúc".</summary>
     public static string[] Cells(DiscountLine line, string ownStoreId, TimeZoneInfo zone) => new[]
     {

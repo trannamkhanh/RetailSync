@@ -35,8 +35,6 @@ public sealed record AlertLine(long AlertId, string BatchId, string Sku, DateOnl
 public record RecommendationLine(long RecId, string Sku, string ActionType, decimal? DiscountPct, int? ProposedQty,
                                  string Status)
 {
-    /// <summary>The Level column of DS-08 screen 3: a percentage for DISCOUNT, units otherwise.
-    /// Numbers use the invariant culture, so 12.5 never shows as "12,5" on a vi-VN machine.</summary>
     /// <summary>The Hành động column: a Vietnamese label for the known codes, an unknown code as sent.
     /// Only the display changes; <c>ActionType</c> keeps the API value.</summary>
     public string ActionLabel => ActionType switch
@@ -47,6 +45,8 @@ public record RecommendationLine(long RecId, string Sku, string ActionType, deci
         _ => ActionType,
     };
 
+    /// <summary>The Level column of DS-08 screen 3: a percentage for DISCOUNT, units otherwise.
+    /// Numbers use the invariant culture, so 12.5 never shows as "12,5" on a vi-VN machine.</summary>
     public string Level => ActionType == "DISCOUNT"
         ? DiscountPct is { } pct ? pct.ToString("0.##", CultureInfo.InvariantCulture) + "%" : "-"
         : ProposedQty is { } qty ? $"{qty} đơn vị" : "-";
@@ -64,7 +64,7 @@ public sealed record RecommendationDetail(RecommendationLine Summary, string? Ba
             var action = Summary.ActionType switch
             {
                 "DISCOUNT" => $"Giảm {Summary.Level} {Summary.Sku}",
-                "CLEARANCE" => $"Xả hàng {Summary.Level} {Summary.Sku}",
+                "CLEARANCE" => $"Thanh lý {Summary.Level} {Summary.Sku}",
                 "REDISTRIBUTION" => $"Điều chuyển {Summary.Level} {Summary.Sku}",
                 _ => $"{Summary.ActionType} {Summary.Sku}",
             };

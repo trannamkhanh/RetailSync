@@ -62,6 +62,8 @@ public sealed class MainForm : Form
     private bool _alertsLoaded;
     private bool _recommendationsLoaded;
     private bool _discountsLoaded;
+    // The header cell draws its text inside borders and margins that its padding does not count.
+    private const int HeaderSlack = 12;
 
     public MainForm(LoadedConfig config, StaffApiClient api)
     {
@@ -71,7 +73,7 @@ public sealed class MainForm : Form
         Font = new Font("Segoe UI", config.Settings.FontSize);
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(1000, 680);
-        Size = new Size(1180, 780);
+        Size = new Size(1280, 780);  // the nine Giảm giá columns fit without a scroll bar
 
         var tabs = new TabControl { Dock = DockStyle.Fill };
         tabs.TabPages.Add(LookupTab());
@@ -190,6 +192,11 @@ public sealed class MainForm : Form
         header.Controls.Add(_ownStore);
         header.Controls.Add(_allStores);
         header.Controls.Add(refresh);
+
+        foreach (DataGridViewColumn column in _discounts.Columns)
+        {
+            column.SortMode = DataGridViewColumnSortMode.NotSortable;  // no room kept for a sort arrow
+        }
 
         var layout = Column(header, _discountsEmpty, _discounts);
         layout.RowStyles[2] = new RowStyle(SizeType.Percent, 100);
@@ -391,6 +398,10 @@ public sealed class MainForm : Form
 
         if (!result.IsSuccess)
         {
+            // Never leave the previous scope's rows under the new choice; the next visit reloads.
+            _discounts.Rows.Clear();
+            _discountsEmpty.Text = string.Empty;
+            _discountsLoaded = false;
             Fail(UserMessages.For(result, ApiArea.Discounts));
             return;
         }
@@ -403,11 +414,18 @@ public sealed class MainForm : Form
             _discounts.Rows.Add(DiscountRows.Cells(line, _storeId, TimeZoneInfo.Local));
         }
 
-        // Nine columns in one width: no cell text is cut, the headers wrap, the rest is shared.
+        // Nine columns in one width: no cell text is cut, each header takes at most two lines,
+        // the rest of the width is shared.
         foreach (DataGridViewColumn column in _discounts.Columns)
         {
-            column.MinimumWidth = Math.Max(70,
+            var style = column.HeaderCell.InheritedStyle;
+            var header = DiscountRows.TwoLineWidth(column.HeaderText,
+                text => TextRenderer.MeasureText(text, style.Font ?? _discounts.Font).Width)
+                + style.Padding.Horizontal + HeaderSlack;
+            column.MinimumWidth = Math.Max(header,
                 column.GetPreferredWidth(DataGridViewAutoSizeColumnMode.AllCellsExceptHeader, true));
+            // Share the spare width in the same proportion, so no column is pushed past the grid.
+            column.FillWeight = column.MinimumWidth;
         }
 
         _discounts.ClearSelection();
@@ -518,6 +536,11 @@ public sealed class MainForm : Form
 
         if (result.IsSuccess)
         {
+            if (accept)
+            {
+                _discountsLoaded = false;  // an accepted discount shows when the Giảm giá tab is opened again
+            }
+
             Done(outcome.Message);
             return;
         }

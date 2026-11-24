@@ -98,10 +98,19 @@ public class DiscountsTests
         Assert.Equal((text, canRetry), (message.Text, message.CanRetry));
     }
 
+    [Theory]
+    [InlineData("Đã bán giá giảm", 8)]   // "Đã bán" | "giá giảm"
+    [InlineData("Khoảng cách", 6)]       // "Khoảng" | "cách"
+    [InlineData("HSD", 3)]               // one word stays on one line
+    public void Pb50_3_header_width_fits_the_header_in_two_lines(string header, int expected)
+    {
+        Assert.Equal(expected, DiscountRows.TwoLineWidth(header, text => text.Length));
+    }
+
     [Fact]
     public void Pb50_3_network_error_offers_retry()
     {
-        var message = UserMessages.For(new ApiResult(0, string.Empty, "no answer within 10 s", string.Empty),
+        var message = UserMessages.For(new ApiResult(0, string.Empty, "không có phản hồi sau 10 giây", string.Empty),
             ApiArea.Discounts);
 
         Assert.True(message.CanRetry);

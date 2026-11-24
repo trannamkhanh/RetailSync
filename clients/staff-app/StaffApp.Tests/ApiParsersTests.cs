@@ -176,6 +176,18 @@ public class ApiParsersTests
     }
 
     [Fact]
+    public void Pb46_5_clearance_title_uses_the_same_name_as_the_action_column()
+    {
+        var detail = ApiParsers.Detail("""
+            {"rec_id":14,"sku":"SKU-0001","action_type":"CLEARANCE","proposed_qty":14,"status":"PENDING",
+             "batch_id":"B-1042","expiry_date":"2026-11-25","reason":"Near expiry.","guardrail_results":[]}
+            """);
+
+        Assert.Equal("Thanh lý 14 đơn vị SKU-0001, lô B-1042", detail.Title);
+        Assert.StartsWith(detail.Summary.ActionLabel, detail.Title);
+    }
+
+    [Fact]
     public void Pb47_decision_answer_parses()
     {
         var decision = ApiParsers.Decision("""{"rec_id":11,"status":"ACCEPTED","decided_at":"2026-11-20T03:15:00Z"}""");

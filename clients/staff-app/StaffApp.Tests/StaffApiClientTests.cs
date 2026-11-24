@@ -106,6 +106,17 @@ public class StaffApiClientTests
     }
 
     [Fact]
+    public async Task Pb46_5_timeout_is_status_0_with_a_vietnamese_message()
+    {
+        var (client, _) = Create(_ => throw new OperationCanceledException());
+
+        var result = await client.GetDiscountsAsync(allStores: false);
+
+        Assert.True(result.IsUnreachable);
+        Assert.Equal("không có phản hồi sau 10 giây", result.Message);
+    }
+
+    [Fact]
     public async Task Pb46_barcode_is_escaped_in_the_path()
     {
         var (client, handler) = Create(_ => Json(HttpStatusCode.NotFound, "{}"));
