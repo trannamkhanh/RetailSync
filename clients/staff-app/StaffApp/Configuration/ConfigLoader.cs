@@ -32,7 +32,7 @@ public static class ConfigLoader
         if (string.IsNullOrEmpty(info.StoreId))
         {
             throw new ConfigurationException(
-                $"The token of '{info.Subject}' has no store_id; use a staff_dn* token (Staff role).");
+                $"Token của '{info.Subject}' không có store_id; hãy dùng token staff_dn* (vai trò Staff).");
         }
 
         return new LoadedConfig(settings, Resolve(appFolder, settings.CaCertificatePath), token, info);
@@ -43,13 +43,13 @@ public static class ConfigLoader
         if (!File.Exists(path))
         {
             throw new ConfigurationException(
-                $"Missing token file: {path}\nPut one staff_dn* token in it (see clients/staff-app/README.md).");
+                $"Thiếu file token: {path}\nHãy đặt một token staff_dn* vào file này (xem clients/staff-app/README.md).");
         }
 
         var text = File.ReadAllText(path).Trim();
         if (!text.StartsWith('{'))
         {
-            return text.Length > 0 ? text : throw new ConfigurationException($"The token file is empty: {path}");
+            return text.Length > 0 ? text : throw new ConfigurationException($"File token đang trống: {path}");
         }
 
         try
@@ -57,11 +57,11 @@ public static class ConfigLoader
             var tokens = JsonSerializer.Deserialize<Dictionary<string, string>>(text, Options);
             return tokens is not null && tokens.TryGetValue(tokenName, out var token) && token.Length > 0
                 ? token.Trim()
-                : throw new ConfigurationException($"No token '{tokenName}' in {path}.");
+                : throw new ConfigurationException($"Không có token '{tokenName}' trong {path}.");
         }
         catch (JsonException error)
         {
-            throw new ConfigurationException($"The token file is not valid JSON: {path}", error);
+            throw new ConfigurationException($"File token không phải JSON hợp lệ: {path}", error);
         }
     }
 
@@ -71,7 +71,7 @@ public static class ConfigLoader
         {
             if (required)
             {
-                throw new ConfigurationException($"Missing {path}.");
+                throw new ConfigurationException($"Thiếu file {path}.");
             }
 
             return;
@@ -93,7 +93,7 @@ public static class ConfigLoader
         }
         catch (JsonException error)
         {
-            throw new ConfigurationException($"{path} is not valid JSON.", error);
+            throw new ConfigurationException($"{path} không phải JSON hợp lệ.", error);
         }
     }
 
@@ -104,12 +104,12 @@ public static class ConfigLoader
     {
         if (!Uri.TryCreate(settings.BaseUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
         {
-            throw new ConfigurationException($"BaseUrl must be an https URL, got '{settings.BaseUrl}'.");
+            throw new ConfigurationException($"BaseUrl phải là URL https, đang là '{settings.BaseUrl}'.");
         }
 
         if (settings.FontSize is < 8 or > 32)
         {
-            throw new ConfigurationException($"FontSize must be between 8 and 32, got {settings.FontSize}.");
+            throw new ConfigurationException($"FontSize phải từ 8 đến 32, đang là {settings.FontSize}.");
         }
     }
 

@@ -14,7 +14,7 @@ internal static class Program
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         Application.ThreadException += (_, args) => ShowError(args.Exception.Message);
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
-            ShowError((args.ExceptionObject as Exception)?.Message ?? "Unknown error");
+            ShowError((args.ExceptionObject as Exception)?.Message ?? "Lỗi không xác định");
 
         LoadedConfig config;
         System.Security.Cryptography.X509Certificates.X509Certificate2 authority;

@@ -6,7 +6,7 @@ using StaffApp.Services;
 namespace StaffApp.UI;
 
 /// <summary>
-/// DS-08: one window, three tabs (Lookup, Near-expiry alerts, Recommendations). The title bar
+/// DS-08: one window, three tabs (Tra cứu, Cảnh báo cận hạn, Đề xuất), labels in Vietnamese. The title bar
 /// shows the store and the staff account of the token; the status bar shows loading, errors,
 /// the last refresh time and Retry after a connection error. Every call is asynchronous.
 /// </summary>
@@ -22,31 +22,31 @@ public sealed class MainForm : Form
 
     private readonly ToolStripStatusLabel _status = new() { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
     private readonly ToolStripStatusLabel _updated = new();
-    private readonly ToolStripButton _retry = new("Retry") { Visible = false };
+    private readonly ToolStripButton _retry = new("Thử lại") { Visible = false };
     private Func<Task>? _lastAction;
 
     // Lookup
     private readonly TextBox _barcode = new() { Width = 260 };
-    private readonly Button _search = new() { Text = "Search", AutoSize = true };
+    private readonly Button _search = new() { Text = "Tìm", AutoSize = true };
     private readonly Label _product = new() { AutoSize = true };
-    private readonly DataGridView _batches = Grid("Batch", "Expiry", "Qty");
-    private readonly DataGridView _nearby = Grid("Store", "Distance", "Quantity");
+    private readonly DataGridView _batches = Grid("Lô", "HSD", "SL");
+    private readonly DataGridView _nearby = Grid("Cửa hàng", "Khoảng cách", "Số lượng");
     private readonly Label _nearbyNote = new() { AutoSize = true, ForeColor = Color.DimGray };
 
     // Alerts
     private readonly Label _alertCount = new() { AutoSize = true };
-    private readonly DataGridView _alerts = Grid("Urgency", "Product", "Batch", "Expiry", "Days left", "Qty");
+    private readonly DataGridView _alerts = Grid("Mức độ", "Sản phẩm", "Lô", "HSD", "Còn (ngày)", "SL");
     private readonly Label _alertsEmpty = new() { AutoSize = true, ForeColor = Color.DimGray };
 
     // Recommendations
-    private readonly DataGridView _recommendations = Grid("Action", "Product", "Level");
+    private readonly DataGridView _recommendations = Grid("Hành động", "Sản phẩm", "Mức");
     private readonly Label _recommendationsEmpty = new() { AutoSize = true, ForeColor = Color.DimGray };
     private readonly Label _detailTitle = new() { AutoSize = true, MaximumSize = new Size(500, 0) };
     private readonly Label _detailExpiry = new() { AutoSize = true };
     private readonly Label _detailReason = new() { AutoSize = true, MaximumSize = new Size(500, 0) };
     private readonly ListBox _guardrails = new() { Height = 120, Width = 500, IntegralHeight = false };
-    private readonly Button _accept = new() { Text = "Accept", AutoSize = true, Enabled = false };
-    private readonly Button _reject = new() { Text = "Reject", AutoSize = true, Enabled = false };
+    private readonly Button _accept = new() { Text = "Chấp nhận", AutoSize = true, Enabled = false };
+    private readonly Button _reject = new() { Text = "Từ chối", AutoSize = true, Enabled = false };
     private RecommendationDetail? _detail;
     private readonly LatestRequest _detailRequests = new();
     // True while the grid is rebuilt: Rows.Add selects row 0 and fires SelectionChanged.
@@ -59,7 +59,7 @@ public sealed class MainForm : Form
     {
         _api = api;
         _storeId = config.TokenInfo.StoreId!;
-        Text = $"RetailSync Staff App - {_storeId} | Staff: {config.TokenInfo.Subject}";
+        Text = $"RetailSync Staff App - {_storeId} | Nhân viên: {config.TokenInfo.Subject}";
         Font = new Font("Segoe UI", config.Settings.FontSize);
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(1000, 680);
@@ -83,7 +83,7 @@ public sealed class MainForm : Form
         }
         else
         {
-            SetStatus("Ready. Scan or enter a barcode.", error: false);
+            SetStatus("Sẵn sàng. Quét hoặc nhập mã vạch.", error: false);
         }
 
         Shown += (_, _) => _barcode.Focus();
@@ -93,10 +93,10 @@ public sealed class MainForm : Form
 
     private TabPage LookupTab()
     {
-        var page = new TabPage("Lookup") { Padding = new Padding(12) };
+        var page = new TabPage("Tra cứu") { Padding = new Padding(12) };
         _product.Font = new Font(Font.FontFamily, Font.Size + 2, FontStyle.Bold);
         var searchRow = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = false };
-        searchRow.Controls.Add(new Label { Text = "Scan or enter barcode", AutoSize = true, Margin = new Padding(0, 8, 8, 0) });
+        searchRow.Controls.Add(new Label { Text = "Quét hoặc nhập mã vạch", AutoSize = true, Margin = new Padding(0, 8, 8, 0) });
         searchRow.Controls.Add(_barcode);
         searchRow.Controls.Add(_search);
         _search.Click += async (_, _) => await RunAsync(SearchAsync);
@@ -109,8 +109,8 @@ public sealed class MainForm : Form
             }
         };
 
-        var layout = Column(searchRow, _product, Heading("Batches in this store"), _batches,
-            Heading("Nearby stores (nearest first)"), _nearbyNote, _nearby);
+        var layout = Column(searchRow, _product, Heading("Các lô tại cửa hàng này"), _batches,
+            Heading("Cửa hàng lân cận (gần nhất trước)"), _nearbyNote, _nearby);
         layout.RowStyles[3] = new RowStyle(SizeType.Percent, 45);
         layout.RowStyles[6] = new RowStyle(SizeType.Percent, 55);
         page.Controls.Add(layout);
@@ -119,8 +119,8 @@ public sealed class MainForm : Form
 
     private TabPage AlertsTab()
     {
-        var page = new TabPage("Near-expiry alerts") { Padding = new Padding(12) };
-        var refresh = new Button { Text = "Refresh", AutoSize = true };
+        var page = new TabPage("Cảnh báo cận hạn") { Padding = new Padding(12) };
+        var refresh = new Button { Text = "Làm mới", AutoSize = true };
         refresh.Click += async (_, _) => await RunAsync(LoadAlertsAsync);
         var header = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = false };
         _alertCount.Margin = new Padding(0, 8, 16, 0);
@@ -134,8 +134,8 @@ public sealed class MainForm : Form
 
     private TabPage RecommendationsTab()
     {
-        var page = new TabPage("Recommendations") { Padding = new Padding(12) };
-        var refresh = new Button { Text = "Refresh", AutoSize = true };
+        var page = new TabPage("Đề xuất") { Padding = new Padding(12) };
+        var refresh = new Button { Text = "Làm mới", AutoSize = true };
         refresh.Click += async (_, _) => await RunAsync(LoadRecommendationsAsync);
         var left = Column(refresh, _recommendationsEmpty, _recommendations);
         left.RowStyles[2] = new RowStyle(SizeType.Percent, 100);
@@ -153,8 +153,8 @@ public sealed class MainForm : Form
         buttons.Controls.Add(_reject);
         _accept.Click += async (_, _) => await RunAsync(() => DecideAsync(accept: true));
         _reject.Click += async (_, _) => await RunAsync(() => DecideAsync(accept: false));
-        var right = Column(Heading("Details"), _detailTitle, _detailExpiry, Heading("Reason"), _detailReason,
-            Heading("Guardrails"), _guardrails, buttons);
+        var right = Column(Heading("Chi tiết"), _detailTitle, _detailExpiry, Heading("Lý do"), _detailReason,
+            Heading("Quy tắc kiểm soát"), _guardrails, buttons);
 
         // Two columns: the list and the details, as in DS-08 screen 3.
         var columns = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
@@ -207,7 +207,7 @@ public sealed class MainForm : Form
         {
             var index = grid.Columns.Add(column.Replace(" ", string.Empty), column);
             // Batch ids such as B-STORE-DN1-SKU-0001-2 need more room than the figures.
-            grid.Columns[index].FillWeight = column == "Batch" ? 220 : 100;
+            grid.Columns[index].FillWeight = column == "Lô" ? 220 : 100;
         }
 
         return grid;
@@ -230,7 +230,7 @@ public sealed class MainForm : Form
         catch (Exception error)
         {
             // A UI action must never close the app.
-            SetStatus($"Error: {error.Message}", error: true);
+            SetStatus($"Lỗi: {error.Message}", error: true);
         }
     }
 
@@ -261,7 +261,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        SetStatus($"Looking up {barcode}...", error: false);
+        SetStatus($"Đang tra cứu {barcode}...", error: false);
         var result = await _api.GetProductAsync(barcode);
         if (!result.IsSuccess)
         {
@@ -273,7 +273,7 @@ public sealed class MainForm : Form
 
         var product = ApiParsers.Product(result.Body);
         _product.Text = $"{product.Name}\n{product.Sku} | {product.Category} | " +
-                        $"{product.UnitPrice.ToString("N0", Numbers)} VND\nIn this store: {product.Quantity}";
+                        $"{product.UnitPrice.ToString("N0", Numbers)} VND\nTại cửa hàng này: {product.Quantity}";
         foreach (var batch in product.Batches)
         {
             _batches.Rows.Add(batch.BatchId, Date(batch.ExpiryDate), batch.Quantity);
@@ -286,7 +286,7 @@ public sealed class MainForm : Form
         {
             var message = UserMessages.For(stock, ApiArea.Lookup);
             _nearbyNote.Text = stock.Status == 404 ? UserMessages.NoStores : message.Text;
-            Fail(message with { Text = $"Nearby stores: {message.Text}" });
+            Fail(message with { Text = $"Cửa hàng lân cận: {message.Text}" });
             return;
         }
 
@@ -299,12 +299,12 @@ public sealed class MainForm : Form
         _nearby.ClearSelection();
         _nearbyNote.Text = stores.Count == 0 ? UserMessages.NoStores
             : stores.All(store => store.Qty == 0) ? UserMessages.NoStock : string.Empty;
-        Done($"Found {product.Sku}.");
+        Done($"Đã tìm thấy {product.Sku}.");
     }
 
     private async Task LoadAlertsAsync()
     {
-        SetStatus("Loading near-expiry alerts...", error: false);
+        SetStatus("Đang tải cảnh báo cận hạn...", error: false);
         var result = await _api.GetAlertsAsync();
         if (!result.IsSuccess)
         {
@@ -319,19 +319,19 @@ public sealed class MainForm : Form
         {
             var row = _alerts.Rows[_alerts.Rows.Add(alert.Urgency, alert.Sku, alert.BatchId, Date(alert.ExpiryDate),
                 alert.DaysToExpiry, alert.RemainingQty)];
-            row.DefaultCellStyle.BackColor = alert.Urgency == "EXPIRED" ? ExpiredColor
-                : alert.Urgency == "Today or tomorrow" ? SoonColor : SystemColors.Window;
+            row.DefaultCellStyle.BackColor = alert.IsExpired ? ExpiredColor
+                : alert.DaysToExpiry <= 1 ? SoonColor : SystemColors.Window;
         }
 
         _alerts.ClearSelection();
-        _alertCount.Text = $"{alerts.Count} open alert{(alerts.Count == 1 ? string.Empty : "s")}";
+        _alertCount.Text = $"{alerts.Count} cảnh báo đang mở";
         _alertsEmpty.Text = alerts.Count == 0 ? UserMessages.NoAlerts : string.Empty;
-        Done("Near-expiry alerts loaded.");
+        Done("Đã tải cảnh báo cận hạn.");
     }
 
     private async Task LoadRecommendationsAsync()
     {
-        SetStatus("Loading recommendations...", error: false);
+        SetStatus("Đang tải đề xuất...", error: false);
         var result = await _api.GetRecommendationsAsync();
         if (!result.IsSuccess)
         {
@@ -342,7 +342,7 @@ public sealed class MainForm : Form
         _board.Replace(ApiParsers.Recommendations(result.Body));
         _recommendationsLoaded = true;
         BindRecommendations();
-        Done("Recommendations loaded.");
+        Done("Đã tải đề xuất.");
     }
 
     private void BindRecommendations()
@@ -353,7 +353,7 @@ public sealed class MainForm : Form
             _recommendations.Rows.Clear();
             foreach (var line in _board.Rows)
             {
-                var index = _recommendations.Rows.Add(line.ActionType, line.Sku, line.Level);
+                var index = _recommendations.Rows.Add(line.ActionLabel, line.Sku, line.Level);
                 _recommendations.Rows[index].Tag = line.RecId;
             }
 
@@ -383,7 +383,7 @@ public sealed class MainForm : Form
 
         ClearDetail();
         var ticket = _detailRequests.Next();
-        SetStatus($"Loading recommendation {recId}...", error: false);
+        SetStatus($"Đang tải đề xuất {recId}...", error: false);
         var result = await _api.GetRecommendationAsync(recId);
         if (!_detailRequests.IsCurrent(ticket))
         {
@@ -404,7 +404,7 @@ public sealed class MainForm : Form
 
         _detail = ApiParsers.Detail(result.Body);
         _detailTitle.Text = _detail.Title;
-        _detailExpiry.Text = _detail.ExpiryDate is { } expiry ? $"Expiry {Date(expiry)}" : "No batch";
+        _detailExpiry.Text = _detail.ExpiryDate is { } expiry ? $"HSD {Date(expiry)}" : "Không theo lô";
         _detailReason.Text = _detail.Reason;
         _guardrails.Items.Clear();
         foreach (var line in _detail.GuardrailResults)
@@ -414,11 +414,11 @@ public sealed class MainForm : Form
 
         if (_detail.GuardrailResults.Count == 0)
         {
-            _guardrails.Items.Add("No rule applies");
+            _guardrails.Items.Add("Không có quy tắc nào áp dụng");
         }
 
         _accept.Enabled = _reject.Enabled = true;
-        Done($"Recommendation {recId}.");
+        Done($"Đề xuất {recId}.");
     }
 
     private async Task DecideAsync(bool accept)
@@ -429,16 +429,16 @@ public sealed class MainForm : Form
         }
 
         var recId = _detail.Summary.RecId;
-        var verb = accept ? "Accept" : "Reject";
-        var answer = MessageBox.Show(this, $"{verb} this recommendation?\n\n{_detail.Title}\n\nA decision is final.",
-            $"{verb} recommendation", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
+        var verb = accept ? "Chấp nhận" : "Từ chối";
+        var answer = MessageBox.Show(this, $"{verb} đề xuất này?\n\n{_detail.Title}\n\nQuyết định không thể thay đổi.",
+            $"{verb} đề xuất", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
         if (answer != DialogResult.Yes)
         {
             return;
         }
 
         _accept.Enabled = _reject.Enabled = false;
-        SetStatus($"Sending {verb.ToLowerInvariant()} for recommendation {recId}...", error: false);
+        SetStatus($"Đang gửi quyết định {verb.ToLowerInvariant()} đề xuất {recId}...", error: false);
         var result = await _api.DecideAsync(recId, accept);
         var outcome = _board.Apply(recId, result);
         if (outcome.Removed)
@@ -471,7 +471,7 @@ public sealed class MainForm : Form
     {
         _detailRequests.Invalidate();
         _detail = null;
-        _detailTitle.Text = "Select a recommendation";
+        _detailTitle.Text = "Chọn một đề xuất";
         _detailExpiry.Text = string.Empty;
         _detailReason.Text = string.Empty;
         _guardrails.Items.Clear();
@@ -483,7 +483,7 @@ public sealed class MainForm : Form
     private void Done(string text)
     {
         SetStatus(text, error: false);
-        _updated.Text = $"Updated {DateTime.Now:HH:mm:ss}";
+        _updated.Text = $"Cập nhật lúc {DateTime.Now:HH:mm:ss}";
     }
 
     private void Fail(UserMessage message)

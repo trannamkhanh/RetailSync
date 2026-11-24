@@ -33,11 +33,11 @@ public sealed class RecommendationBoard
             }
             catch (FormatException)
             {
-                status = "decided";
+                status = "đã quyết định";
             }
 
             _rows.RemoveAll(row => row.RecId == recId);
-            return new DecisionOutcome(true, false, $"Recommendation {recId}: {status}");
+            return new DecisionOutcome(true, false, $"Đề xuất {recId}: {status}");
         }
 
         var message = UserMessages.For(result, ApiArea.Decision);
