@@ -459,11 +459,11 @@ public sealed class MainForm : Form
         productLayout.Controls.Add(search, 0, 0);
 
         ConfigureGrid(_productGrid);
-        AddColumn(_productGrid, nameof(ProductRow.Sku), "SKU", 68);
-        AddColumn(_productGrid, nameof(ProductRow.Name), "Tên", 195);
-        AddColumn(_productGrid, nameof(ProductRow.Barcode), "Barcode", 105);
-        AddColumn(_productGrid, nameof(ProductRow.OriginalPriceText), "Giá gốc", 65);
-        AddColumn(_productGrid, nameof(ProductRow.UnitPriceText), "Giá", 80);
+        AddColumn(_productGrid, nameof(ProductRow.Sku), "SKU", 70);
+        AddColumn(_productGrid, nameof(ProductRow.Name), "Tên", 150);
+        AddColumn(_productGrid, nameof(ProductRow.Barcode), "Barcode", 100);
+        AddColumn(_productGrid, nameof(ProductRow.OriginalPriceText), "Giá gốc", 70);
+        AddColumn(_productGrid, nameof(ProductRow.UnitPriceText), "Giá", 130);
         _productGrid.DataSource = _productView;
         productLayout.Controls.Add(_productGrid, 0, 1);
 
@@ -621,8 +621,7 @@ public sealed class MainForm : Form
         }
 
         var seed = Environment.TickCount;
-        _autoSales = new AutomaticSales(_config.Products, seed,
-            product => ResolveSalePrice(product.Sku, product.UnitPrice));
+        _autoSales = new AutomaticSales(_config.Products, seed);
         _autoSeed.Text = $"Seed: {seed}";
         _autoTimer.Interval = (int)_autoInterval.Value * 1000;
         _autoTimer.Start();

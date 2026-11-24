@@ -613,6 +613,80 @@ public sealed class Pb50PosDiscountsTests
         });
     }
 
+    [Fact]
+    public void Pb50_ProductGridPriceColumnFitsDiscountTextAtDefaultWindowSize()
+    {
+        OnStaThread(() =>
+        {
+            using var directory = new TemporaryDirectory();
+            var loaded = BuildConfig(directory.Path, mock: true);
+            // Match the 9-product demo catalogue so the vertical scrollbar is present just like live runs.
+            loaded.Config.Products.AddRange(new[]
+            {
+                new ProductConfig { Sku = "SKU-0004", Barcode = "8930000000042", Name = "Cheese slices 200g", UnitPrice = 65000m },
+                new ProductConfig { Sku = "SKU-0005", Barcode = "8930000000059", Name = "Sponge cake 300g", UnitPrice = 45000m },
+                new ProductConfig { Sku = "SKU-0006", Barcode = "8930000000066", Name = "Butter cookies 200g", UnitPrice = 38000m },
+                new ProductConfig { Sku = "SKU-0007", Barcode = "8930000000073", Name = "Rice 5kg", UnitPrice = 120000m },
+                new ProductConfig { Sku = "SKU-0008", Barcode = "8930000000080", Name = "Instant noodles 75g", UnitPrice = 4500m },
+                new ProductConfig { Sku = "SKU-0009", Barcode = "8930000000097", Name = "Cooking oil 1L", UnitPrice = 58000m },
+            });
+
+            using var form = new MainForm(loaded, directory.Path)
+            {
+                UtcClock = () => FixedUtc,
+                LocalClock = () => FixedLocal,
+            };
+            ShowFormDeterministically(form);
+
+            form.MockBackend.SetDiscounts("STORE-DN1", new PosDiscountList(
+                FixedBusinessDate,
+                new[]
+                {
+                    new PosDiscountItem("SKU-0001", 30m, 22400m),
+                    new PosDiscountItem("SKU-0007", 30m, 84000m),
+                }));
+            var refresh = form.RefreshDiscountsAsync();
+            PumpUntil(() => refresh.IsCompleted && IsFormIdle(form));
+            refresh.GetAwaiter().GetResult();
+
+            var skuCol = form.ProductGrid.Columns.Cast<DataGridViewColumn>()
+                .First(col => col.DataPropertyName == nameof(ProductRow.Sku));
+            var nameCol = form.ProductGrid.Columns.Cast<DataGridViewColumn>()
+                .First(col => col.DataPropertyName == nameof(ProductRow.Name));
+            var barcodeCol = form.ProductGrid.Columns.Cast<DataGridViewColumn>()
+                .First(col => col.DataPropertyName == nameof(ProductRow.Barcode));
+            var origCol = form.ProductGrid.Columns.Cast<DataGridViewColumn>()
+                .First(col => col.DataPropertyName == nameof(ProductRow.OriginalPriceText));
+            var priceCol = form.ProductGrid.Columns.Cast<DataGridViewColumn>()
+                .First(col => col.DataPropertyName == nameof(ProductRow.UnitPriceText));
+
+            var milkRow = form.ProductGrid.Rows.Cast<DataGridViewRow>()
+                .First(row => ((ProductRow)row.DataBoundItem!).Sku == "SKU-0001");
+            var cookieRow = form.ProductGrid.Rows.Cast<DataGridViewRow>()
+                .First(row => ((ProductRow)row.DataBoundItem!).Sku == "SKU-0006");
+            var riceRow = form.ProductGrid.Rows.Cast<DataGridViewRow>()
+                .First(row => ((ProductRow)row.DataBoundItem!).Sku == "SKU-0007");
+
+            // At default 1420x900 (with 125% PerMonitorV2 DPI headroom where fonts scale by 1.25x
+            // while fixed pixel window size stays 1420px), "22,400 (-30%)" and "84,000 (-30%)" must fit without ellipsis.
+            var dpiScale = form.DeviceDpi > 96 ? 1.0 : 1.25;
+            var neededMilkPrice = (int)Math.Ceiling(milkRow.Cells[priceCol.Index].PreferredSize.Width * dpiScale);
+            var neededRicePrice = (int)Math.Ceiling(riceRow.Cells[priceCol.Index].PreferredSize.Width * dpiScale);
+            Assert.True(priceCol.Width >= neededMilkPrice,
+                $"Giá column width {priceCol.Width}px is narrower than {neededMilkPrice}px needed for '{milkRow.Cells[priceCol.Index].FormattedValue}'.");
+            Assert.True(priceCol.Width >= neededRicePrice,
+                $"Giá column width {priceCol.Width}px is narrower than {neededRicePrice}px needed for '{riceRow.Cells[priceCol.Index].FormattedValue}'.");
+            Assert.True(skuCol.Width >= cookieRow.Cells[skuCol.Index].PreferredSize.Width,
+                $"SKU column width {skuCol.Width}px < preferred {cookieRow.Cells[skuCol.Index].PreferredSize.Width}px.");
+            Assert.True(nameCol.Width >= cookieRow.Cells[nameCol.Index].PreferredSize.Width,
+                $"Tên column width {nameCol.Width}px < preferred {cookieRow.Cells[nameCol.Index].PreferredSize.Width}px.");
+            Assert.True(barcodeCol.Width >= cookieRow.Cells[barcodeCol.Index].PreferredSize.Width,
+                $"Barcode column width {barcodeCol.Width}px < preferred {cookieRow.Cells[barcodeCol.Index].PreferredSize.Width}px.");
+            Assert.True(origCol.Width >= riceRow.Cells[origCol.Index].PreferredSize.Width,
+                $"Giá gốc column width {origCol.Width}px < preferred {riceRow.Cells[origCol.Index].PreferredSize.Width}px.");
+        });
+    }
+
     // 4. RETURN and CANCELLATION preserve original sale unit_price
 
     [Fact]
@@ -705,28 +779,14 @@ public sealed class Pb50PosDiscountsTests
         });
     }
 
-    // 5. AutomaticSales applies discounted_price
+    // 5. Automatic mode applies discounted_price through MainForm's AddToCart path
 
     [Fact]
-    public void Pb50_AutomaticSalesUsesDiscountedPriceInServiceAndMainForm()
+    public void Pb50_AutomaticSalesUsesDiscountedPriceInMainForm()
     {
-        var catalogue = new List<ProductConfig>
-        {
-            new() { Sku = "SKU-0001", Barcode = "1", Name = "Milk", UnitPrice = 32000m },
-            new() { Sku = "SKU-0002", Barcode = "2", Name = "Yogurt", UnitPrice = 7000m },
-        };
-        var book = new PosDiscountBook();
-        book.ApplySuccess(
-            new PosDiscountList(FixedBusinessDate, new[] { new PosDiscountItem("SKU-0001", 30m, 22400m) }),
-            FixedUtc,
-            FixedLocal);
-
-        var auto = new AutomaticSales(catalogue, seed: 42, product => book.PriceFor(product, FixedUtc));
-        var generated = Enumerable.Range(0, 20).SelectMany(_ => auto.NextItems()).ToList();
-        Assert.Contains(generated, item => item.Sku == "SKU-0001");
-        Assert.Contains(generated, item => item.Sku == "SKU-0002");
-        Assert.All(generated.Where(item => item.Sku == "SKU-0001"), item => Assert.Equal(22400m, item.UnitPrice));
-        Assert.All(generated.Where(item => item.Sku == "SKU-0002"), item => Assert.Equal(7000m, item.UnitPrice));
+        // AutomaticSales does not take a priceSelector parameter: MainForm applies discounts via AddToCart.
+        var ctor = Assert.Single(typeof(AutomaticSales).GetConstructors());
+        Assert.Equal(2, ctor.GetParameters().Length);
 
         OnStaThread(() =>
         {
