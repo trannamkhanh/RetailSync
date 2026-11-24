@@ -1,20 +1,22 @@
-# Staff App (PB-46, PB-47)
+# Staff App (PB-46, PB-47, PB-50)
 
 WinForms client (.NET 8) for store staff, following `docs/design/DS-08_Staff_App_Wireframes.html`.
-One window, three tabs:
+One window, four tabs, with a Vietnamese UI (PB-46-5):
 
 | Tab | Calls (DS-04) | Test cases |
 |---|---|---|
-| Lookup | `GET /products/barcode/{barcode}`, `GET /products/barcode/{barcode}/stock?from_store=` | STF46-1, 46-2, 46-3 |
-| Near-expiry alerts | `GET /near-expiry-alerts` | STF46-4 |
-| Recommendations (list and details) | `GET /recommendations`, `GET /recommendations/{rec_id}`, `POST /recommendations/{rec_id}/decision` | STF47-1 to 47-5 |
+| Tra cứu (lookup) | `GET /products/barcode/{barcode}`, `GET /products/barcode/{barcode}/stock?from_store=` | STF46-1, 46-2, 46-3 |
+| Cảnh báo cận hạn (near-expiry alerts) | `GET /near-expiry-alerts` | STF46-4 |
+| Đề xuất (recommendations, list and details) | `GET /recommendations`, `GET /recommendations/{rec_id}`, `POST /recommendations/{rec_id}/decision` | STF47-1 to 47-5 |
+| Giảm giá (active discounts, read-only) | `GET /staff/discounts?scope=own` or `?scope=all` | DSC50-* |
 
 The app calls only these endpoints, over HTTPS on port 8443, with one `staff_dn*` token. The store comes
 from the token's `store_id`; the title bar shows the store and the account. It never reads SQL.
-Messages follow DS-08: 401 "Token invalid or expired" (STF46-5), 403 "This role cannot use this
-function", 404 on lookup "Product not found", 409 `ALREADY_DECIDED` "Already decided",
-`RECOMMENDATION_EXPIRED` "No longer valid" (both refresh the list). A connection error keeps the screen
-and shows Retry in the status bar.
+Messages follow DS-08, in Vietnamese: 401 "Token không hợp lệ hoặc đã hết hạn" (STF46-5), 403 "Vai trò
+này không dùng được chức năng này", 404 on lookup "Không tìm thấy sản phẩm", 409 `ALREADY_DECIDED` "Đề xuất
+đã được quyết định", `RECOMMENDATION_EXPIRED` "Đề xuất không còn hiệu lực" (both refresh the list). A
+connection error keeps the screen and shows Thử lại in the status bar. API codes, product names and the
+server's reason text stay as sent.
 
 ## Configuration
 
