@@ -53,6 +53,10 @@ public sealed class StaffApiClient : IDisposable
     public Task<ApiResult> GetRecommendationAsync(long recId) =>
         SendAsync(HttpMethod.Get, $"/recommendations/{recId}", null);
 
+    /// <summary>GET /staff/discounts (PB-50): the caller's store, or every active store.</summary>
+    public Task<ApiResult> GetDiscountsAsync(bool allStores) =>
+        SendAsync(HttpMethod.Get, $"/staff/discounts?scope={(allStores ? "all" : "own")}", null);
+
     public Task<ApiResult> DecideAsync(long recId, bool accept) =>
         SendAsync(HttpMethod.Post, $"/recommendations/{recId}/decision",
             accept ? "{\"decision\":\"ACCEPT\"}" : "{\"decision\":\"REJECT\"}");

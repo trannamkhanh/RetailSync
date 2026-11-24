@@ -6,7 +6,7 @@ using StaffApp.Services;
 namespace StaffApp.UI;
 
 /// <summary>
-/// DS-08: one window, three tabs (Tra cứu, Cảnh báo cận hạn, Đề xuất), labels in Vietnamese. The title bar
+/// DS-08: one window, four tabs (Tra cứu, Cảnh báo cận hạn, Đề xuất, Giảm giá), labels in Vietnamese. The title bar
 /// shows the store and the staff account of the token; the status bar shows loading, errors,
 /// the last refresh time and Retry after a connection error. Every call is asynchronous.
 /// </summary>
@@ -52,8 +52,16 @@ public sealed class MainForm : Form
     // True while the grid is rebuilt: Rows.Add selects row 0 and fires SelectionChanged.
     private bool _binding;
 
+    // Discounts (PB-50-3): read-only.
+    private readonly RadioButton _ownStore = new() { Text = "Cửa hàng của tôi", AutoSize = true, Checked = true };
+    private readonly RadioButton _allStores = new() { Text = "Tất cả cửa hàng", AutoSize = true };
+    private readonly DataGridView _discounts = Grid(DiscountRows.Columns);
+    private readonly Label _discountsEmpty = new() { AutoSize = true, ForeColor = Color.DimGray };
+    private readonly LatestRequest _discountRequests = new();
+
     private bool _alertsLoaded;
     private bool _recommendationsLoaded;
+    private bool _discountsLoaded;
 
     public MainForm(LoadedConfig config, StaffApiClient api)
     {
@@ -69,6 +77,7 @@ public sealed class MainForm : Form
         tabs.TabPages.Add(LookupTab());
         tabs.TabPages.Add(AlertsTab());
         tabs.TabPages.Add(RecommendationsTab());
+        tabs.TabPages.Add(DiscountsTab());
         tabs.SelectedIndexChanged += async (_, _) => await OnTabChangedAsync(tabs.SelectedIndex);
 
         var statusBar = new StatusStrip();
@@ -168,6 +177,26 @@ public sealed class MainForm : Form
         return page;
     }
 
+    private TabPage DiscountsTab()
+    {
+        var page = new TabPage("Giảm giá") { Padding = new Padding(12) };
+        var refresh = new Button { Text = "Làm mới", AutoSize = true };
+        refresh.Click += async (_, _) => await RunAsync(LoadDiscountsAsync);
+        // Only the button that becomes checked reloads, so one click is one call.
+        _ownStore.CheckedChanged += async (_, _) => { if (_ownStore.Checked) { await RunAsync(LoadDiscountsAsync); } };
+        _allStores.CheckedChanged += async (_, _) => { if (_allStores.Checked) { await RunAsync(LoadDiscountsAsync); } };
+        var header = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = false };
+        _ownStore.Margin = _allStores.Margin = new Padding(0, 6, 16, 0);
+        header.Controls.Add(_ownStore);
+        header.Controls.Add(_allStores);
+        header.Controls.Add(refresh);
+
+        var layout = Column(header, _discountsEmpty, _discounts);
+        layout.RowStyles[2] = new RowStyle(SizeType.Percent, 100);
+        page.Controls.Add(layout);
+        return page;
+    }
+
     private static TableLayoutPanel Column(params Control[] controls)
     {
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = controls.Length };
@@ -246,6 +275,10 @@ public sealed class MainForm : Form
         else if (index == 2 && !_recommendationsLoaded)
         {
             await RunAsync(LoadRecommendationsAsync);
+        }
+        else if (index == 3 && !_discountsLoaded)
+        {
+            await RunAsync(LoadDiscountsAsync);
         }
     }
 
@@ -343,6 +376,43 @@ public sealed class MainForm : Form
         _recommendationsLoaded = true;
         BindRecommendations();
         Done("Đã tải đề xuất.");
+    }
+
+    private async Task LoadDiscountsAsync()
+    {
+        var all = _allStores.Checked;
+        var ticket = _discountRequests.Next();
+        SetStatus("Đang tải giảm giá...", error: false);
+        var result = await _api.GetDiscountsAsync(all);
+        if (!_discountRequests.IsCurrent(ticket))
+        {
+            return;  // the scope changed while this answer was on its way
+        }
+
+        if (!result.IsSuccess)
+        {
+            Fail(UserMessages.For(result, ApiArea.Discounts));
+            return;
+        }
+
+        var lines = ApiParsers.Discounts(result.Body);
+        _discountsLoaded = true;
+        _discounts.Rows.Clear();
+        foreach (var line in lines)
+        {
+            _discounts.Rows.Add(DiscountRows.Cells(line, _storeId, TimeZoneInfo.Local));
+        }
+
+        // Nine columns in one width: no cell text is cut, the headers wrap, the rest is shared.
+        foreach (DataGridViewColumn column in _discounts.Columns)
+        {
+            column.MinimumWidth = Math.Max(70,
+                column.GetPreferredWidth(DataGridViewAutoSizeColumnMode.AllCellsExceptHeader, true));
+        }
+
+        _discounts.ClearSelection();
+        _discountsEmpty.Text = lines.Count == 0 ? UserMessages.NoDiscounts : string.Empty;
+        Done(all ? "Đã tải giảm giá của tất cả cửa hàng." : "Đã tải giảm giá của cửa hàng.");
     }
 
     private void BindRecommendations()

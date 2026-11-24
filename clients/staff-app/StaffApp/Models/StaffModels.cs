@@ -91,5 +91,11 @@ public sealed record GuardrailLine(string RuleType, string Outcome, decimal? Ori
     }
 }
 
+/// <summary>GET /staff/discounts (DS-04 StaffDiscount, PB-50). <c>DistanceKm</c> is null for the
+/// caller's own store; <c>BatchId</c> and <c>ExpiryDate</c> are null for a SKU-level discount.</summary>
+public sealed record DiscountLine(string StoreId, string StoreName, double? DistanceKm, string Sku, string Name,
+                                  string? BatchId, DateOnly? ExpiryDate, decimal DiscountPct, decimal ListPrice,
+                                  decimal DiscountedPrice, DateTimeOffset DecidedAt, bool SoldAtDiscount);
+
 /// <summary>POST /recommendations/{rec_id}/decision, 200 answer.</summary>
 public sealed record DecisionResult(long RecId, string Status, DateTimeOffset DecidedAt);

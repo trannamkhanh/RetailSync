@@ -101,14 +101,25 @@ public static class ApiParsers
     {
         using var document = Parse(body);
         var root = document.RootElement;
-        var decidedAt = RequiredString(root, "decided_at");
-        if (!DateTimeOffset.TryParse(decidedAt, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal,
-                out var moment))
-        {
-            throw new FormatException($"decided_at is not a date-time: {decidedAt}");
-        }
+        return new DecisionResult(RequiredLong(root, "rec_id"), RequiredString(root, "status"),
+            RequiredMoment(root, "decided_at"));
+    }
 
-        return new DecisionResult(RequiredLong(root, "rec_id"), RequiredString(root, "status"), moment);
+    public static IReadOnlyList<DiscountLine> Discounts(string body)
+    {
+        using var document = Parse(body);
+        return RequiredArray(document.RootElement, "items")
+            .Select(item =>
+            {
+                var expiry = OptionalString(item, "expiry_date");
+                return new DiscountLine(RequiredString(item, "store_id"), RequiredString(item, "store_name"),
+                    OptionalDecimal(item, "distance_km") is { } distance ? (double)distance : null,
+                    RequiredString(item, "sku"), RequiredString(item, "name"), OptionalString(item, "batch_id"),
+                    expiry is null ? null : ParseDate(expiry, "expiry_date"), RequiredDecimal(item, "discount_pct"),
+                    RequiredDecimal(item, "list_price"), RequiredDecimal(item, "discounted_price"),
+                    RequiredMoment(item, "decided_at"), RequiredBool(item, "sold_at_discount"));
+            })
+            .ToList();
     }
 
     private static RecommendationLine Summary(JsonElement item) =>
@@ -205,6 +216,22 @@ public static class ApiParsers
         element.TryGetProperty(name, out var value) && value.ValueKind != JsonValueKind.Null
             ? RequiredDecimal(element, name)
             : null;
+
+    private static bool RequiredBool(JsonElement element, string name) =>
+        Required(element, name).ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => throw new FormatException($"Field '{name}' is not a boolean."),
+        };
+
+    private static DateTimeOffset RequiredMoment(JsonElement element, string name)
+    {
+        var text = RequiredString(element, name);
+        return DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var moment)
+            ? moment
+            : throw new FormatException($"{name} is not a date-time: {text}");
+    }
 
     private static DateOnly RequiredDate(JsonElement element, string name) =>
         ParseDate(RequiredString(element, name), name);

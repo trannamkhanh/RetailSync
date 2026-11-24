@@ -10,6 +10,7 @@ public enum ApiArea
     Recommendations,
     Detail,
     Decision,
+    Discounts,
 }
 
 /// <summary>A failed call as the user sees it. <c>CanRetry</c> offers Retry; <c>Refresh</c> reloads the list.</summary>
@@ -27,6 +28,7 @@ public static class UserMessages
     public const string NoStock = "Không cửa hàng nào còn hàng sản phẩm này";
     public const string NoAlerts = "Không có cảnh báo cận hạn";
     public const string NoRecommendations = "Không có đề xuất cần xử lý";
+    public const string NoDiscounts = "Không có giảm giá đang áp dụng.";
     public const string InvalidBarcode = "Nhập mã vạch từ 1 đến 30 ký tự: chữ, số hoặc '-'";
 
     public static UserMessage For(ApiResult result, ApiArea area)
