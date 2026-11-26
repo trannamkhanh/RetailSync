@@ -120,7 +120,7 @@ clients/demo-console/DemoConsole/bin/Debug/net8.0-windows/DemoConsole.exe
 
 Cửa sổ mở toàn màn hình, tiêu đề có `(RTS_DB_DEMO)`. Mỗi tab có dòng "Làm mới lúc ...
 Không có lỗi." màu xanh. Chữ to hơn cho máy chiếu: tạo
-`clients/demo-console/DemoConsole/appsettings.Local.json` với `{ "FontSize": 16 }`.
+`clients/demo-console/DemoConsole/appsettings.Local.json` với `{ "FontSize": 16 }` (không cần chép vào `bin/`: app ưu tiên file cạnh `.exe` trước rồi tự đọc từ thư mục project).
 
 Nút xám kèm dòng chữ cam nghĩa là tính năng chưa có trên `main` (API trả 404): bảng điều
 khiển kiểm tra lại mỗi 30 giây, nên sau khi PR merge và middleware khởi động lại, nút tự
@@ -212,7 +212,7 @@ Chép sang A và B đúng bộ tệp của máy đó: `.certs/ca.crt`, `.certs/p
 chỉ gồm token terminal của máy + token Staff của store (`staff_dn1`/`staff_dn2`/`staff_dn3`). A và B
 **không** giữ token `auditor`, không giữ private key hay token của máy khác.
 
-`appsettings.Local.json` cạnh exe (hoặc trong `clients/demo-pos/DemoPos/` khi chạy từ repo) trỏ về S và
+`appsettings.Local.json` cạnh exe (ưu tiên trước) hoặc trong `clients/demo-pos/DemoPos/` khi chạy từ repo (tự fallback, không cần chép vào `bin/`) trỏ về S và
 chỉ khai báo terminal của máy:
 
 ```json

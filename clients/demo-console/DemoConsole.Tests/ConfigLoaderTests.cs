@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using DemoConsole.Configuration;
 using Xunit;
 
@@ -132,5 +133,98 @@ public class ConfigLoaderTests
         using var repo = new TestRepo("{ not json");
 
         Assert.Throws<ConfigurationException>(() => ConfigLoader.Load(repo.Root, repo.SettingsFile));
+    }
+
+    [Fact]
+    public void Pb41_5_LocalSettingsNextToExecutableWinsOverProjectFolder()
+    {
+        using var repo = new TestRepo();
+        var (binDir, binSettings, projectDir) = PrepareBinLayout(repo.Root);
+        var binLocal = Path.Combine(binDir, "appsettings.Local.json");
+        var projectLocal = Path.Combine(projectDir, "appsettings.Local.json");
+        File.WriteAllText(projectLocal, """{ "MiddlewareBaseUrl": "https://10.0.0.10:8443/api/v1", "FontSize": 18 }""");
+        File.WriteAllText(binLocal, """{ "MiddlewareBaseUrl": "https://192.168.1.99:8443/api/v1", "FontSize": 16 }""");
+
+        var (loaded, logs) = LoadWithTrace(() => ConfigLoader.Load(binDir, binSettings));
+
+        Assert.Equal("https://192.168.1.99:8443/api/v1", loaded.Config.MiddlewareBaseUrl);
+        Assert.Equal(16, loaded.Config.FontSize);
+        Assert.Equal(Path.GetFullPath(binLocal), loaded.Paths.LocalSettingsFile);
+        Assert.Contains(logs, line => line.Contains(Path.GetFullPath(binLocal), StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Pb41_5_LocalSettingsFallsBackToProjectFolderWhenMissingNextToExecutable()
+    {
+        using var repo = new TestRepo();
+        var (binDir, binSettings, projectDir) = PrepareBinLayout(repo.Root);
+        var projectLocal = Path.Combine(projectDir, "appsettings.Local.json");
+        File.WriteAllText(projectLocal, """{ "MiddlewareBaseUrl": "https://192.168.1.10:8443/api/v1", "FontSize": 16 }""");
+
+        var (loaded, logs) = LoadWithTrace(() => ConfigLoader.Load(binDir, binSettings));
+
+        Assert.Equal("https://192.168.1.10:8443/api/v1", loaded.Config.MiddlewareBaseUrl);
+        Assert.Equal(16, loaded.Config.FontSize);
+        Assert.Equal(Path.GetFullPath(projectLocal), loaded.Paths.LocalSettingsFile);
+        Assert.Contains(logs, line => line.Contains(Path.GetFullPath(projectLocal), StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Pb41_5_LoadsDefaultsWhenNoLocalSettingsExistInEitherLocation()
+    {
+        using var repo = new TestRepo();
+        var (binDir, binSettings, _) = PrepareBinLayout(repo.Root);
+
+        var (loaded, logs) = LoadWithTrace(() => ConfigLoader.Load(binDir, binSettings));
+
+        Assert.Equal("https://localhost:8443/api/v1", loaded.Config.MiddlewareBaseUrl);
+        Assert.Equal(13, loaded.Config.FontSize);
+        Assert.Null(loaded.Paths.LocalSettingsFile);
+        Assert.Contains(logs, line => line.Contains("appsettings.Local.json", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Pb41_5_DemoConsoleProjectFileDoesNotCopyLocalSettingsToOutput()
+    {
+        var repoRoot = RepoRootLocator.Find(AppContext.BaseDirectory);
+        var csprojPath = Path.Combine(repoRoot, "clients", "demo-console", "DemoConsole", "DemoConsole.csproj");
+        var csproj = File.ReadAllText(csprojPath);
+
+        Assert.Contains("appsettings.json", csproj, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("appsettings.Local.json", csproj, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static (string BinDir, string BinSettings, string ProjectDir) PrepareBinLayout(string root)
+    {
+        var projectDir = Path.Combine(root, "clients", "demo-console", "DemoConsole");
+        var binDir = Path.Combine(projectDir, "bin", "Debug", "net8.0-windows");
+        Directory.CreateDirectory(binDir);
+        File.WriteAllText(Path.Combine(projectDir, "appsettings.json"), TestRepo.DefaultSettings());
+        var binSettings = Path.Combine(binDir, "appsettings.json");
+        File.WriteAllText(binSettings, TestRepo.DefaultSettings());
+        return (binDir, binSettings, projectDir);
+    }
+
+    private static (T Result, List<string> Logs) LoadWithTrace<T>(Func<T> action)
+    {
+        var messages = new List<string>();
+        using var listener = new CapturingTraceListener(messages);
+        Trace.Listeners.Add(listener);
+        try
+        {
+            return (action(), messages);
+        }
+        finally
+        {
+            Trace.Listeners.Remove(listener);
+        }
+    }
+
+    private sealed class CapturingTraceListener : TraceListener
+    {
+        private readonly List<string> _messages;
+        public CapturingTraceListener(List<string> messages) => _messages = messages;
+        public override void Write(string? message) { if (message is not null) _messages.Add(message); }
+        public override void WriteLine(string? message) { if (message is not null) _messages.Add(message); }
     }
 }

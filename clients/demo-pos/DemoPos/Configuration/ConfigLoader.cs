@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using DemoPos.Services;
@@ -44,17 +45,25 @@ public static class ConfigLoader
             throw new ConfigurationException($"appsettings.json is not valid JSON: {file}", error);
         }
 
-        var localFile = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(file))!, "appsettings.Local.json");
-        if (File.Exists(localFile))
+        var (localFile, localExists, fromProjectFallback) = ResolveLocalSettingsFile(file, root);
+        if (localExists)
         {
             try
             {
                 Merge(document, ParseObject(File.ReadAllText(localFile), localFile));
+                Trace.TraceInformation(fromProjectFallback
+                    ? $"[DemoPos] Loaded appsettings.Local.json from project folder '{localFile}' (not found beside '{Path.GetFullPath(file)}')."
+                    : $"[DemoPos] Loaded appsettings.Local.json from '{localFile}'.");
             }
             catch (JsonException error)
             {
                 throw new ConfigurationException($"appsettings.Local.json is not valid JSON: {localFile}", error);
             }
+        }
+        else
+        {
+            Trace.TraceInformation(
+                $"[DemoPos] No appsettings.Local.json found beside '{Path.GetFullPath(file)}' or in project folder; using base settings.");
         }
 
         AppConfig config;
@@ -104,6 +113,27 @@ public static class ConfigLoader
 
         var inProject = Path.Combine(root, "clients", "demo-pos", "DemoPos", "appsettings.json");
         return File.Exists(inProject) ? inProject : nextToExecutable;
+    }
+
+    private static (string Path, bool Exists, bool FromProjectFallback) ResolveLocalSettingsFile(
+        string settingsFile, string repoRoot)
+    {
+        var besideSettings = Path.GetFullPath(
+            Path.Combine(Path.GetDirectoryName(Path.GetFullPath(settingsFile))!, "appsettings.Local.json"));
+        if (File.Exists(besideSettings))
+        {
+            return (besideSettings, true, false);
+        }
+
+        var inProject = Path.GetFullPath(
+            Path.Combine(repoRoot, "clients", "demo-pos", "DemoPos", "appsettings.Local.json"));
+        if (!string.Equals(besideSettings, inProject, StringComparison.OrdinalIgnoreCase)
+            && File.Exists(inProject))
+        {
+            return (inProject, true, true);
+        }
+
+        return (besideSettings, false, false);
     }
 
     private static JsonObject ParseObject(string text, string file)

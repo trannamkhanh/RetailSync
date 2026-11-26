@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -36,10 +37,18 @@ public static class ConfigLoader
         }
 
         var document = ReadObject(file);
-        var localFile = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(file))!, "appsettings.Local.json");
-        if (File.Exists(localFile))
+        var (localFile, localExists, fromProjectFallback) = ResolveLocalSettingsFile(file, root);
+        if (localExists)
         {
             Merge(document, ReadObject(localFile));
+            Trace.TraceInformation(fromProjectFallback
+                ? $"[DemoConsole] Loaded appsettings.Local.json from project folder '{localFile}' (not found beside '{Path.GetFullPath(file)}')."
+                : $"[DemoConsole] Loaded appsettings.Local.json from '{localFile}'.");
+        }
+        else
+        {
+            Trace.TraceInformation(
+                $"[DemoConsole] No appsettings.Local.json found beside '{Path.GetFullPath(file)}' or in project folder; using base settings.");
         }
 
         ConsoleConfig config;
@@ -62,6 +71,7 @@ public static class ConfigLoader
             TokensFile = Resolve(root, config.TokensPath),
             EnvFile = Resolve(root, config.EnvFilePath),
             SettingsFile = Path.GetFullPath(file),
+            LocalSettingsFile = localExists ? localFile : null,
         };
 
         var problems = new List<string>();
@@ -174,6 +184,27 @@ public static class ConfigLoader
 
         var inProject = Path.Combine(root, "clients", "demo-console", "DemoConsole", "appsettings.json");
         return File.Exists(inProject) ? inProject : nextToExecutable;
+    }
+
+    private static (string Path, bool Exists, bool FromProjectFallback) ResolveLocalSettingsFile(
+        string settingsFile, string repoRoot)
+    {
+        var besideSettings = Path.GetFullPath(
+            Path.Combine(Path.GetDirectoryName(Path.GetFullPath(settingsFile))!, "appsettings.Local.json"));
+        if (File.Exists(besideSettings))
+        {
+            return (besideSettings, true, false);
+        }
+
+        var inProject = Path.GetFullPath(
+            Path.Combine(repoRoot, "clients", "demo-console", "DemoConsole", "appsettings.Local.json"));
+        if (!string.Equals(besideSettings, inProject, StringComparison.OrdinalIgnoreCase)
+            && File.Exists(inProject))
+        {
+            return (inProject, true, true);
+        }
+
+        return (besideSettings, false, false);
     }
 
     private static JsonObject ReadObject(string file)
