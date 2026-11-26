@@ -41,6 +41,9 @@ services:
     environment:
       DB_HOST: sqlserver
       SQLSERVER_PORT: 1433
+      DB_NAME: ${DB_NAME:-RTS_DB}
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env}
+      POS_GATEWAY_SECRET: ${POS_GATEWAY_SECRET:-}
       MTLS_REQUIRED: "true"
       # PB-18: the HQ demo service, reached by its compose service name.
       HQ_URL: https://hq-demo:9000/api/v1
