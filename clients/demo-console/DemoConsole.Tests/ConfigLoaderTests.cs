@@ -183,6 +183,17 @@ public class ConfigLoaderTests
         Assert.Contains(logs, line => line.Contains("appsettings.Local.json", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void Pb41_5_DemoConsoleProjectFileDoesNotCopyLocalSettingsToOutput()
+    {
+        var repoRoot = RepoRootLocator.Find(AppContext.BaseDirectory);
+        var csprojPath = Path.Combine(repoRoot, "clients", "demo-console", "DemoConsole", "DemoConsole.csproj");
+        var csproj = File.ReadAllText(csprojPath);
+
+        Assert.Contains("appsettings.json", csproj, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("appsettings.Local.json", csproj, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static (string BinDir, string BinSettings, string ProjectDir) PrepareBinLayout(string root)
     {
         var projectDir = Path.Combine(root, "clients", "demo-console", "DemoConsole");

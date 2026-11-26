@@ -182,6 +182,67 @@ public sealed class ConfigLoaderTests
         Assert.Contains(logs, line => line.Contains("appsettings.Local.json", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void Pb41_5_DemoPosProjectFileDoesNotCopyLocalSettingsToOutput()
+    {
+        var repoRoot = RepoRootLocator.Find(AppContext.BaseDirectory);
+        var csprojPath = Path.Combine(repoRoot, "clients", "demo-pos", "DemoPos", "DemoPos.csproj");
+        var csproj = File.ReadAllText(csprojPath);
+
+        Assert.Contains("appsettings.json", csproj, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("appsettings.Local.json", csproj, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Pb41_5_MainFormStatusStripShowsResolvedLocalSettingsSource()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                using var temporary = new TemporaryDirectory();
+                var (binDir, binSettings, projectDir) = PrepareRepoWithBinLayout(temporary.Path);
+
+                // 1. Neither present -> "Local: không có"
+                var noneLoaded = ConfigLoader.Load(binDir, binSettings);
+                using (var form = new DemoPos.UI.MainForm(noneLoaded, temporary.Path))
+                {
+                    Assert.Contains("Local: không có", form.FilesStatusText, StringComparison.Ordinal);
+                }
+
+                // 2. Project-folder fallback -> shows project appsettings.Local.json
+                var projectLocal = Path.Combine(projectDir, "appsettings.Local.json");
+                File.WriteAllText(projectLocal, """{"PosBaseUrl": "https://192.168.1.50:9443/api/v1"}""");
+                var projectLoaded = ConfigLoader.Load(binDir, binSettings);
+                using (var form = new DemoPos.UI.MainForm(projectLoaded, temporary.Path))
+                {
+                    Assert.Contains("Local: appsettings.Local.json (project)", form.FilesStatusText, StringComparison.Ordinal);
+                }
+
+                // 3. Beside executable wins -> shows exe appsettings.Local.json
+                var binLocal = Path.Combine(binDir, "appsettings.Local.json");
+                File.WriteAllText(binLocal, """{"PosBaseUrl": "https://192.168.1.99:9443/api/v1"}""");
+                var binLoaded = ConfigLoader.Load(binDir, binSettings);
+                using (var form = new DemoPos.UI.MainForm(binLoaded, temporary.Path))
+                {
+                    Assert.Contains("Local: appsettings.Local.json (exe)", form.FilesStatusText, StringComparison.Ordinal);
+                }
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        if (failure is not null)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+        }
+    }
+
     private static (string BinDir, string BinSettings, string ProjectDir) PrepareRepoWithBinLayout(string root)
     {
         File.WriteAllText(Path.Combine(root, "compose.yaml"), "name: test\n");

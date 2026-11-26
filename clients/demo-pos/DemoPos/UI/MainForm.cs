@@ -152,6 +152,7 @@ public sealed class MainForm : Form
         UpdateCartTotal();
         RefreshLogView();
         UpdateQueueStatus();
+        UpdateFilesStatus();
         _monitorTimer.Start();
         _statusTimer.Start();
         _queueTimer.Start();
@@ -253,6 +254,8 @@ public sealed class MainForm : Form
     internal Func<TerminalConfig, HttpMessageHandler>? DiscountHandlerFactory { get; set; }
 
     internal string DiscountStatusText => _discountStatus.Text ?? string.Empty;
+
+    internal string FilesStatusText => _filesStatus.Text ?? string.Empty;
 
     internal Action<string, string>? WarningPresenter { get; set; }
 
@@ -2301,8 +2304,7 @@ public sealed class MainForm : Form
         {
             EvictExpiredDiscountsIfNeeded();
             _clockStatus.Text = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-            _filesStatus.Text = $"CA: {(File.Exists(_loaded.Paths.CaCertificate) ? "OK" : "thiếu")} · " +
-                                $"tokens: {(File.Exists(_loaded.Paths.TokensFile) ? $"{_loaded.Tokens.Count} khóa" : "thiếu")}";
+            UpdateFilesStatus();
             _modeStatus.Text = _mockMode ? "MOCK" : "LIVE";
             _modeStatus.ForeColor = _mockMode ? Color.FromArgb(199, 119, 0) : Color.FromArgb(30, 122, 52);
 
@@ -2379,6 +2381,33 @@ public sealed class MainForm : Form
                 _ = RefreshStatusAsync();
             }
         }
+    }
+
+    private void UpdateFilesStatus()
+    {
+        var localLabel = FormatLocalSettingsLabel(out var fullLocalPath);
+        _filesStatus.Text = $"CA: {(File.Exists(_loaded.Paths.CaCertificate) ? "OK" : "thiếu")} · " +
+                            $"tokens: {(File.Exists(_loaded.Paths.TokensFile) ? $"{_loaded.Tokens.Count} khóa" : "thiếu")} · " +
+                            $"Local: {localLabel}";
+        _filesStatus.ToolTipText = fullLocalPath ?? "Không có appsettings.Local.json";
+    }
+
+    private string FormatLocalSettingsLabel(out string? fullPath)
+    {
+        var localPath = _loaded.Paths.LocalSettingsFile;
+        if (string.IsNullOrWhiteSpace(localPath) || !File.Exists(localPath))
+        {
+            fullPath = null;
+            return "không có";
+        }
+
+        fullPath = Path.GetFullPath(localPath);
+        var inProject = Path.GetFullPath(
+            Path.Combine(_loaded.Paths.RepoRoot, "clients", "demo-pos", "DemoPos", "appsettings.Local.json"));
+        var fileName = Path.GetFileName(fullPath);
+        return string.Equals(fullPath, inProject, StringComparison.OrdinalIgnoreCase)
+            ? $"{fileName} (project)"
+            : $"{fileName} (exe)";
     }
 
     private void OnRequestLogChanged()
