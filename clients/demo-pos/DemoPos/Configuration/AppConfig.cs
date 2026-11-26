@@ -120,7 +120,7 @@ public static class SetupCommands
         "docker compose run --rm --no-deps --volume \"${PWD}:/repo:ro\" --workdir /repo middleware python scripts/register_pos_certificates.py";
 
     public const string IssueTokens =
-        "docker compose run --rm --volume \"${PWD}:/repo\" --workdir /repo middleware python scripts/issue_demo_tokens.py";
+        "docker compose run --rm --no-deps --volume \"${PWD}:/repo\" --workdir /repo middleware python scripts/issue_demo_tokens.py";
 
     public const string StartServices =
         "docker compose up -d --wait middleware pos-gateway";

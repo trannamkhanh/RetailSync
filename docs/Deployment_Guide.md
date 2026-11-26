@@ -61,16 +61,16 @@ Copy `.env.example` to `.env` in the repository root and populate local secrets.
 Copy-Item .env.example .env
 ```
 
-Settings load from the repository root `.env`, then a working-directory `.env` if present. Process environment variables take precedence over `.env`.
+Settings load from the repository root `.env`, then a working-directory `.env` if present. Process environment variables take precedence over `.env`. In `compose.yaml`, `middleware` explicitly forwards `${DB_NAME:-RTS_DB}`, `${MSSQL_SA_PASSWORD}`, and `${POS_GATEWAY_SECRET:-}` (alongside `env_file: .env`) so host-shell overrides never split `migrate`, `middleware`, `sqlserver`, and `pos-gateway` onto different databases or credentials, while a plain `docker compose up` still reads `.env`.
 
 ### Complete Variable Reference (`.env.example`)
 
 | Variable | Default in `.env.example` | Compose Override (`compose.yaml`) | Purpose |
 |---|---|---|---|
-| `MSSQL_SA_PASSWORD` | `replace-with-a-strong-password` | Passed as `MSSQL_SA_PASSWORD` / `SQLCMDPASSWORD` | SQL Server `sa` password (no code default; must meet SQL Server complexity rules) |
+| `MSSQL_SA_PASSWORD` | `replace-with-a-strong-password` | Forwarded to `sqlserver`, `migrate` (`SQLCMDPASSWORD`), and `middleware` | SQL Server `sa` password (no code default; must meet SQL Server complexity rules) |
 | `SQLSERVER_PORT` | `14333` | Overridden to `1433` inside containers | Host port published by `sqlserver` (`127.0.0.1:<port>:1433`) for native clients |
 | `DB_HOST` | `127.0.0.1` | Overridden to `sqlserver` inside containers | SQL Server host for native runs |
-| `DB_NAME` | `RTS_DB` | Uses `.env` (default `RTS_DB`) | Active middleware database (`RTS_DB` for dev, `RTS_DB_DEMO` for demos) |
+| `DB_NAME` | `RTS_DB` | Forwarded to `migrate` and `middleware` (`${DB_NAME:-RTS_DB}`) | Active middleware database (`RTS_DB` for dev, `RTS_DB_DEMO` for demos); shell overrides apply consistently to both services while default `up` uses `.env` |
 | `TEST_DB_NAME` | `RTS_DB_TEST` | Uses `.env` or `--env` override | Database used by `middleware` pytest; must end in `_TEST` and differ from `DB_NAME` |
 | `HQ_DB_NAME` | `RTS_HQ` | Uses `.env` (default `RTS_HQ`) | Database used by `hq-demo` (`RTS_HQ_TEST` for `hq-demo` pytest) |
 | `HQ_URL` | `http://localhost:9000/api/v1` | Overridden to `https://hq-demo:9000/api/v1` | Base URL the middleware sends sync batches to |
@@ -82,7 +82,7 @@ Settings load from the repository root `.env`, then a working-directory `.env` i
 | `SYNC_SEND_POLL_SECONDS` | `30` | Uses `.env` | `sync-send` runs every `min(SYNC_INTERVAL, SYNC_SEND_POLL_SECONDS)` seconds, so a retry goes out at most one poll after it is due (5 to 3600) |
 | `JWT_SECRET` | `replace-with-a-long-random-secret` | Uses `.env` | HS256 signing key for POS, Staff, Manager, Admin, Auditor, and HQ operator JWTs |
 | `MTLS_REQUIRED` | `false` | Overridden to `true` in `middleware` | Enforces `X-Gateway-Secret` and client certificate fingerprint check on `POST /api/v1/pos/events` |
-| `POS_GATEWAY_SECRET` | `replace-with-a-long-random-secret` | Passed to `middleware` and `pos-gateway` | Shared secret nginx injects as `X-Gateway-Secret` so POS events cannot bypass port 9443 |
+| `POS_GATEWAY_SECRET` | `replace-with-a-long-random-secret` | Forwarded to `middleware` and `pos-gateway` (`${POS_GATEWAY_SECRET:-}`) | Shared secret nginx injects as `X-Gateway-Secret` so POS events cannot bypass port 9443 |
 | `POS_LOCK_TIMEOUT_MS` | `2000` | Uses `.env` | Max wait (ms, positive integer) per SQL Server lock on the POS event path before returning `503 SERVICE_UNAVAILABLE` |
 | `SCHEDULER_ENABLED` | `false` | Overridden to `true` in `middleware` | Enables background scheduler (`aggregation`, `near-expiry`, `forecast`, `recommendation`, `sync-send`) |
 | `NEAR_EXPIRY_DEFAULT_DAYS` | `3` | Uses `.env` | Fallback alert window (0–3650 days) for categories without a `near_expiry_config` row |

@@ -301,3 +301,20 @@ def test_audit_minor_hq_tables_migration_is_one_transaction():
 
     assert text.index("SET XACT_ABORT ON;") < text.index("BEGIN TRANSACTION;") \
         < text.index("CREATE TABLE") < text.rindex("COMMIT;")
+
+
+def test_pb41_6_middleware_forwards_host_env_vars_matching_migrate_and_gateway():
+    services = _compose_services()
+    migrate_env = services["migrate"]["environment"]
+    middleware = services["middleware"]
+    middleware_env = middleware["environment"]
+    gateway_env = services["pos-gateway"]["environment"]
+
+    # Default `docker compose up` still reads .env for all non-overridden variables.
+    assert middleware.get("env_file") == ".env"
+
+    # Host overrides for DB_NAME, MSSQL_SA_PASSWORD, and POS_GATEWAY_SECRET stay aligned
+    # between migrate, sqlserver, pos-gateway, and middleware.
+    assert middleware_env.get("DB_NAME") == migrate_env.get("DB_NAME") == "${DB_NAME:-RTS_DB}"
+    assert middleware_env.get("MSSQL_SA_PASSWORD") == "${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env}"
+    assert middleware_env.get("POS_GATEWAY_SECRET") == gateway_env.get("POS_GATEWAY_SECRET") == "${POS_GATEWAY_SECRET:-}"
