@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using DemoPos.Configuration;
 using Xunit;
@@ -130,6 +131,90 @@ public sealed class ConfigLoaderTests
         var loaded = ConfigLoader.Load(temporary.Path, settings);
 
         Assert.Contains(loaded.Problems, problem => problem.Contains("Missing token 'POS-DN1-01'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Pb41_5_LocalSettingsNextToExecutableWinsOverProjectFolder()
+    {
+        using var temporary = new TemporaryDirectory();
+        var (binDir, binSettings, projectDir) = PrepareRepoWithBinLayout(temporary.Path);
+        var binLocal = Path.Combine(binDir, "appsettings.Local.json");
+        var projectLocal = Path.Combine(projectDir, "appsettings.Local.json");
+        File.WriteAllText(projectLocal, """{"PosBaseUrl": "https://10.0.0.10:9443/api/v1"}""");
+        File.WriteAllText(binLocal, """{"PosBaseUrl": "https://192.168.1.99:9443/api/v1"}""");
+
+        var (loaded, logs) = LoadWithTrace(() => ConfigLoader.Load(binDir, binSettings));
+
+        Assert.Equal("https://192.168.1.99:9443/api/v1", loaded.Config.PosBaseUrl);
+        Assert.Equal(Path.GetFullPath(binLocal), loaded.Paths.LocalSettingsFile);
+        Assert.Contains(logs, line => line.Contains(Path.GetFullPath(binLocal), StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Pb41_5_LocalSettingsFallsBackToProjectFolderWhenMissingNextToExecutable()
+    {
+        using var temporary = new TemporaryDirectory();
+        var (binDir, binSettings, projectDir) = PrepareRepoWithBinLayout(temporary.Path);
+        var projectLocal = Path.Combine(projectDir, "appsettings.Local.json");
+        File.WriteAllText(projectLocal,
+            """{"PosBaseUrl": "https://192.168.1.10:9443/api/v1", "MonitorBaseUrl": "https://192.168.1.10:8443/api/v1"}""");
+
+        var (loaded, logs) = LoadWithTrace(() => ConfigLoader.Load(binDir, binSettings));
+
+        Assert.Equal("https://192.168.1.10:9443/api/v1", loaded.Config.PosBaseUrl);
+        Assert.Equal("https://192.168.1.10:8443/api/v1", loaded.Config.MonitorBaseUrl);
+        Assert.Equal(Path.GetFullPath(projectLocal), loaded.Paths.LocalSettingsFile);
+        Assert.Contains(logs, line => line.Contains(Path.GetFullPath(projectLocal), StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Pb41_5_LoadsDefaultsWhenNoLocalSettingsExistInEitherLocation()
+    {
+        using var temporary = new TemporaryDirectory();
+        var (binDir, binSettings, _) = PrepareRepoWithBinLayout(temporary.Path);
+
+        var (loaded, logs) = LoadWithTrace(() => ConfigLoader.Load(binDir, binSettings));
+
+        Assert.Equal("https://localhost:9443/api/v1", loaded.Config.PosBaseUrl);
+        Assert.Equal("https://localhost:8443/api/v1", loaded.Config.MonitorBaseUrl);
+        Assert.True(loaded.IsMock);
+        Assert.False(File.Exists(loaded.Paths.LocalSettingsFile));
+        Assert.Contains(logs, line => line.Contains("appsettings.Local.json", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static (string BinDir, string BinSettings, string ProjectDir) PrepareRepoWithBinLayout(string root)
+    {
+        File.WriteAllText(Path.Combine(root, "compose.yaml"), "name: test\n");
+        var projectDir = Path.Combine(root, "clients", "demo-pos", "DemoPos");
+        var binDir = Path.Combine(projectDir, "bin", "Debug", "net8.0-windows");
+        Directory.CreateDirectory(binDir);
+        File.WriteAllText(Path.Combine(projectDir, "appsettings.json"), Settings);
+        var binSettings = Path.Combine(binDir, "appsettings.json");
+        File.WriteAllText(binSettings, Settings);
+        return (binDir, binSettings, projectDir);
+    }
+
+    private static (T Result, List<string> Logs) LoadWithTrace<T>(Func<T> action)
+    {
+        var messages = new List<string>();
+        using var listener = new CapturingTraceListener(messages);
+        Trace.Listeners.Add(listener);
+        try
+        {
+            return (action(), messages);
+        }
+        finally
+        {
+            Trace.Listeners.Remove(listener);
+        }
+    }
+
+    private sealed class CapturingTraceListener : TraceListener
+    {
+        private readonly List<string> _messages;
+        public CapturingTraceListener(List<string> messages) => _messages = messages;
+        public override void Write(string? message) { if (message is not null) _messages.Add(message); }
+        public override void WriteLine(string? message) { if (message is not null) _messages.Add(message); }
     }
 
     /// <summary>One terminal, its own certificate and key, the CA, and no Auditor token.</summary>

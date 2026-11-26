@@ -44,6 +44,7 @@ public sealed class ConsolePaths
     public required string TokensFile { get; init; }
     public required string EnvFile { get; init; }
     public required string SettingsFile { get; init; }
+    public string? LocalSettingsFile { get; init; }
 }
 
 public sealed class LoadedConsoleConfig
