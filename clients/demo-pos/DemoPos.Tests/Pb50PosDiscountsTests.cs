@@ -32,6 +32,19 @@ public sealed class Pb50PosDiscountsTests
             key.ExportPkcs8PrivateKeyPem());
     });
 
+    private static readonly Lazy<CachedPems> SharedSecondTerminalPems = new(() =>
+    {
+        using var authority = TestCertificates.CreateAuthority();
+        using var cert1 = TestCertificates.CreateClientCertificate(authority, "POS-DN1-01");
+        using var key1 = cert1.GetRSAPrivateKey()!;
+        using var cert2 = TestCertificates.CreateClientCertificate(authority, "POS-DN2-01");
+        using var key2 = cert2.GetRSAPrivateKey()!;
+        return new CachedPems(
+            authority.ExportCertificatePem(),
+            cert1.ExportCertificatePem() + "\n---SECOND---\n" + cert2.ExportCertificatePem(),
+            key1.ExportPkcs8PrivateKeyPem() + "\n---SECOND---\n" + key2.ExportPkcs8PrivateKeyPem());
+    });
+
     private static void OnStaThread(Action action)
     {
         Exception? failure = null;
@@ -157,7 +170,11 @@ public sealed class Pb50PosDiscountsTests
                && GetPrivateField<SemaphoreSlim>(form, "_queueGate").CurrentCount == 1;
     }
 
-    private static void ShowFormDeterministically(MainForm form, Func<TerminalConfig, HttpMessageHandler>? discountFactory = null)
+    private static StubHttpHandler CreateOfflineStub(string message = "Connection refused") =>
+        new((_, _) => Task.FromException<HttpResponseMessage>(new HttpRequestException(message)));
+
+    private static void ShowFormDeterministically(MainForm form, Func<TerminalConfig, HttpMessageHandler>? discountFactory = null,
+                                                  bool offline = false)
     {
         StopBackgroundTimers(form);
         if (discountFactory is not null)
@@ -170,13 +187,13 @@ public sealed class Pb50PosDiscountsTests
             var monitor = GetPrivateField<MonitorApiClient?>(form, "_monitorClient");
             if (monitor is not null)
             {
-                ReplaceHttpClient(monitor, CreateMonitorStub(), disposeHandler: true);
+                ReplaceHttpClient(monitor, offline ? CreateOfflineStub() : CreateMonitorStub(), disposeHandler: true);
             }
 
             var probe = GetPrivateField<GatewayProbe?>(form, "_gatewayProbe");
             if (probe is not null)
             {
-                ReplaceHttpClient(probe, CreateGatewayProbeStub(), disposeHandler: true);
+                ReplaceHttpClient(probe, offline ? CreateOfflineStub() : CreateGatewayProbeStub(), disposeHandler: true);
             }
         }
 
@@ -187,24 +204,55 @@ public sealed class Pb50PosDiscountsTests
         PumpUntil(() => IsFormIdle(form));
     }
 
-    private static LoadedConfig BuildConfig(string directory, bool mock)
+    private static LoadedConfig BuildConfig(string directory, bool mock,
+                                            string posBaseUrl = "https://127.0.0.1:19443/api/v1",
+                                            string storeId = "STORE-DN1",
+                                            bool includeSecondTerminal = false)
     {
-        var pems = SharedPems.Value;
         var caPath = Path.Combine(directory, "ca.crt");
-        File.WriteAllText(caPath, pems.CaPem);
-        File.WriteAllText(Path.Combine(directory, "POS-DN1-01.crt"), pems.ClientCertPem);
-        File.WriteAllText(Path.Combine(directory, "POS-DN1-01.key"), pems.ClientKeyPem);
+        if (includeSecondTerminal)
+        {
+            var pair = SharedSecondTerminalPems.Value;
+            var certs = pair.ClientCertPem.Split("\n---SECOND---\n");
+            var keys = pair.ClientKeyPem.Split("\n---SECOND---\n");
+            File.WriteAllText(caPath, pair.CaPem);
+            File.WriteAllText(Path.Combine(directory, "POS-DN1-01.crt"), certs[0]);
+            File.WriteAllText(Path.Combine(directory, "POS-DN1-01.key"), keys[0]);
+            File.WriteAllText(Path.Combine(directory, "POS-DN2-01.crt"), certs[1]);
+            File.WriteAllText(Path.Combine(directory, "POS-DN2-01.key"), keys[1]);
+        }
+        else
+        {
+            var pems = SharedPems.Value;
+            File.WriteAllText(caPath, pems.CaPem);
+            File.WriteAllText(Path.Combine(directory, "POS-DN1-01.crt"), pems.ClientCertPem);
+            File.WriteAllText(Path.Combine(directory, "POS-DN1-01.key"), pems.ClientKeyPem);
+        }
 
-        var payload = Convert.ToBase64String(Encoding.UTF8.GetBytes("""{"sub":"pos_system","role":"POS","store_id":"STORE-DN1","pos_id":"POS-DN1-01"}"""))
-            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
-        var posJwt = $"header.{payload}.sig";
+        static string MakePosJwt(string sid, string pid)
+        {
+            var payload = Convert.ToBase64String(Encoding.UTF8.GetBytes(
+                    $"{{\"sub\":\"pos_system\",\"role\":\"POS\",\"store_id\":\"{sid}\",\"pos_id\":\"{pid}\"}}"))
+                .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+            return $"header.{payload}.sig";
+        }
 
         var tokensPath = Path.Combine(directory, "tokens.json");
         var tokens = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["POS-DN1-01"] = posJwt,
+            ["POS-DN1-01"] = MakePosJwt(storeId, "POS-DN1-01"),
             ["staff_dn1"] = "token-staff-1",
         };
+        var terminals = new List<TerminalConfig>
+        {
+            new() { StoreId = storeId, StoreName = "Cửa hàng Hải Châu", PosId = "POS-DN1-01" },
+        };
+        if (includeSecondTerminal)
+        {
+            tokens["POS-DN2-01"] = MakePosJwt("STORE-DN2", "POS-DN2-01");
+            terminals.Add(new TerminalConfig { StoreId = "STORE-DN2", StoreName = "Cửa hàng Thanh Khê", PosId = "POS-DN2-01" });
+        }
+
         File.WriteAllText(tokensPath, JsonSerializer.Serialize(tokens));
 
         return new LoadedConfig
@@ -212,12 +260,9 @@ public sealed class Pb50PosDiscountsTests
             Config = new AppConfig
             {
                 UseMock = mock,
-                PosBaseUrl = "https://127.0.0.1:19443/api/v1",
+                PosBaseUrl = posBaseUrl,
                 MonitorBaseUrl = "https://127.0.0.1:18443/api/v1",
-                Terminals = new List<TerminalConfig>
-                {
-                    new() { StoreId = "STORE-DN1", StoreName = "Cửa hàng Hải Châu", PosId = "POS-DN1-01" },
-                },
+                Terminals = terminals,
                 Products = new List<ProductConfig>
                 {
                     new() { Sku = "SKU-0001", Barcode = "8930000000011", Name = "Fresh milk 1L", UnitPrice = 32000m },
@@ -977,6 +1022,403 @@ public sealed class Pb50PosDiscountsTests
                 .First(row => ((ProductRow)row.DataBoundItem!).Sku == "SKU-0001");
             Assert.Same(firstFont, secondMilkRow.Cells[origCol.Index].Style.Font);
         });
+    }
+
+    // 7. Issue #88 (DSH50-10): Persist active discounts across offline restarts on same business date
+
+    [Fact]
+    public void Dsh50_10_OfflineRestartKeepsLastDiscountOnSameBusinessDate()
+    {
+        OnStaThread(() =>
+        {
+            using var directory = new TemporaryDirectory();
+            var loaded = BuildConfig(directory.Path, mock: false);
+
+            // Session 1 (online at 14:35 UTC+7): load 30% discount for SKU-0001 -> 22,400 VND.
+            using (var onlineHandler = new StubHttpHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """{"business_date":"2026-11-23","items":[{"sku":"SKU-0001","discount_pct":30.0,"discounted_price":22400.0}]}""",
+                    Encoding.UTF8, "application/json"),
+            })))
+            using (var form1 = new MainForm(loaded, directory.Path)
+            {
+                UtcClock = () => FixedUtc,
+                LocalClock = () => FixedLocal,
+            })
+            {
+                ShowFormDeterministically(form1, _ => onlineHandler);
+                form1.AddProductToCart("SKU-0001", 1);
+                Assert.Equal(22400m, Assert.Single(form1.CartItems).UnitPrice);
+                form1.Close();
+            }
+
+            // Session 2 (same config, same business date 5 minutes later, middleware unavailable).
+            using (var offlineDiscountHandler = CreateOfflineStub("Connection refused"))
+            using (var form2 = new MainForm(loaded, directory.Path)
+            {
+                UtcClock = () => FixedUtc.AddMinutes(5),
+                LocalClock = () => FixedLocal.AddMinutes(5),
+            })
+            {
+                ShowFormDeterministically(form2, _ => offlineDiscountHandler, offline: true);
+
+                // Fetch failure must be shown with the last successful update time (14:35).
+                Assert.Equal("Giảm giá: cập nhật lúc 14:35", form2.DiscountStatusText);
+
+                // ProductGrid must show strikeout original price and 22,400 discounted price.
+                var origCol = form2.ProductGrid.Columns.Cast<DataGridViewColumn>()
+                    .First(col => col.DataPropertyName == nameof(ProductRow.OriginalPriceText));
+                var priceCol = form2.ProductGrid.Columns.Cast<DataGridViewColumn>()
+                    .First(col => col.DataPropertyName == nameof(ProductRow.UnitPriceText));
+                var milkRow = form2.ProductGrid.Rows.Cast<DataGridViewRow>()
+                    .First(row => ((ProductRow)row.DataBoundItem!).Sku == "SKU-0001");
+                Assert.Equal(32000m.ToString("N0"), milkRow.Cells[origCol.Index].Value?.ToString());
+                Assert.True(milkRow.Cells[origCol.Index].Style.Font?.Strikeout ?? false);
+                Assert.Contains(22400m.ToString("N0"), milkRow.Cells[priceCol.Index].Value?.ToString());
+
+                // Cart uses 22,400 VND (not 32,000 list price), and Pay queues offline without blocking sales.
+                form2.AddProductToCart("SKU-0001", 1);
+                var cartItem = Assert.Single(form2.CartItems);
+                Assert.Equal(22400m, cartItem.UnitPrice);
+                Assert.Equal(32000m, cartItem.ListPrice);
+                Assert.True(cartItem.HasDiscount);
+
+                var liveClient = (TerminalClient)InvokePrivate(form2, "GetLiveClient", loaded.Config.Terminals[0])!;
+                ReplaceHttpClient(liveClient, CreateOfflineStub("Connection refused"), disposeHandler: true);
+
+                var payTask = form2.PayAsync();
+                PumpUntil(() => payTask.IsCompleted && IsFormIdle(form2));
+                var payResult = payTask.GetAwaiter().GetResult();
+                Assert.Equal("WAITING", payResult.Code);
+                Assert.Empty(form2.CartItems);
+
+                var queuedSale = PosEventJson.Deserialize(form2.CurrentHistory[0].RawBody);
+                Assert.Equal(EventTypes.Sale, queuedSale.EventType);
+                Assert.Equal(22400m, Assert.Single(queuedSale.Items!).UnitPrice);
+                form2.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public void Dsh50_10_OfflineRestartOnNextBusinessDateDropsCachedDiscount()
+    {
+        OnStaThread(() =>
+        {
+            using var directory = new TemporaryDirectory();
+            var loaded = BuildConfig(directory.Path, mock: false);
+
+            var beforeMidnightUtc = new DateTime(2026, 11, 23, 16, 59, 30, DateTimeKind.Utc);
+            var beforeMidnightLocal = new DateTime(2026, 11, 23, 23, 59, 30, DateTimeKind.Local);
+            using (var onlineHandler = new StubHttpHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """{"business_date":"2026-11-23","items":[{"sku":"SKU-0001","discount_pct":30,"discounted_price":22400}]}""",
+                    Encoding.UTF8, "application/json"),
+            })))
+            using (var form1 = new MainForm(loaded, directory.Path)
+            {
+                UtcClock = () => beforeMidnightUtc,
+                LocalClock = () => beforeMidnightLocal,
+            })
+            {
+                ShowFormDeterministically(form1, _ => onlineHandler);
+                form1.AddProductToCart("SKU-0001", 1);
+                Assert.Equal(22400m, Assert.Single(form1.CartItems).UnitPrice);
+                form1.Close();
+            }
+
+            // Reopen offline after UTC+7 midnight: 2026-11-24 00:00:05 UTC+7.
+            var afterMidnightUtc = new DateTime(2026, 11, 23, 17, 0, 5, DateTimeKind.Utc);
+            var afterMidnightLocal = new DateTime(2026, 11, 24, 0, 0, 5, DateTimeKind.Local);
+            using (var offlineHandler = CreateOfflineStub("Connection refused"))
+            using (var form2 = new MainForm(loaded, directory.Path)
+            {
+                UtcClock = () => afterMidnightUtc,
+                LocalClock = () => afterMidnightLocal,
+            })
+            {
+                ShowFormDeterministically(form2, _ => offlineHandler, offline: true);
+
+                Assert.Equal("Giảm giá: chưa tải được", form2.DiscountStatusText);
+                Assert.DoesNotContain("23:59", form2.DiscountStatusText);
+
+                var milkRow = form2.ProductGrid.Rows.Cast<DataGridViewRow>()
+                    .First(row => ((ProductRow)row.DataBoundItem!).Sku == "SKU-0001");
+                Assert.False(((ProductRow)milkRow.DataBoundItem!).HasDiscount);
+
+                form2.AddProductToCart("SKU-0001", 1);
+                Assert.Equal(32000m, Assert.Single(form2.CartItems).UnitPrice);
+                Assert.False(File.Exists(Path.Combine(directory.Path, "POS-DN1-01.discounts.json")));
+                form2.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public void Dsh50_10_EmptyOnlineRefreshOverwritesPersistedDiscountCache()
+    {
+        OnStaThread(() =>
+        {
+            using var directory = new TemporaryDirectory();
+            var loaded = BuildConfig(directory.Path, mock: false);
+            var currentUtc = FixedUtc;
+            var currentLocal = FixedLocal;
+            var call = 0;
+
+            using (var handler = new StubHttpHandler((_, _) =>
+            {
+                call++;
+                var body = call == 1
+                    ? """{"business_date":"2026-11-23","items":[{"sku":"SKU-0001","discount_pct":30,"discounted_price":22400}]}"""
+                    : """{"business_date":"2026-11-23","items":[]}""";
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(body, Encoding.UTF8, "application/json"),
+                });
+            }))
+            using (var form1 = new MainForm(loaded, directory.Path)
+            {
+                UtcClock = () => currentUtc,
+                LocalClock = () => currentLocal,
+            })
+            {
+                ShowFormDeterministically(form1, _ => handler);
+                form1.AddProductToCart("SKU-0001", 1);
+                Assert.Equal(22400m, Assert.Single(form1.CartItems).UnitPrice);
+
+                currentUtc = FixedUtc.AddMinutes(5);
+                currentLocal = FixedLocal.AddMinutes(5);
+                var refresh = form1.RefreshDiscountsAsync();
+                PumpUntil(() => refresh.IsCompleted && IsFormIdle(form1));
+                refresh.GetAwaiter().GetResult();
+                form1.Close();
+            }
+
+            // Reopen offline on the same business date: revoked discount must NOT resurrect.
+            using (var offlineHandler = CreateOfflineStub("Connection refused"))
+            using (var form2 = new MainForm(loaded, directory.Path)
+            {
+                UtcClock = () => FixedUtc.AddMinutes(10),
+                LocalClock = () => FixedLocal.AddMinutes(10),
+            })
+            {
+                ShowFormDeterministically(form2, _ => offlineHandler, offline: true);
+
+                Assert.Equal("Giảm giá: cập nhật lúc 14:40", form2.DiscountStatusText);
+                form2.AddProductToCart("SKU-0001", 1);
+                Assert.Equal(32000m, Assert.Single(form2.CartItems).UnitPrice);
+                form2.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public void Dsh50_10_MockModeAndChangedConfigDoNotPolluteOrLeakLiveDiscountCache()
+    {
+        OnStaThread(() =>
+        {
+            using var directory = new TemporaryDirectory();
+            var loaded = BuildConfig(directory.Path, mock: false);
+
+            // Session 1: fetch LIVE 30% discount (22,400), then toggle to MOCK with a 50% discount (16,000).
+            using (var onlineHandler = new StubHttpHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """{"business_date":"2026-11-23","items":[{"sku":"SKU-0001","discount_pct":30,"discounted_price":22400}]}""",
+                    Encoding.UTF8, "application/json"),
+            })))
+            using (var form1 = new MainForm(loaded, directory.Path)
+            {
+                UtcClock = () => FixedUtc,
+                LocalClock = () => FixedLocal,
+            })
+            {
+                ShowFormDeterministically(form1, _ => onlineHandler);
+                var toMock = form1.ToggleMockAsync();
+                PumpUntil(() => toMock.IsCompleted && IsFormIdle(form1));
+                toMock.GetAwaiter().GetResult();
+
+                form1.MockBackend.SetDiscounts("STORE-DN1", new PosDiscountList(
+                    FixedBusinessDate,
+                    new[] { new PosDiscountItem("SKU-0001", 50m, 16000m) }));
+                var mockRefresh = form1.RefreshDiscountsAsync();
+                PumpUntil(() => mockRefresh.IsCompleted && IsFormIdle(form1));
+                mockRefresh.GetAwaiter().GetResult();
+                form1.Close();
+            }
+
+            // Session 2 (same LIVE config, offline): still has LIVE 22,400 (NOT mock 16,000).
+            var sameLiveConfig = BuildConfig(directory.Path, mock: false);
+            using (var offlineHandler = CreateOfflineStub("Connection refused"))
+            using (var form2 = new MainForm(sameLiveConfig, directory.Path)
+            {
+                UtcClock = () => FixedUtc.AddMinutes(5),
+                LocalClock = () => FixedLocal.AddMinutes(5),
+            })
+            {
+                ShowFormDeterministically(form2, _ => offlineHandler, offline: true);
+                Assert.Equal("Giảm giá: cập nhật lúc 14:35", form2.DiscountStatusText);
+                form2.AddProductToCart("SKU-0001", 1);
+                Assert.Equal(22400m, Assert.Single(form2.CartItems).UnitPrice);
+                form2.Close();
+            }
+
+            // Session 3 (different PosBaseUrl, offline): must not reuse cache from another endpoint.
+            var differentEndpointConfig = BuildConfig(
+                directory.Path, mock: false, posBaseUrl: "https://127.0.0.1:29443/api/v1");
+            using (var offlineHandler = CreateOfflineStub("Connection refused"))
+            using (var form3 = new MainForm(differentEndpointConfig, directory.Path)
+            {
+                UtcClock = () => FixedUtc.AddMinutes(5),
+                LocalClock = () => FixedLocal.AddMinutes(5),
+            })
+            {
+                ShowFormDeterministically(form3, _ => offlineHandler, offline: true);
+                Assert.Equal("Giảm giá: chưa tải được", form3.DiscountStatusText);
+                form3.AddProductToCart("SKU-0001", 1);
+                Assert.Equal(32000m, Assert.Single(form3.CartItems).UnitPrice);
+                form3.Close();
+            }
+
+            // Session 4 (different StoreId for same PosId, offline): must not leak another store's discount.
+            var differentStoreConfig = BuildConfig(
+                directory.Path, mock: false, storeId: "STORE-DN2");
+            using (var offlineHandler = CreateOfflineStub("Connection refused"))
+            using (var form4 = new MainForm(differentStoreConfig, directory.Path)
+            {
+                UtcClock = () => FixedUtc.AddMinutes(5),
+                LocalClock = () => FixedLocal.AddMinutes(5),
+            })
+            {
+                ShowFormDeterministically(form4, _ => offlineHandler, offline: true);
+                Assert.Equal("Giảm giá: chưa tải được", form4.DiscountStatusText);
+                form4.AddProductToCart("SKU-0001", 1);
+                Assert.Equal(32000m, Assert.Single(form4.CartItems).UnitPrice);
+                form4.Close();
+            }
+        });
+    }
+
+    [Theory]
+    [InlineData("en-US")]
+    [InlineData("vi-VN")]
+    [InlineData("de-DE")]
+    public void Dsh50_10_RestartPreservesDiscountsPerTerminalAcrossLocales(string cultureName)
+    {
+        OnStaThread(() =>
+        {
+            var previous = CultureInfo.CurrentCulture;
+            try
+            {
+                CultureInfo.CurrentCulture = new CultureInfo(cultureName);
+                using var directory = new TemporaryDirectory();
+                var loaded = BuildConfig(directory.Path, mock: false, includeSecondTerminal: true);
+
+                using (var form1 = new MainForm(loaded, directory.Path)
+                {
+                    UtcClock = () => FixedUtc,
+                    LocalClock = () => FixedLocal,
+                })
+                {
+                    ShowFormDeterministically(form1, terminal => new StubHttpHandler((_, _) =>
+                    {
+                        var body = string.Equals(terminal.PosId, "POS-DN1-01", StringComparison.OrdinalIgnoreCase)
+                            ? """{"business_date":"2026-11-23","items":[{"sku":"SKU-0001","discount_pct":30.5,"discounted_price":22240.50}]}"""
+                            : """{"business_date":"2026-11-23","items":[{"sku":"SKU-0001","discount_pct":15.0,"discounted_price":27200.00}]}""";
+                        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                        {
+                            Content = new StringContent(body, Encoding.UTF8, "application/json"),
+                        });
+                    }));
+
+                    // Switch to terminal 2 so both terminals fetch and persist their own discount caches.
+                    form1.SelectTerminal("POS-DN2-01");
+                    PumpUntil(() => IsFormIdle(form1));
+                    form1.AddProductToCart("SKU-0001", 1);
+                    Assert.Equal(27200m, Assert.Single(form1.CartItems).UnitPrice);
+                    form1.Close();
+                }
+
+                // Restart offline: terminal 1 keeps 22,240.50 and terminal 2 keeps 27,200.
+                using (var offlineHandler = CreateOfflineStub("Connection refused"))
+                using (var form2 = new MainForm(loaded, directory.Path)
+                {
+                    UtcClock = () => FixedUtc.AddMinutes(5),
+                    LocalClock = () => FixedLocal.AddMinutes(5),
+                })
+                {
+                    ShowFormDeterministically(form2, _ => offlineHandler, offline: true);
+
+                    Assert.Equal("Giảm giá: cập nhật lúc 14:35", form2.DiscountStatusText);
+                    form2.AddProductToCart("SKU-0001", 1);
+                    Assert.Equal(22240.50m, Assert.Single(form2.CartItems).UnitPrice);
+
+                    form2.SelectTerminal("POS-DN2-01");
+                    PumpUntil(() => IsFormIdle(form2));
+                    Assert.Equal("Giảm giá: cập nhật lúc 14:35", form2.DiscountStatusText);
+                    form2.AddProductToCart("SKU-0001", 1);
+                    Assert.Equal(27200m, Assert.Single(form2.CartItems).UnitPrice);
+                    form2.Close();
+                }
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = previous;
+            }
+        });
+    }
+
+    [Fact]
+    public void Dsh50_10_CorruptDiscountCacheFileIsIgnoredSafelyOnOfflineStartup()
+    {
+        OnStaThread(() =>
+        {
+            using var directory = new TemporaryDirectory();
+            var loaded = BuildConfig(directory.Path, mock: false);
+            File.WriteAllText(Path.Combine(directory.Path, "POS-DN1-01.discounts.json"), "{corrupt-json", Encoding.UTF8);
+
+            using var offlineHandler = CreateOfflineStub("Connection refused");
+            using var form = new MainForm(loaded, directory.Path)
+            {
+                UtcClock = () => FixedUtc,
+                LocalClock = () => FixedLocal,
+            };
+            ShowFormDeterministically(form, _ => offlineHandler, offline: true);
+
+            Assert.Equal("Giảm giá: chưa tải được", form.DiscountStatusText);
+            form.AddProductToCart("SKU-0001", 1);
+            Assert.Equal(32000m, Assert.Single(form.CartItems).UnitPrice);
+            form.Close();
+        });
+    }
+
+    [Fact]
+    public void Dsh50_10_PosDiscountCacheStoreValidatesPosIdNormalizesUrlAndLeavesNoTempFiles()
+    {
+        using var directory = new TemporaryDirectory();
+        var store = new PosDiscountCacheStore(directory.Path);
+
+        Assert.Throws<ArgumentException>(() => store.PathFor(""));
+        Assert.Throws<ArgumentException>(() => store.PathFor(".."));
+        Assert.Throws<ArgumentException>(() => store.PathFor("POS/01"));
+        Assert.Null(store.Load("..", "STORE-DN1", "https://127.0.0.1:19443/api/v1"));
+
+        var list = new PosDiscountList(
+            FixedBusinessDate,
+            new[] { new PosDiscountItem("SKU-0001", 30m, 22400m) });
+        store.Save("POS-DN1-01", "STORE-DN1", "https://127.0.0.1:19443/api/v1/", list, FixedLocal);
+
+        var loaded = store.Load("POS-DN1-01", "store-dn1", "https://127.0.0.1:19443/api/v1");
+        Assert.NotNull(loaded);
+        Assert.Equal(FixedBusinessDate, loaded!.List.BusinessDate);
+        Assert.Equal(22400m, Assert.Single(loaded.List.Items).DiscountedPrice);
+        Assert.Equal(FixedLocal, loaded.UpdatedAtLocal);
+        Assert.Empty(Directory.GetFiles(directory.Path, "*.tmp"));
+
+        store.Clear("POS-DN1-01");
+        Assert.Null(store.Load("POS-DN1-01", "STORE-DN1", "https://127.0.0.1:19443/api/v1"));
     }
 
     private static void SelectHistoryByTxnId(MainForm form, string txnId)

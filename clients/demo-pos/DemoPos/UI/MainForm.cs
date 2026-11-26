@@ -41,6 +41,7 @@ public sealed class MainForm : Form
     private readonly NumericUpDown _autoInterval = new();
     private readonly Label _autoSeed = new();
     private readonly Dictionary<string, DurableEventQueue> _queues = new(StringComparer.OrdinalIgnoreCase);
+    private readonly PosDiscountCacheStore _discountCacheStore;
     private readonly Dictionary<string, DateTime> _retryAfter = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _queueGate = new(1, 1);
     private readonly ToolStripStatusLabel _queueStatus = new();
@@ -61,6 +62,7 @@ public sealed class MainForm : Form
     private bool _statusRefreshPending;
     private bool _discountBusy;
     private bool _discountRefreshPending;
+    private bool _liveDiscountsHydrated;
     private bool _closing;
     private bool? _linkUp;
     private int _modeEpoch;
@@ -132,6 +134,7 @@ public sealed class MainForm : Form
         // One journal per terminal: a sale is on disk before the first network send.
         queueDirectory ??= Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RetailSync", "DemoPos");
+        _discountCacheStore = new PosDiscountCacheStore(queueDirectory);
         foreach (var terminal in _config.Terminals)
         {
             _queues.Add(terminal.PosId, new DurableEventQueue(queueDirectory, terminal.PosId));
@@ -164,6 +167,8 @@ public sealed class MainForm : Form
                 return;
             }
 
+            EnsureLiveDiscountsHydrated();
+            ApplyCurrentDiscountsToUi();
             var discountTask = RefreshDiscountsAsync();
             await RefreshStatusAsync();
             if (_closing || IsDisposed)
@@ -326,6 +331,7 @@ public sealed class MainForm : Form
         _modeEpoch++;
         var liveEpoch = _modeEpoch;
         _config.UseMock = false;
+        EnsureLiveDiscountsHydrated();
         ApplyMode();
         ApplyCurrentDiscountsToUi();
         _resultPanel.ShowInfo("Đang ở chế độ LIVE — mọi request đi vào middleware thật.");
@@ -964,6 +970,7 @@ public sealed class MainForm : Form
 
         UpdateTerminalHighlight();
         UpdateHistoryButtons();
+        EnsureLiveDiscountsHydrated();
         ApplyMode();
         ApplyCurrentDiscountsToUi();
         _ = RefreshDiscountsAsync();
@@ -1020,6 +1027,30 @@ public sealed class MainForm : Form
                          : _liveDiscountsByPos.GetValueOrDefault(terminal.PosId))
             : null;
 
+    private void EnsureLiveDiscountsHydrated()
+    {
+        if (_liveDiscountsHydrated || _closing || IsDisposed)
+        {
+            return;
+        }
+
+        _liveDiscountsHydrated = true;
+        var utcNow = UtcClock();
+        foreach (var terminal in _config.Terminals)
+        {
+            var cached = _discountCacheStore.Load(terminal.PosId, terminal.StoreId, _config.PosBaseUrl);
+            if (cached is null)
+            {
+                continue;
+            }
+
+            if (!_liveDiscountsByPos[terminal.PosId].RestoreCached(cached.List, cached.UpdatedAtLocal, utcNow))
+            {
+                _discountCacheStore.Clear(terminal.PosId);
+            }
+        }
+    }
+
     private decimal ResolveSalePrice(string sku, decimal listPrice)
     {
         EvictExpiredDiscountsIfNeeded();
@@ -1030,13 +1061,24 @@ public sealed class MainForm : Form
 
     private void EvictExpiredDiscountsIfNeeded()
     {
-        if (_closing || IsDisposed || CurrentDiscountBook is not { } book)
+        if (_closing || IsDisposed)
+        {
+            return;
+        }
+
+        EnsureLiveDiscountsHydrated();
+        if (CurrentTerminal is not { } terminal || CurrentDiscountBook is not { } book)
         {
             return;
         }
 
         if (book.EvictIfExpired(UtcClock()))
         {
+            if (!_mockMode)
+            {
+                _discountCacheStore.Clear(terminal.PosId);
+            }
+
             ApplyCurrentDiscountsToUi();
         }
     }
@@ -1225,6 +1267,7 @@ public sealed class MainForm : Form
         var wasMock = _mockMode;
         var modeEpoch = _modeEpoch;
         var terminalPosId = terminal.PosId;
+        var terminalStoreId = terminal.StoreId;
         var terminalEpoch = _terminalEpoch;
         try
         {
@@ -1238,10 +1281,17 @@ public sealed class MainForm : Form
                 return;
             }
 
+            EnsureLiveDiscountsHydrated();
             var client = TryGetDiscountClient(terminal);
             if (client is null)
             {
-                _liveDiscountsByPos[terminal.PosId].ApplyFailure("Missing certificate or POS token.", utcNow);
+                var liveBook = _liveDiscountsByPos[terminalPosId];
+                if (liveBook.EvictIfExpired(utcNow))
+                {
+                    _discountCacheStore.Clear(terminalPosId);
+                }
+
+                liveBook.ApplyFailure("Missing certificate or POS token.", utcNow);
                 ApplyCurrentDiscountsToUi();
                 return;
             }
@@ -1255,13 +1305,28 @@ public sealed class MainForm : Form
             }
 
             var book = _liveDiscountsByPos[terminalPosId];
+            var settledUtc = UtcClock();
             if (result.IsSuccess && result.Data is { } fetched)
             {
-                book.ApplySuccess(fetched, UtcClock(), LocalClock());
+                var settledLocal = LocalClock();
+                book.ApplySuccess(fetched, settledUtc, settledLocal);
+                if (fetched.BusinessDate < PosDiscounts.CurrentBusinessDate(settledUtc))
+                {
+                    _discountCacheStore.Clear(terminalPosId);
+                }
+                else
+                {
+                    _discountCacheStore.Save(terminalPosId, terminalStoreId, _config.PosBaseUrl, fetched, settledLocal);
+                }
             }
             else
             {
-                book.ApplyFailure(result.Error ?? $"HTTP {result.HttpStatus}", UtcClock());
+                if (book.EvictIfExpired(settledUtc))
+                {
+                    _discountCacheStore.Clear(terminalPosId);
+                }
+
+                book.ApplyFailure(result.Error ?? $"HTTP {result.HttpStatus}", settledUtc);
             }
 
             if (_terminalEpoch == terminalEpoch
@@ -1278,7 +1343,14 @@ public sealed class MainForm : Form
         {
             if (!_closing && !IsDisposed && _mockMode == wasMock && _modeEpoch == modeEpoch)
             {
-                _liveDiscountsByPos[terminalPosId].ApplyFailure(error.Message, UtcClock());
+                var failureUtc = UtcClock();
+                var book = _liveDiscountsByPos[terminalPosId];
+                if (book.EvictIfExpired(failureUtc))
+                {
+                    _discountCacheStore.Clear(terminalPosId);
+                }
+
+                book.ApplyFailure(error.Message, failureUtc);
                 if (_terminalEpoch == terminalEpoch
                     && string.Equals(CurrentTerminal?.PosId, terminalPosId, StringComparison.OrdinalIgnoreCase))
                 {
