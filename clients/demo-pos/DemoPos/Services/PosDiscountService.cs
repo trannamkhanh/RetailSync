@@ -182,6 +182,30 @@ public sealed class PosDiscountBook
         return _bySku.Count;
     }
 
+    public bool RestoreCached(PosDiscountList cached, DateTime updatedAtLocal, DateTime utcNow)
+    {
+        ArgumentNullException.ThrowIfNull(cached);
+        if (cached.BusinessDate < PosDiscounts.CurrentBusinessDate(utcNow))
+        {
+            _current = null;
+            _bySku.Clear();
+            LastUpdatedLocal = null;
+            return false;
+        }
+
+        _current = cached;
+        LastUpdatedLocal = updatedAtLocal;
+        LastFetchFailed = false;
+        LastError = null;
+        _bySku.Clear();
+        foreach (var item in cached.Items)
+        {
+            _bySku[item.Sku] = item;
+        }
+
+        return true;
+    }
+
     public void ApplySuccess(PosDiscountList fetched, DateTime utcNow, DateTime localNow)
     {
         ArgumentNullException.ThrowIfNull(fetched);
