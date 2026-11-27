@@ -3,7 +3,7 @@
 **Owner:** Quang · **Built:** 27/11/2026 · **Base:** main `a5f509b`
 **Used at:** UAT 1 (27/11, with the mentor) and the final UAT (30/11)
 **Source of the steps:** `docs/demo/Sprint_3_Demo.md` (acts 2–6, plus Màn 7 for the dashboard lines in act 7) with the act-7 audit additions from `Demo_Plan.docx` §5
-**Where it goes:** the GitHub issue **"UAT Capstone 1"**, pasted as this checklist. **That issue is not open yet** — see §11.3.
+**Where it goes:** GitHub issue **#99 "UAT Capstone 1"** — the checklist below is pasted there, opened 27/11 (§11.3).
 
 ---
 
@@ -222,14 +222,18 @@ Before the freeze, Khanh and Sang must say in the team chat which branch, if any
 
 The three Sprint 4 notes Quang already wrote (`Bao_Cao_Kiem_Thu_Sang_26-11.md`, `Retest_Skipped_Cases.md`, `Review_Test_Case_Sprint2-3.md`) exist only in the old checkout on `docs/no-deps-and-audit-followups` and have never been merged; they are copied into this branch under `docs/sprint-4/` so the report can cite them. Each carries a banner saying it is a 26/11 historical record, and that its `evidence/` files and helper scripts are not in the repository.
 
-### 11.3 The UAT issue itself is not open yet
+### 11.3 The UAT issue
 
-The 27/11 brief asks for a GitHub issue titled **"UAT Capstone 1"**, due 27/11, to hold this checklist and the bug list. As of this commit the repository has no such issue — a title search returns no match, and the only issues are the PRs and the `[TestCase]` reports.
+The 27/11 brief asks for a GitHub issue titled **"UAT Capstone 1"**, due 27/11, to hold this checklist and the bug list. It is now open as **[issue #99](https://github.com/trannamkhanh/RetailSync/issues/99)**, opened by `quangquang04` on 27/11.
 
-Opening it needs repository write access, which a docs branch cannot grant itself, so it is the one item in this deliverable that must be done by hand:
+What the issue body carries, so it can be checked against this file:
 
-1. Open the issue titled `UAT Capstone 1`, label/assign it to Quang, reference this file.
-2. Paste §2–§7 as the checklist body, then §11.1b under a "27/11 add lines" heading.
-3. Paste `Bug_List_PB-38-3.md` as the bug-list section of the same issue, per that file's header.
+1. §2–§7 as the tick-able checklist, one line per step with the case id and the *where* column.
+2. §9's measured-numbers table, because act 7 step 7.4 reads the figures from there during the demo.
+3. §11.1b under its own heading, as the 27/11 "add lines" block with the five checkboxes and the freeze date.
+4. A closing note that the three PB-51/52/53 lines must not be ticked empty if those branches miss the 12:00 30/11 freeze.
 
-Until it exists, the pass/fail record lives only in this file and in `Regression_v1.0_Runbook.md` §7.
+`Bug_List_PB-38-3.md` stays the bug-list section for the same issue; its rows are added as the run happens and pasted into the issue, per that file's header. Its §4 is still deliberately empty — the list is created by the run, not before it.
+
+One item remains manual, and it is not a repository edit: §11.1b's checkboxes have to be re-ticked on 30/11 as the run proves or disproves each line. Nothing in the repository can tick them for the team.
+

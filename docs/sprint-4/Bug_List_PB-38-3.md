@@ -2,7 +2,7 @@
 
 **Owner:** Quang · **Opened:** 27/11/2026 · **Base:** main `a5f509b`
 **Issue title (GitHub):** "UAT Capstone 1" — this file is the body's bug-list section
-**Issue state:** **not opened yet.** A title search finds no such issue; opening it needs repository write access. Steps are in `UAT_Capstone_1_List.md` §11.3.
+**Issue state:** open as **[#99](https://github.com/trannamkhanh/RetailSync/issues/99)** (opened 27/11 by `quangquang04`); the checklist, the measured-numbers table and the 27/11 add-lines block are in the issue body, the bug rows are pasted in as the run happens.
 **Triage:** Kiệt, 28/11, PB-41-1
 
 ---
