@@ -266,6 +266,104 @@ def test_pb15_6_a_failing_catch_up_job_is_logged_and_not_retried(clock, monkeypa
     assert any("nightly" in record.getMessage() for record in caplog.records)
 
 
+# A catch-up job whose run is refused (PB-41-4). START is 01:30 local in UTC+7.
+
+
+class Refusals:
+    """The per-job lock of the named jobs: held elsewhere, held by a run in this process, or failing."""
+
+    def __init__(self, kind: str, names: set[str]) -> None:
+        self.kind = kind
+        self.names = set(names)
+
+    @contextmanager
+    def job_lock(self, name: str) -> Iterator[bool]:
+        if name in self.names and self.kind == "lock error":
+            raise RuntimeError("SQL Server unreachable")
+        yield not (name in self.names and self.kind == "held elsewhere")
+
+    def apply(self, sched: Scheduler, monkeypatch) -> None:
+        monkeypatch.setattr(scheduler, "job_lock", self.job_lock, raising=False)
+        if self.kind == "running here":
+            for name in self.names:
+                sched._jobs[name].running.acquire()
+
+    def release(self, sched: Scheduler) -> None:
+        if self.kind == "running here":
+            for name in self.names:
+                sched._jobs[name].running.release()
+        self.names.clear()
+
+
+def nightly_chain(order: list[str]) -> list[Job]:
+    """forecast -> recommendation as in app/jobs/registry.py, all passed at 01:30 local."""
+    return [Job(name, lambda name=name: order.append(name), daily_at=at)
+            for name, at in (("near-expiry", time(0, 30)), ("forecast", time(1, 0)),
+                             ("recommendation", time(1, 15)))]
+
+
+@pytest.mark.parametrize("kind", ["held elsewhere", "running here", "lock error"])
+def test_pb41_4_refused_first_catch_up_job_runs_nothing_after_it_and_keeps_all(clock, monkeypatch, kind):
+    monkeypatch.setattr(settings, "business_utc_offset_hours", 7)
+    order: list[str] = []
+    sched = make(nightly_chain(order), clock)
+    refusals = Refusals(kind, {"near-expiry"})
+    refusals.apply(sched, monkeypatch)
+
+    assert sched.tick() == []
+    assert order == []
+    assert sched.catch_up_pending() == ["near-expiry", "forecast", "recommendation"]
+
+
+@pytest.mark.parametrize("kind", ["held elsewhere", "running here", "lock error"])
+def test_pb41_4_refused_middle_job_keeps_it_and_the_jobs_after_it(clock, monkeypatch, kind):
+    monkeypatch.setattr(settings, "business_utc_offset_hours", 7)
+    order: list[str] = []
+    sched = make(nightly_chain(order), clock)
+    refusals = Refusals(kind, {"forecast"})
+    refusals.apply(sched, monkeypatch)
+
+    assert sched.tick() == ["near-expiry"]
+    assert order == ["near-expiry"]  # recommendation never runs on yesterday's forecast
+    assert sched.catch_up_pending() == ["forecast", "recommendation"]
+
+
+@pytest.mark.parametrize("kind", ["held elsewhere", "running here", "lock error"])
+def test_pb41_4_next_tick_runs_the_kept_jobs_once_in_registry_order(clock, monkeypatch, kind):
+    monkeypatch.setattr(settings, "business_utc_offset_hours", 7)
+    order: list[str] = []
+    sched = make(nightly_chain(order), clock)
+    refusals = Refusals(kind, {"forecast"})
+    refusals.apply(sched, monkeypatch)
+    assert sched.tick() == ["near-expiry"]
+
+    clock.advance(1)
+    assert sched.tick() == []  # still refused: kept again, nothing after it runs
+    assert sched.catch_up_pending() == ["forecast", "recommendation"]
+
+    refusals.release(sched)
+    clock.advance(1)
+    assert sched.tick() == ["forecast", "recommendation"]
+    clock.advance(60)
+    assert sched.tick() == []
+    assert order == ["near-expiry", "forecast", "recommendation"]
+    assert sched.catch_up_pending() == []
+    # Each keeps its next daily time: 01:00 local tomorrow is 18:00 UTC on 15 Nov.
+    assert sched.next_run("forecast") == datetime(2026, 11, 15, 18, 0, tzinfo=timezone.utc)
+
+
+def test_pb41_4_catch_up_without_refusal_is_unchanged(clock, monkeypatch):
+    monkeypatch.setattr(settings, "business_utc_offset_hours", 7)
+    order: list[str] = []
+    sched = make(nightly_chain(order), clock)
+
+    assert sched.tick() == ["near-expiry", "forecast", "recommendation"]
+    assert sched.catch_up_pending() == []
+    clock.advance(60)
+    assert sched.tick() == []
+    assert order == ["near-expiry", "forecast", "recommendation"]
+
+
 # Failover and several jobs in one tick (audit #15)
 
 

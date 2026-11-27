@@ -17,7 +17,9 @@ once a day at a business local time (UTC + ``BUSINESS_UTC_OFFSET_HOURS``).
 - Catch-up (PB-15-6, decided 11 Nov 2026): every ``daily_at`` job whose time
   has already passed today when the scheduler first takes the application lock
   runs once, in registry order, before any other job. No run history is stored,
-  so daily jobs must be safe to run twice on one business date.
+  so daily jobs must be safe to run twice on one business date. A catch-up job
+  whose run is refused (its lock is held or cannot be taken) stops the catch-up:
+  it and every job after it are retried, in order, at the next tick (PB-41-4).
 - Between two jobs of one tick the scheduler checks again that it holds the
   application lock and has not been stopped.
 
@@ -274,9 +276,13 @@ class Scheduler:
             if not self._may_go_on():
                 self._catch_up = names[index:]  # kept for the next tick that holds the lock
                 break
-            if self.run_job(name):
-                ran.append(name)
-                self._next_run[name] = self._jobs[name].next_after(self._clock())
+            if not self.run_job(name):
+                # Refused (its lock is held or failed): retry from here at the next tick, so the jobs
+                # after it (forecast -> recommendation) never run on old data.
+                self._catch_up = names[index:]
+                break
+            ran.append(name)
+            self._next_run[name] = self._jobs[name].next_after(self._clock())
         return ran
 
     def tick(self) -> list[str]:
