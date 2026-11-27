@@ -16,4 +16,8 @@ public sealed class LatestRequest
     public void Invalidate() => _current++;
 
     public bool IsCurrent(int ticket) => ticket == _current;
+
+    /// <summary>True when an answer may still be shown: the ticket is current and the window is not gone
+    /// (closed or disposed while the call ran).</summary>
+    public bool Applies(int ticket, bool windowGone) => !windowGone && IsCurrent(ticket);
 }

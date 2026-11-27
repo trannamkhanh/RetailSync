@@ -1,4 +1,5 @@
 using System.Globalization;
+using StaffApp.Services;
 
 namespace StaffApp.Models;
 
@@ -25,8 +26,10 @@ public sealed record NearbyStore(string StoreId, string Name, int Qty, double Di
 public sealed record AlertLine(long AlertId, string BatchId, string Sku, DateOnly ExpiryDate, int RemainingQty,
                                int DaysToExpiry, string AlertType)
 {
-    /// <summary>The Urgency column of DS-08 screen 2.</summary>
-    public string Urgency => IsExpired ? "Đã hết hạn" : DaysToExpiry <= 1 ? "Hôm nay hoặc mai" : "Sắp hết hạn";
+    /// <summary>The Urgency column of DS-08 screen 2: the alert type's name, with "Hôm nay hoặc mai" for an
+    /// alert that expires within a day (a level from the days left, not a code).</summary>
+    public string Urgency => IsExpired ? DisplayNames.AlertType("EXPIRED")
+        : DaysToExpiry <= 1 ? "Hôm nay hoặc mai" : DisplayNames.AlertType(AlertType);
 
     public bool IsExpired => AlertType == "EXPIRED" || DaysToExpiry < 0;
 }
@@ -35,15 +38,8 @@ public sealed record AlertLine(long AlertId, string BatchId, string Sku, DateOnl
 public record RecommendationLine(long RecId, string Sku, string ActionType, decimal? DiscountPct, int? ProposedQty,
                                  string Status)
 {
-    /// <summary>The Hành động column: a Vietnamese label for the known codes, an unknown code as sent.
-    /// Only the display changes; <c>ActionType</c> keeps the API value.</summary>
-    public string ActionLabel => ActionType switch
-    {
-        "DISCOUNT" => "Giảm giá",
-        "CLEARANCE" => "Thanh lý",
-        "REDISTRIBUTION" => "Điều chuyển",
-        _ => ActionType,
-    };
+    /// <summary>The Hành động column; <c>ActionType</c> keeps the API value.</summary>
+    public string ActionLabel => DisplayNames.ActionType(ActionType);
 
     /// <summary>The Level column of DS-08 screen 3: a percentage for DISCOUNT, units otherwise.
     /// Numbers use the invariant culture, so 12.5 never shows as "12,5" on a vi-VN machine.</summary>
@@ -61,13 +57,9 @@ public sealed record RecommendationDetail(RecommendationLine Summary, string? Ba
     {
         get
         {
-            var action = Summary.ActionType switch
-            {
-                "DISCOUNT" => $"Giảm {Summary.Level} {Summary.Sku}",
-                "CLEARANCE" => $"Thanh lý {Summary.Level} {Summary.Sku}",
-                "REDISTRIBUTION" => $"Điều chuyển {Summary.Level} {Summary.Sku}",
-                _ => $"{Summary.ActionType} {Summary.Sku}",
-            };
+            var action = Summary.ActionType == "DISCOUNT" ? $"Giảm {Summary.Level} {Summary.Sku}"  // "Giảm 50%"
+                : Summary.ActionLabel == Summary.ActionType ? $"{Summary.ActionType} {Summary.Sku}"  // unknown code
+                : $"{Summary.ActionLabel} {Summary.Level} {Summary.Sku}";
             return BatchId is null ? action : $"{action}, lô {BatchId}";
         }
     }
@@ -76,16 +68,18 @@ public sealed record RecommendationDetail(RecommendationLine Summary, string? Ba
 public sealed record GuardrailLine(string RuleType, string Outcome, decimal? OriginalValue, decimal? AdjustedValue,
                                    string? Message)
 {
-    /// <summary>"MIN_SHELF_LIFE: đạt" or "MAX_DISCOUNT: điều chỉnh 60 -> 50 (message)"; the rule type
-    /// and the server message stay as sent.</summary>
+    /// <summary>"Hạn dùng tối thiểu: Đạt" or "Giảm giá tối đa: Điều chỉnh 60 -> 50 (message)"; the server
+    /// message stays as sent.</summary>
     public string Text
     {
         get
         {
-            var text = Outcome == "ADJUSTED"
-                ? string.Create(CultureInfo.InvariantCulture,
-                    $"{RuleType}: điều chỉnh {OriginalValue:0.##} -> {AdjustedValue:0.##}")
-                : $"{RuleType}: {Outcome switch { "PASSED" => "đạt", "BLOCKED" => "chặn", _ => Outcome }}";
+            var text = $"{DisplayNames.RuleType(RuleType)}: {DisplayNames.Outcome(Outcome)}";
+            if (Outcome == "ADJUSTED")
+            {
+                text += string.Create(CultureInfo.InvariantCulture, $" {OriginalValue:0.##} -> {AdjustedValue:0.##}");
+            }
+
             return string.IsNullOrWhiteSpace(Message) ? text : $"{text} ({Message})";
         }
     }
