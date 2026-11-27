@@ -1,12 +1,13 @@
 """PB-37: a real mTLS POS -> middleware -> HQ chain, followed by reconciliation.
 
 Run inside the middleware container against your own RTS_DB_DEMO stack:
-python scripts/e2e/e2e_check.py --db RTS_DB_DEMO --hq-db RTS_HQ_TEST
+python scripts/e2e/e2e_check.py --db RTS_DB_DEMO
 Use --opening STORE=QTY after a documented replenishment. Never targets RTS_DB.
 """
 import argparse
 from decimal import Decimal
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -27,7 +28,7 @@ from scripts.demo import sprint2_smoke as api
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", default="RTS_DB_DEMO", choices=["RTS_DB_DEMO"])
-    parser.add_argument("--hq-db", default="RTS_HQ_TEST")
+    parser.add_argument("--hq-db", default=os.environ.get("HQ_DB_NAME", "RTS_HQ"))
     parser.add_argument("--tokens", type=Path, default=api.TOKENS_FILE)
     parser.add_argument("--hq-url", default="https://hq-demo:9000/api/v1")
     parser.add_argument("--opening", action="append", default=[])
@@ -58,7 +59,7 @@ def hq_totals(body, store, sku):
 
 
 def delta(after, before):
-    return tuple(a - b for a, b in zip(after, before))
+    return tuple(a - b for a, b in zip(after, before, strict=True))
 
 
 def verify(label, ok, detail):
@@ -85,11 +86,23 @@ def send(event):
         return
 
 
+def settle_older_traffic(admin):
+    """A 202 can mean a busy job or pending backoff, not a drained queue."""
+    for attempt in range(30):
+        answer = request("POST", api.MIDDLEWARE + "/sync/run", token=admin)
+        if isinstance(answer, dict) and answer.get("batches_pending") == 0:
+            verify("older sync traffic drained", True, "batches_pending=0 before HQ baseline")
+            return
+        if attempt < 29:
+            time.sleep(1)
+    verify("older sync traffic drained", False, f"no zero-pending response after 30 polls: {answer}")
+
+
 def run(args):
     api.TOKENS = json.loads(args.tokens.read_text(encoding="utf-8"))
     admin = api.TOKENS["admin"]
     # Settle older traffic before taking the HQ baseline; this is not a reset.
-    request("POST", api.MIDDLEWARE + "/sync/run", token=admin)
+    settle_older_traffic(admin)
     before = request("GET", args.hq_url.rstrip("/") + "/demo/batches")
     opening = api.stock()
     verify("stock available", opening >= 5, f"{api.STORE_DN1}/{api.STOCK}={opening}")

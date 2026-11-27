@@ -33,6 +33,8 @@ python scripts/e2e/e2e_check.py --db RTS_DB_DEMO --hq-db RTS_HQ_TEST \
 
 For this isolated run the private token file was passed with --tokens /evidence/s4-demo-tokens.json. Default use is .tokens/demo_tokens.json. The checker refuses any middleware database other than RTS_DB_DEMO and requires DB_NAME to match before sending requests. It reuses sprint2_smoke.py's TLS/mTLS transport, preserving transaction IDs on transient 503 retries.
 
+The HQ database defaults to HQ_DB_NAME when set, otherwise RTS_HQ (the standard demo stack). --hq-db overrides either. The isolated measurement above explicitly selected RTS_HQ_TEST. Before taking the HQ baseline, the checker polls POST /sync/run up to 30 times, waiting one second between attempts, and requires batches_pending=0. A queue that stays pending fails before baseline capture or new POS traffic; HTTP 202 alone is not treated as a drained queue.
+
 A cancellation cannot reference the partially returned sale: the chain therefore uses SALE A (3), RETURN A (1), SALE B (2), CANCELLATION B. Expected stock offsets are -3, -2, -4, -2. The HQ baseline is taken before these four requests; exact expected deltas are sold=5, returned=3, net revenue=64,000 VND.
 
 Captured normal-run output:
@@ -123,6 +125,8 @@ RECONCILIATION PASS
 
 ## Scenario 2: HQ outage (PB-37-3)
 
+This rerun used SCHEDULER_ENABLED=false and manual sync cycles, so automatic backoff-timer evidence is inherited from the prior DS-09 measurements; it was not remeasured here.
+
 HQ OFFLINE from 09:19:13.410Z until 09:22:13.410Z (180.01 seconds), covering three manual sync cycles 60 seconds apart. Every cycle sent five real mTLS events on SKU-0007 at 120,000 VND: DN1 SALE 2 / RETURN 1, DN2 SALE 2 / CANCELLATION of that sale, DN3 SALE 1. All 15 answered 200 while HQ stayed unavailable. Each cycle called POST /sync/run as Admin; the batches remained PENDING. The oldest batch accumulated three 503 HQ_OFFLINE attempts; all eight newer batches had zero attempts, proving the global send gate. After ONLINE, all nine ACKED and the order in GET /demo/batches exactly matched local created_at/batch-id order. All 15 planned IDs were present once.
 
 Reproduction on the private stack: PUT /api/v1/demo/mode {"mode":"OFFLINE"}; send the five events per cycle through the terminal certificate gateway; POST /api/v1/sync/run at 0, 60 and 120 seconds; at 180 seconds PUT {"mode":"ONLINE"}; POST /sync/run until ACKED; compare HQ order and run sync_reconcile. The mode was restored in a finally block so an assertion failure could not leave HQ offline.
@@ -150,7 +154,7 @@ RECONCILIATION PASS
 
 ## Verification and findings (PB-37-5)
 
-Pure-helper regression test test_pb37_stock_and_hq_delta_helpers covers expected stock offsets, exact Decimal HQ delta, absent totals, and duplicate total-row rejection. Full container suite: **1437 passed, 0 failed, 0 skipped, 0 xfail**. Command from the root, with RTS_DB_TEST and the entire repository mounted:
+Pure-helper regression test test_pb37_stock_and_hq_delta_helpers covers expected stock offsets, exact Decimal HQ delta, absent totals, and duplicate total-row rejection. Initial full container suite before the review follow-up: **1437 passed, 0 failed, 0 skipped, 0 xfail**. Command from the root, with RTS_DB_TEST and the entire repository mounted:
 
 ```sh
 docker compose run --rm --no-deps --volume "${PWD}:/repo" --workdir /repo/middleware \
@@ -160,4 +164,21 @@ docker compose run --rm --no-deps --volume "${PWD}:/repo" --workdir /repo/middle
 
 Main independent retest evidence: middleware 1436, HQ 28, Staff App 84, Demo POS 116, Demo Console 165 passed; all zero skipped. No product finding was reproduced in the measured checks, so no product issue was invented. Local configuration corrections are documented above.
 
-TC-SA: 87 assigned cases directly match passing named tests (including one report-method case with its own named regression), and evidence is retained in TC-SA_evidence.csv. The remaining 66 manual/report cases and shared-sheet edits need the exact workbook steps and access; TST37-7 remains excluded as assigned. No UAT sign-off, freeze/tag, merge, or another person's workbook results are claimed.
+TC-SA: 87 assigned cases directly match passing named tests (including one report-method case with its own named regression), and evidence is retained in TC-SA_evidence.csv, a local evidence file outside the repository. The remaining 66 manual/report cases and shared-sheet edits need the exact workbook steps and access; TST37-7 remains excluded as assigned. No UAT sign-off, freeze/tag, merge, or another person's workbook results are claimed.
+
+## Review follow-up validation
+
+The default-HQ and premature-baseline regressions were reproduced before the fix (3 failed, 1 passed in the selected regression run). HQ_DB_NAME/fallback/explicit override, unsafe CLI arguments, mismatched DB_NAME, pending-to-zero baseline ordering, timeout-before-POS, and strict delta shapes now pass: 14 targeted tests. Full container rerun: **1450 passed, 0 failed, 0 skipped, 0 xfail**.
+
+A same-store/SKU SALE was placed in an older PENDING batch on the private demo stack using HQ OFFLINE, then HQ was restored ONLINE. The updated checker was run without --hq-db, so HQ_DB_NAME=RTS_HQ_TEST selected the configured HQ database. It drained the older batch before taking its baseline; its own four-event delta remained 5 sold, 3 returned, 64,000 VND. The bounded wait fails before baseline capture or POS requests if no zero-pending response is obtained within 30 polls. This check still requires a private/quiescent demo stack so unrelated concurrent POS traffic cannot enter the measured delta.
+
+```text
+Seeded older SALE: batches_created=1, batches_sent=0, batches_pending=1
+PASS older sync traffic drained: batches_pending=0 before HQ baseline
+PASS HQ totals match SALE/RETURN/CANCELLATION: (5, 3, Decimal('64000.0'))
+PASS 1 stock = opening + movements: 27 inventory rows
+PASS 2 HQ totals = lines of ACKED batches: 15 ACKED batches, 4 store/SKU totals
+PASS 3 each transaction in at most one batch: 15 batches, 58 linked transactions, 0 not batched yet
+RECONCILIATION PASS
+E2E PASS
+```
