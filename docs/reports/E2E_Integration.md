@@ -38,8 +38,8 @@ A cancellation cannot reference the partially returned sale: the chain therefore
 Captured normal-run output:
 
 ```text
-PASS POST https://middleware:8443/api/v1/sync/run: HTTP 202 
-PASS GET https://hq-demo:9000/api/v1/demo/batches: HTTP 200 
+PASS POST https://middleware:8443/api/v1/sync/run: HTTP 202
+PASS GET https://hq-demo:9000/api/v1/demo/batches: HTTP 200
 PASS stock available: STORE-DN1/SKU-0001=58
 PASS SALE through mTLS gateway: E2E-76cd0b04a008-A HTTP 200 OK
 PASS stock after SALE: expected=55, actual=55
@@ -49,9 +49,9 @@ PASS SALE through mTLS gateway: E2E-76cd0b04a008-B HTTP 200 OK
 PASS stock after SALE: expected=54, actual=54
 PASS CANCELLATION through mTLS gateway: E2E-76cd0b04a008-C HTTP 200 OK
 PASS stock after CANCELLATION: expected=56, actual=56
-PASS POST https://middleware:8443/api/v1/sync/run: HTTP 202 
+PASS POST https://middleware:8443/api/v1/sync/run: HTTP 202
 PASS all four transactions ACKED: [('E2E-76cd0b04a008-A', 'SB-STORE-DN1-20261127091214', 'ACKED'), ('E2E-76cd0b04a008-B', 'SB-STORE-DN1-20261127091214', 'ACKED'), ('E2E-76cd0b04a008-C', 'SB-STORE-DN1-20261127091214', 'ACKED'), ('E2E-76cd0b04a008-R', 'SB-STORE-DN1-20261127091214', 'ACKED')]
-PASS GET https://hq-demo:9000/api/v1/demo/batches: HTTP 200 
+PASS GET https://hq-demo:9000/api/v1/demo/batches: HTTP 200
 PASS ACKED batch present at HQ: ['SB-STORE-DN1-20261127091214']
 PASS HQ totals match SALE/RETURN/CANCELLATION: sold/returned/net revenue delta=(5, 3, Decimal('64000.0'))
 Reconciling RTS_DB_DEMO with RTS_HQ_TEST
