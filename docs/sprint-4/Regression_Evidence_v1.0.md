@@ -36,8 +36,10 @@ Cause: `RTS_DB_TEST` was one migration behind (`004_pos_transaction_occurred_at.
 Fix, then re-run:
 
 ```powershell
-docker compose run --rm -e DB_NAME=RTS_DB_TEST migrate
+docker compose run --rm -e DB_NAME=RTS_DB_TEST -e HQ_DB_NAME=RTS_HQ_TEST migrate
 ```
+
+`DB_NAME` has to travel with `HQ_DB_NAME` in the same call: on its own the migration falls back to the `.env` value for the application database and would run against `RTS_DB` / `RTS_DB_DEMO`. The 27/11 run above passed only `-e DB_NAME=RTS_DB_TEST` and therefore left `HQ_DB_NAME` at its `.env` default.
 
 Output tail:
 
@@ -100,7 +102,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/demo/run_console_tes
 ```
 
 ```
-Building G:\RetailSync\.agents\worktrees\docs\sprint-4-quang-uat-regression\clients\demo-console\DemoConsole.sln ...
+Building <worktree>\clients\demo-console\DemoConsole.sln ...
   Discovering: DemoConsole.Tests
   Discovered:  DemoConsole.Tests
   Starting:    DemoConsole.Tests

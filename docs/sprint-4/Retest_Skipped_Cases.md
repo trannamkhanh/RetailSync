@@ -1,5 +1,11 @@
 # Kiểm thử lại các case bị SKIPPED — kết quả
 
+> **Bản lưu lịch sử — 26/11/2026, trên `a82b90c`.** File giữ nguyên trạng thái ngày 26/11 để làm bằng chứng cho vòng kiểm thử đó; nó **không** phản ánh trạng thái hiện tại của repo. Ba điểm cần biết trước khi đọc:
+>
+> - **`scripts/demo/run_client_tests.ps1`, `capture_window.ps1` và `drive_ui.ps1` không có trong repo.** Đó là các script phụ chỉ tồn tại trên máy chạy lần kiểm. Trong repo chỉ có `scripts/demo/run_console_tests.ps1`, và nó chỉ phủ demo console — nên hai dòng `DemoPos.Tests` / `StaffApp.Tests` **không tái lập được chỉ từ repo** (`Regression_Evidence_v1.0.md` §6).
+> - **Các file `evidence/*.png` và `evidence/_tests-*.txt` không có trong repo.** Đường dẫn là nơi bằng chứng được lưu lúc đó trên máy cá nhân.
+> - **Issue #88 đã sửa và đóng** qua PR #89 (`7a04ecb`, merge 26/11 18:28). Dòng "issue #88 đang open" ở §5.2 là trạng thái lịch sử.
+
 **Người kiểm:** Quang · **Ngày:** 26/11/2026 · **Code:** main `a82b90c` (worktree sạch `a82b90c`, HEAD xác nhận)
 **Môi trường:** stack demo riêng, project `retailsync-test`, DB `RTS_DB_DEMO`; `RTS_DB` và stack dev không bị chạm.
 **Kết quả:** **6/6 PASS** — 5 case SKIPPED của vòng re-test Sprint 2+3, cộng `DSH50-11` của PB-50 (lần kiểm bổ sung, xem mục 2.6).
@@ -100,7 +106,7 @@ Kết quả trên UI:
 3. Bán `SKU-0001` trên Demo POS (giá đơn vị 22.400 — POS đã nhận bảng giảm giá, trạng thái "Giảm giá: 1 mã"), rồi bấm **Làm mới** trên Staff App: cột "Đã bán giá giảm" của STORE-DN1 chuyển thành **Có**, STORE-DN2 vẫn **Chưa**. API trả `sold_at_discount: True` cho DN1 và `False` cho DN2 — **khớp**.
 4. Hộp là **chỉ đọc**: `MainForm.cs` dựng grid bằng `Grid(...)` với `ReadOnly = true`, `AllowUserToAddRows = false`, `AllowUserToDeleteRows = false`.
 
-Vậy cả 4 điểm của Excepted Result đều đạt: cùng các dòng như API, chỉ đọc, có marker "đã bán giá giảm", và đổi được giữa hai phạm vi.
+Vậy cả 4 điểm của Expected Result đều đạt: cùng các dòng như API, chỉ đọc, có marker "đã bán giá giảm", và đổi được giữa hai phạm vi.
 
 ## 3. Cách dựng môi trường (để tái lập)
 
@@ -129,17 +135,18 @@ dotnet build clients/staff-app/StaffApp.sln -c Debug
 ```
 Staff App cần `ca.crt` cạnh file thực thi và `staff_token.txt` chứa token `staff_dn1`.
 
-Bộ test (dùng xunit console runner, vì `dotnet test` hỏng trên host này — xem mục 5):
+Bộ test (dùng xunit console runner, vì `dotnet test` hỏng trên host này — xem mục 4). Hai script dưới đây **không có trong repo**; chúng chỉ tồn tại trên máy chạy lần kiểm 26/11:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/demo/run_client_tests.ps1 -Client demo-pos
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/demo/run_client_tests.ps1 -Client staff-app
 ```
+Cách tái lập thay thế, chỉ dùng thứ có trong repo: build solution rồi chạy xunit console runner trực tiếp, đúng kỹ thuật mà `scripts/demo/run_console_tests.ps1` dùng cho demo console (copy runner vào thư mục test bin, viết `xunit.console.runtimeconfig.json` cho `Microsoft.WindowsDesktop.App`, copy `Microsoft.Data.SqlClient.dll` và `SNI.dll` theo RID). Chi tiết từng bước ở `Regression_Evidence_v1.0.md` §6.
 
 ## 4. Ghi chú kỹ thuật gặp trong lúc kiểm
 
-1. **App phải chạy từ đường dẫn trên ổ C.** Bản build đặt trong worktree trên `G:\` mở ra thì thoát ngay với `UnauthorizedAccessException` khi tạo thư mục `%LOCALAPPDATA%\RetailSync\DemoPos`, dù tài khoản có toàn quyền trên thư mục đó. Chép cùng bộ file sang `%TEMP%` (ổ C) thì chạy bình thường và LIVE. Đây là hạn chế môi trường, không phải lỗi sản phẩm.
-2. **`dotnet test` không dùng được trên host này**: testhost thoát với `Win32Exception (5): Access is denied` khi mở handle tới tiến trình cha. Repo đã có sẵn `scripts/demo/run_console_tests.ps1` cho đúng tình huống này; tôi thêm `scripts/demo/run_client_tests.ps1` làm việc tương tự cho `demo-pos` và `staff-app`. Không sửa code sản phẩm.
-3. Script phụ trợ dùng để chụp bằng chứng: `scripts/demo/capture_window.ps1` (PrintWindow, chụp đúng cửa sổ kể cả khi bị che) và `scripts/demo/drive_ui.ps1` (đưa cửa sổ lên trước, click theo toạ độ, gõ phím).
+1. **App phải chạy từ đường dẫn trên ổ C.** Bản build đặt trong worktree trên một ổ khác `C:` mở ra thì thoát ngay với `UnauthorizedAccessException` khi tạo thư mục `%LOCALAPPDATA%\RetailSync\DemoPos`, dù tài khoản có toàn quyền trên thư mục đó. Chép cùng bộ file sang `%TEMP%` (ổ C) thì chạy bình thường và LIVE. Đây là hạn chế môi trường, không phải lỗi sản phẩm.
+2. **`dotnet test` không dùng được trên host này**: testhost thoát với `Win32Exception (5): Access is denied` khi mở handle tới tiến trình cha. Repo đã có sẵn `scripts/demo/run_console_tests.ps1` cho đúng tình huống này; lúc kiểm tôi dùng thêm một script phụ `run_client_tests.ps1` cho `demo-pos` và `staff-app` — **script đó không được commit vào repo**. Không sửa code sản phẩm.
+3. Script phụ trợ dùng để chụp bằng chứng (**không có trong repo**): `capture_window.ps1` (PrintWindow, chụp đúng cửa sổ kể cả khi bị che) và `drive_ui.ps1` (đưa cửa sổ lên trước, click theo toạ độ, gõ phím).
 
 ## 5. Giới hạn của lần kiểm này
 
@@ -151,6 +158,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/demo/run_client_test
 - DSH50-11 chỉ kiểm với hai cửa hàng có giảm giá đang hiệu lực (STORE-DN1 và STORE-DN2). Trường hợp không có giảm giá nào (danh sách rỗng) do test `DiscountsTests` phủ, không kiểm bằng mắt lần này.
 
 ## 6. Tệp bằng chứng
+
+Các file dưới đây **không nằm trong repo** (xem banner đầu file); đường dẫn là nơi lưu lúc kiểm 26/11.
 
 | Tệp | Nội dung |
 |---|---|

@@ -1,5 +1,11 @@
 # Kiểm thử sáng 26/11/2026 — báo cáo để trao đổi nhóm
 
+> **Bản lưu lịch sử — 26/11/2026, trên `a82b90c`.** File này giữ nguyên trạng thái ngày 26/11 để làm bằng chứng cho vòng kiểm thử đó; nó **không** phản ánh trạng thái hiện tại của repo. Ba điểm đã thay đổi từ đó:
+>
+> - **Issue #88 đã sửa và đóng** qua PR #89 (`7a04ecb`, merge 26/11 18:28). Câu "issue #88 đang open" ở §5.2 là trạng thái lịch sử.
+> - **`scripts/demo/run_client_tests.ps1` không có trong repo** — script đó chỉ tồn tại trên máy chạy lần kiểm 26/11. Trong repo chỉ có `scripts/demo/run_console_tests.ps1` (chỉ phủ demo console).
+> - **Các file `evidence/*.png` và `evidence/_tests-*.txt` không có trong repo.** Đó là nơi bằng chứng được lưu lúc đó trên máy cá nhân, không phải file đọc được từ checkout này.
+
 **Người thực hiện:** Quang · **Code:** main `a82b90c` · **Thời gian:** 07:45 – 08:25, 26/11/2026
 **Môi trường:** worktree sạch tại `a82b90c`, stack demo riêng (`docker compose -p retailsync-test`), DB `RTS_DB_DEMO`.
 `RTS_DB` và stack dev **không bị chạm**. Đã khôi phục dữ liệu demo sau khi kiểm.
@@ -82,7 +88,7 @@ So sánh UI với API, cùng token `staff_dn1`:
 | Bán SKU-0001 trên POS rồi Làm mới | DN1 "Đã bán giá giảm" → **Có**; DN2 → **Chưa**. API: `True` / `False` — khớp |
 | Chỉ đọc | `MainForm.cs`: `ReadOnly = true`, `AllowUserToAddRows = false`, `AllowUserToDeleteRows = false` |
 
-Cả 4 điểm của Excepted Result đều đạt: giống API, chỉ đọc, có marker đã bán giá giảm, đổi được giữa hai phạm vi.
+Cả 4 điểm của Expected Result đều đạt: giống API, chỉ đọc, có marker đã bán giá giảm, đổi được giữa hai phạm vi.
 
 ## 4. Bộ test tự động trên cùng commit
 
@@ -91,7 +97,7 @@ Cả 4 điểm của Excepted Result đều đạt: giống API, chỉ đọc, c
 | `DemoPos.Tests` | **101 passed**, 0 failed, 0 skipped (20.5 s) |
 | `StaffApp.Tests` | **84 passed**, 0 failed, 0 skipped (1.6 s) |
 
-Log đầy đủ: `evidence/_tests-demopos.txt`, `evidence/_tests-staffapp.txt`.
+Log đầy đủ: `evidence/_tests-demopos.txt`, `evidence/_tests-staffapp.txt` (ảnh/text lưu ngoài repo, xem §8).
 
 ## 5. Việc cần nhóm làm — đây là phần cần trao đổi
 
@@ -113,10 +119,10 @@ Nếu sửa đủ 6 ô trên thì:
 
 - Toàn workbook **không còn SKIPPED** nào.
 - Dòng `Re-test Status` toàn bộ: **250 pass / 0 skip trên 269 case** (hiện là 245 / 5).
-- PB-50 còn **1 FAIL** (`DSH50-10`, GitHub issue #88 đang open) — sửa thuộc PB-41.
+- PB-50 còn **1 FAIL** (`DSH50-10`, GitHub issue #88 — **nay đã đóng** qua PR #89) — sửa thuộc PB-41.
 - Trạng thái lần đầu (cột J): **261 pass, 1 fail, 7 Not Implemented, 0 skipped**. 7 Not Implemented là PB-38 (4) và PB-44 (3) — việc Sprint 4.
 
-**Lưu ý khi chạy `cross_test_totals.py`:** script in dòng cuối "No failed cases." vì nó chỉ xét dòng Re-test Status, mà PB-50 để trống cột L. FAIL của `DSH50-10` vẫn có thật. Khi đưa totals cho Kiệt phải nêu bằng lời, đừng chỉ dựa vào dòng kết luận của script.
+**Lưu ý khi chạy `cross_test_totals.py`:** script in dòng cuối "No failed cases." vì với mỗi sheet nó chỉ lấy **một** dòng đếm — `Re-test Status` nếu có, ngược lại mới dùng `Status` (hàm `failed_sheets`). PB-50 có dòng `Re-test Status` nhưng để trống cột L, nên FAIL của `DSH50-10` ở dòng `Status` bị che. Khi đưa totals cho Kiệt phải nêu bằng lời, đừng chỉ dựa vào dòng kết luận của script.
 
 ### 5.3. Việc vẫn treo từ lần review 25/11 (cần Kiệt)
 
@@ -128,8 +134,8 @@ Chi tiết và commit hash: mục 4.1 của `Review_Test_Case_Sprint2-3.md`.
 
 Không phải lỗi sản phẩm, nhưng sẽ gặp lại:
 
-1. **App GUI phải chạy từ đường dẫn trên ổ C.** Bản build đặt trong worktree trên `G:\` mở ra là thoát ngay với `UnauthorizedAccessException` khi tạo `%LOCALAPPDATA%\RetailSync\DemoPos`, dù tài khoản có toàn quyền thư mục đó. Chép cùng bộ file sang `%TEMP%` thì chạy LIVE bình thường. Ai để repo trên ổ `G:` sẽ gặp lỗi này.
-2. **`dotnet test` không chạy được trên máy này**: testhost thoát với `Win32Exception (5): Access is denied` khi mở handle tới tiến trình cha. Repo đã có `scripts/demo/run_console_tests.ps1` cho đúng tình huống; tôi thêm `scripts/demo/run_client_tests.ps1` làm việc tương tự cho `demo-pos` và `staff-app`.
+1. **App GUI phải chạy từ đường dẫn trên ổ C.** Bản build đặt trong worktree trên một ổ khác `C:` mở ra là thoát ngay với `UnauthorizedAccessException` khi tạo `%LOCALAPPDATA%\RetailSync\DemoPos`, dù tài khoản có toàn quyền thư mục đó. Chép cùng bộ file sang `%TEMP%` thì chạy LIVE bình thường. Ai để repo ngoài ổ `C:` sẽ gặp lỗi này.
+2. **`dotnet test` không chạy được trên máy này**: testhost thoát với `Win32Exception (5): Access is denied` khi mở handle tới tiến trình cha. Repo đã có `scripts/demo/run_console_tests.ps1` cho đúng tình huống; lúc kiểm tôi dùng thêm một script phụ `run_client_tests.ps1` cho `demo-pos` và `staff-app` — **script đó không được commit vào repo**.
 
 ## 7. Giới hạn của lần kiểm
 
@@ -141,6 +147,8 @@ Không phải lỗi sản phẩm, nhưng sẽ gặp lại:
 - Toàn bộ kiểm trên `RTS_DB_DEMO`, không kiểm trên dữ liệu thật.
 
 ## 8. Tệp bằng chứng
+
+Các file dưới đây **không nằm trong repo** (xem banner đầu file). Chúng ở thư mục `evidence/` trên máy chạy lần kiểm 26/11; đường dẫn giữ nguyên để đối chiếu với báo cáo gửi nhóm.
 
 | Tệp | Nội dung |
 |---|---|

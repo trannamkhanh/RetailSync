@@ -2,7 +2,7 @@
 
 **Owner:** Quang (machine S, recording and editing) · **Recorded:** 1/12/2026 · **Narration:** Kiệt
 **Base:** the commit tagged `v1.0` (frozen 30/11). Video and report must use the same commit.
-**Replaces:** `docs/sprint-4/Video_Demo_Plan.md`, which the 27/11 brief references but which does not exist in the repository (that path is written fresh here; see `UAT_Capstone_1_List.md` §11.2).
+**Fills:** the path `docs/sprint-4/Video_Demo_Plan.md` that the 27/11 brief references but which did not exist in the repository before this file (`UAT_Capstone_1_List.md` §11.2).
 
 ---
 
@@ -17,12 +17,15 @@ A step-by-step recording plan: machine setup, the order of acts, what is on scre
 ### 2.1 Machine S — the presenter machine, and what is filmed
 
 1. `git checkout v1.0`, confirm `git describe --tags` prints `v1.0`, then `docker compose pull` / `build` **while still online**.
-2. `.env`: `DB_NAME=RTS_DB_DEMO`, `SYNC_INTERVAL=60`, `SYNC_RETRY_BASE_SECONDS=60`, `POS_BIND_ADDRESS` and `MIDDLEWARE_BIND_ADDRESS` set to S's static IP on the private network.
+2. `.env`: `DB_NAME=RTS_DB_DEMO`, `SYNC_INTERVAL=3600`, `SYNC_RETRY_BASE_SECONDS=10`, `POS_BIND_ADDRESS` and `MIDDLEWARE_BIND_ADDRESS` set to S's static IP on the private network. Both values match `Sprint_3_Demo.md` §1.2 and the lines `reset_demo_db.ps1 -DemoMode` prints: `3600` keeps the scheduler from syncing in the middle of act 5, and `10` keeps a retry from waiting a full minute.
 3. Certificates regenerated so the SAN contains S's IP. Do **not** recreate the CA — A and B hold copies of `ca.crt`.
-4. `powershell -File scripts/demo/reset_demo_db.ps1 -DemoMode` — resets the demo database and prints the demo-mode env lines.
-5. `sprint2_smoke.py` twice, both all PASS.
-6. Open the demo console; confirm five tabs load with no red error lines: **Tồn và lô**, **Giao dịch và audit**, **Đồng bộ và HQ**, **Job**, **Doanh thu**.
-7. Set display scaling so the console is readable at 1080p on the recording — font 20–24 in the console config is the readable range.
+4. `docker compose up -d --wait sqlserver` — the reset script needs the server up; it does not start it.
+5. `powershell -File scripts/demo/reset_demo_db.ps1 -DemoMode` — resets the demo database and prints the demo-mode env lines.
+6. `sprint2_smoke.py` twice, both all PASS.
+7. **Reset `RTS_DB_DEMO` once more** — the smoke test writes sales into the database, so without this second reset act 2 starts on stock the smoke run already changed.
+8. Open the demo console; confirm five tabs load with no red error lines: **Tồn và lô**, **Giao dịch và audit**, **Đồng bộ và HQ**, **Job**, **Doanh thu**.
+9. Set display scaling so the console is readable at 1080p on the recording — `FontSize` **16–20** is the readable range; 20–24 crowds the wider grids at 1080p.
+10. Agree the seating plan with Kiệt (who sits at A, B and S) — settle it by 1/12, not on the day.
 
 ### 2.2 Machines A and B
 
@@ -57,7 +60,7 @@ Console full screen, all five tabs visible. Narration: three machines, one priva
 
 Show the architecture diagram, then the console. State the three data locations: POS has no business database, middleware holds the region, HQ holds SKU totals only.
 
-**There is no diagram asset in the repository** (`docs/` holds no `.png`, `.svg` or `.drawio`; the diagrams live inside the Word documents in `D:\NCKH\doc\`). Before recording, export the architecture figure from `C1SE.24_ArchitectureDesign_v1.5_3.docx` to PNG and keep it outside the repo in `G:\AI(retailsync)\video\`. Do not plan a shot around a file that has to be produced on the day.
+**There is no diagram asset in the repository** (`docs/` holds no `.png`, `.svg` or `.drawio`; the diagrams live inside the Word design documents, which are not committed). Before recording, export the architecture figure from `C1SE.24_ArchitectureDesign_v1.5_3.docx` to PNG and keep it outside the repo in a local `video/` folder. Do not plan a shot around a file that has to be produced on the day.
 
 ### 4.2 Act 2 — live selling (90 s)
 
@@ -99,14 +102,17 @@ This act is the strongest segment. Do not cut the drain — the automatic catch-
 1. Run the near-expiry job, then the recommendation job. Alerts for the Dairy/Bakery batches; proposals with reasons.
 2. Lower the guardrail max discount, rerun: the over-limit proposal is `ADJUSTED` or `BLOCKED` and disappears from the staff list.
 3. Cut to A, Staff App **Cảnh báo cận hạn**: `EXPIRED` first, then fewest days.
-4. Barcode lookup of a product sold out at Hải Châu: own batches and expiry, nearby stores with distances.
+4. Barcode lookup of a product sold out at Hải Châu: own batches and expiry, then nearby stores **nearest first — Sơn Trà (~1.7 km) above Thanh Khê (~4.4 km)**, each row carrying its distance.
 5. Open a proposal, read reason and guardrail result, **Chấp nhận**; reject another. Press Accept again: "already decided".
 6. Staff App **Giảm giá**, switch *Cửa hàng của tôi* / *Tất cả cửa hàng*.
 
-### 4.7 Act 7 — audit and numbers (60 s)
+### 4.7 Act 7 — dashboard, audit and numbers (90 s)
 
-1. Audit log with the Auditor token: every change from acts 2–6 is there.
-2. Show the measured-numbers table, reading each figure from `docs/reports/` — p95 latency, 98.91% reduction, 100% ACK, WAPE vs seasonal naive, guardrail PASSED/ADJUSTED/BLOCKED, E2E reconciliation.
+1. **Doanh thu** tab (token `admin`), scope **Toàn hệ thống**, bucket **Ngày**: the three charts and the KPI. Say plainly that the 90-day history is simulated by `tools/history-generator`, not transactions from this demo.
+2. Switch to one store: line and pie narrow, the bar chart still compares all three — say this is by design, so nobody reads it as a bug.
+3. **Làm mới**: the status line reads "Làm mới lúc HH:mm:ss. Không có lỗi."
+4. Audit log with the Auditor token: every change from acts 2–6 is there.
+5. Show the measured-numbers table, reading each figure from `docs/reports/` — p95 latency 226.60 ms, 98.91% reduction, 100% ACK, WAPE vs seasonal naive, near-expiry 32/32, guardrail PASSED/ADJUSTED/BLOCKED, staff acceptance 60% (6/10), E2E reconciliation.
 
 ### 4.8 Outro (20 s)
 
@@ -154,7 +160,7 @@ Re-record affected acts entirely; do not splice half an act from before the chan
 3. Blur or crop any token, certificate fingerprint, or password that appears.
 4. Target 12–15 minutes final. Anything longer loses the viewer; the mentor Q&A is separate.
 5. Export 1080p H.264, plus a 720p copy for upload.
-6. Store the master outside the repo (`G:\AI(retailsync)\video\`) and put only the link in the report.
+6. Store the master outside the repo (a local `video/` folder) and put only the link in the report.
 
 ---
 

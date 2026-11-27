@@ -1,6 +1,7 @@
 # Final report — technical part
 
-**Author of this part:** Quang · **Lead editor:** Kiệt · **Base:** `v1.0` (frozen 30/11/2026)
+**Author of this part:** Quang · **Lead editor:** Kiệt
+**Base for the numbers:** draft on `a5f509b` (target snapshot: `v1.0`, frozen 30/11/2026) — re-check every figure on the freeze commit before submission.
 **Scope:** architecture as built, data, tests, and measured results. Kiệt owns the surrounding narrative, the sprint narrative and the burn-down.
 
 Every number below is taken from a committed file in `docs/reports/` or from a test run recorded in `docs/sprint-4/Regression_Evidence_v1.0.md`. Where a number is *not* available, this says so rather than estimating.
@@ -81,7 +82,15 @@ Two facts a reader should not have to discover alone:
 ### 4.1 Performance (PB-39) — `docs/reports/Performance.md`
 
 p95 POS API latency measured over the gateway with mTLS and 50 ms RTT, three stores, six terminals, own certificates and tokens, scheduler disabled to isolate POS traffic, demo database reset and replenished to 5,000 units per store/SKU.
-**Target: under 500 ms.** The measured value is in that report and must be quoted from it.
+**Target: under 500 ms.** Measured:
+
+| Run | p50 | **p95** | p99 | Accepted / sent | Error rate |
+|---|---:|---:|---:|---:|---:|
+| Normal, sustained 30 min, 12/s | 186.94 ms | **226.60 ms** | 248.04 ms | 21,600 / 21,600 | 0% |
+| Peak, 36/s | 159.51 ms | **193.51 ms** | 217.63 ms | 1,080 / 1,080 | 0% |
+| Baseline, no netem, 12/s | 141.12 ms | **181.99 ms** | 478.27 ms | 360 / 360 | 0% |
+
+Cross-store lookup (TST39-3), sampled once per second throughout the normal run: **1,805 responses, all HTTP 200, zero errors, p95 136.85 ms, maximum 206.56 ms.** Both p95 figures are inside the 500 ms target.
 
 ### 4.2 Sync and data reduction (PB-40) — `docs/reports/Sync_Metrics.md`
 
@@ -99,7 +108,9 @@ Holdout: 14 days from 2026-10-30, recursive prediction using only training deman
 
 ### 4.4 Near-expiry accuracy (PB-43) — `docs/reports/Near_Expiry_Accuracy.md`
 
-Measured with `scripts/metrics/near_expiry_accuracy.py` against a labelled dataset where every batch has a known expected result. Correctly flagged share, missed alerts and false alerts are all reported. The report also carries an audit #11b re-run, because the earlier run had a config row present that suppressed the `NEAR_EXPIRY_DEFAULT_DAYS` fallback.
+Measured with `scripts/metrics/near_expiry_accuracy.py` against a labelled dataset where every batch has a known expected result: **100.0% correct — 32/32 batches, 0 missed, 0 false** across the three thresholds (3, 7, 14 days) and the default window, 8 batches each.
+
+The report also carries an audit #11b re-run, because the earlier run had a config row present that suppressed the `NEAR_EXPIRY_DEFAULT_DAYS` fallback.
 
 ### 4.5 Guardrail and acceptance rates (PB-44) — `docs/reports/Guardrail_Metrics.md`
 
@@ -112,6 +123,17 @@ Measured with `scripts/metrics/near_expiry_accuracy.py` against a labelled datas
 | BLOCKED | 37.50% (6/16) |
 
 Per-rule-type rates use the worst result per recommendation/type, so denominators differ between rule types and are printed with each rate. Denominators below ten are marked **small sample** — which every per-store row here is. This is a staged sample, not UAT feedback, and the report says so.
+
+**Staff acceptance rate** (`staff_decision` rows: ACCEPT / (ACCEPT + REJECT)):
+
+| Population | ACCEPT | REJECT | Acceptance rate |
+|---|---:|---:|---|
+| All recommendations | 6 | 4 | **60.00% (6/10)** |
+| DISCOUNT | 5 | 4 | 55.56% (5/9) — small sample |
+| CLEARANCE | 1 | 0 | 100.00% (1/1) — small sample |
+| REDISTRIBUTION | 0 | 0 | n/a |
+
+Undecided rows: 0 PENDING and 0 EXPIRED without a decision. Six of ten decisions were ACCEPT — the scripted sample's mix, not an estimate of staff preference. Guardrail rates and acceptance rates use different populations and must not be compared as the same denominator.
 
 ### 4.6 End-to-end integration (PB-37) — `docs/reports/E2E_Integration.md`
 
