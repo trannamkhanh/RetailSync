@@ -15,13 +15,14 @@
 param(
     [Parameter(Mandatory)][ValidateLength(1, 50)][string]$Category,
     [Parameter(Mandatory)][ValidateRange(0, 3650)][int]$Days,
-    [string]$BaseUrl = "https://localhost:8443/api/v1",
+    [string]$BaseUrl,
     [string]$Token = "admin",
     [string]$TokensPath,
     [string]$CaPath
 )
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "_demo_http.ps1")
+if ([string]::IsNullOrWhiteSpace($BaseUrl)) { $BaseUrl = Get-DemoBaseUrl }
 $common = New-DemoCommonArgs -TokensPath $TokensPath -CaPath $CaPath
 
 $url = "$($BaseUrl.TrimEnd('/'))/admin/near-expiry-thresholds/$([Uri]::EscapeDataString($Category))"

@@ -14,7 +14,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$BaseUrl = "https://localhost:8443/api/v1",
+    [string]$BaseUrl,
     [string]$Token = "hq_operator",
     [ValidatePattern('^[A-Za-z0-9_-]{1,10}$')][string]$StoreId = "STORE-DN1",
     [string]$TokensPath,
@@ -22,6 +22,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "_demo_http.ps1")
+if ([string]::IsNullOrWhiteSpace($BaseUrl)) { $BaseUrl = Get-DemoBaseUrl }
 $common = New-DemoCommonArgs -TokensPath $TokensPath -CaPath $CaPath
 
 $takenAt = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", [Globalization.CultureInfo]::InvariantCulture)

@@ -78,16 +78,8 @@ if (-not (Test-Path $EnvFile)) {
     throw "Missing $EnvFile. Copy .env.example to .env and fill in MSSQL_SA_PASSWORD, JWT_SECRET and POS_GATEWAY_SECRET."
 }
 
-function Get-EnvValue {
-    param([string]$Key)
-    $value = $null
-    Get-Content $EnvFile | ForEach-Object {
-        if ($_ -match "^\s*$Key\s*=\s*(.+?)\s*$") {
-            $value = $Matches[1].Trim().Trim('"').Trim("'")
-        }
-    }
-    return $value
-}
+# Get-EnvValue, Get-DemoBaseUrl and Invoke-DemoApi.
+. (Join-Path $PSScriptRoot "_demo_http.ps1")
 
 $Password = Get-EnvValue "MSSQL_SA_PASSWORD"
 if ([string]::IsNullOrWhiteSpace($Password)) {
@@ -96,10 +88,7 @@ if ([string]::IsNullOrWhiteSpace($Password)) {
 $EnvDbName = Get-EnvValue "DB_NAME"
 $EnvHqDbName = Get-EnvValue "HQ_DB_NAME"
 if ([string]::IsNullOrWhiteSpace($EnvHqDbName)) { $EnvHqDbName = "RTS_HQ" }
-# The middleware publishes 8443 on MIDDLEWARE_BIND_ADDRESS (the LAN IP in 3-laptop mode).
-$ApiHost = Get-EnvValue "MIDDLEWARE_BIND_ADDRESS"
-if ([string]::IsNullOrWhiteSpace($ApiHost) -or $ApiHost -eq "0.0.0.0") { $ApiHost = "localhost" }
-$ApiBaseUrl = "https://${ApiHost}:8443/api/v1"
+$ApiBaseUrl = Get-DemoBaseUrl
 
 # --- Helpers ----------------------------------------------------------------
 
@@ -291,7 +280,6 @@ if ($EnvDbName -ieq $Database -and $EnvHqDbName -ieq $HqDatabase) {
 $ForecastLine = ""
 if ($ServicesStarted) {
     Write-Host "==> Running the forecast job once, if it exists"
-    . (Join-Path $PSScriptRoot "_demo_http.ps1")
 
     # Do not rely on a compose healthcheck: poll /health until it answers 200.
     $healthUrl = "$ApiBaseUrl/health"

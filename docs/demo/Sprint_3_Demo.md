@@ -331,7 +331,7 @@ Lưu ý cho màn 7:
 # (chỉ có từ PowerShell 7). CA phát triển được tin cậy tường minh.
 curl.exe --ssl-no-revoke --cacert .certs/ca.crt `
   -H "Authorization: Bearer $env:ADMIN_TOKEN" `
-  "https://localhost:8443/api/v1/dashboard/revenue?from=2026-08-22T00:00:00Z&to=2026-11-20T00:00:00Z&bucket=day"
+  "https://<IP máy S>:8443/api/v1/dashboard/revenue?from=2026-08-22T00:00:00Z&to=2026-11-20T00:00:00Z&bucket=day"
 ```
 
 
@@ -350,8 +350,10 @@ curl.exe --ssl-no-revoke --cacert .certs/ca.crt `
 
 Mọi script in một dòng `HTTP <status> code: <code> <body rút gọn>` và thoát 0 khi thành
 công (`hq_snapshot.ps1` coi 422 `SNAPSHOT_REJECTED` là thành công). Tham số chung:
-`-BaseUrl` (mặc định `https://localhost:8443/api/v1`), `-HqBaseUrl` cho `hq_mode.ps1`
-(mặc định `https://localhost:9000/api/v1`), `-TokensPath`, `-CaPath`.
+`-BaseUrl` (mặc định `https://<MIDDLEWARE_BIND_ADDRESS trong .env>:8443/api/v1`, là
+`localhost` khi không có `.env`, biến để trống hoặc là `0.0.0.0`; nên trên S không cần truyền),
+`-HqBaseUrl` cho `hq_mode.ps1` (mặc định `https://localhost:9000/api/v1`), `-TokensPath`,
+`-CaPath`. Trên máy A và B, `.env` không có IP của S, nên vẫn truyền `-BaseUrl https://<IP máy S>:8443/api/v1`.
 
 ## 6. Sau buổi demo
 
