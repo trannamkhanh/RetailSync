@@ -317,4 +317,64 @@ public sealed class DurableEventQueueTests
         Assert.Equal(new[] { "first", "second", "third" }, sent);
         Assert.Equal(0, second.Count);
     }
+
+    [Fact]
+    public async Task Pb41_7_DrainStopsBeforeNextItemWhenShouldContinueReturnsFalse()
+    {
+        using var directory = new TemporaryDirectory();
+        var queue = new DurableEventQueue(directory.Path, "POS-1");
+        queue.Enqueue("first");
+        queue.Enqueue("second");
+        queue.Enqueue("third");
+
+        var keepGoing = true;
+        var sent = new List<string>();
+        var last = await queue.DrainAsync(
+            entry =>
+            {
+                sent.Add(entry.Body);
+                keepGoing = false;
+                return Task.FromResult(Result(PosOutcome.OK));
+            },
+            shouldContinue: () => keepGoing);
+
+        Assert.NotNull(last);
+        Assert.Equal(PosOutcome.OK, last!.Outcome);
+        Assert.Equal(new[] { "first" }, sent);
+        Assert.Equal(2, queue.Count);
+
+        // Resuming later drains the remaining events in order.
+        await queue.DrainAsync(
+            entry =>
+            {
+                sent.Add(entry.Body);
+                return Task.FromResult(Result(PosOutcome.OK));
+            },
+            shouldContinue: () => true);
+
+        Assert.Equal(new[] { "first", "second", "third" }, sent);
+        Assert.Equal(0, queue.Count);
+    }
+
+    [Fact]
+    public async Task Pb41_7_DrainSendsNothingWhenShouldContinueStartsFalse()
+    {
+        using var directory = new TemporaryDirectory();
+        var queue = new DurableEventQueue(directory.Path, "POS-1");
+        queue.Enqueue("first");
+        queue.Enqueue("second");
+
+        var calls = 0;
+        var result = await queue.DrainAsync(
+            _ =>
+            {
+                calls++;
+                return Task.FromResult(Result(PosOutcome.OK));
+            },
+            shouldContinue: () => false);
+
+        Assert.Null(result);
+        Assert.Equal(0, calls);
+        Assert.Equal(2, queue.Count);
+    }
 }

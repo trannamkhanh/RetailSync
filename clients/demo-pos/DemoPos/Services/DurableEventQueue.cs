@@ -89,12 +89,14 @@ public sealed class DurableEventQueue
     }
 
     /// <summary>
-    /// Sends the head until the queue is empty or an answer says "try later". A retryable answer keeps
-    /// the head in place and stops this cycle, so no event is reordered. Returns the last answer, or
-    /// null when nothing was sent (empty queue or another sender holds the terminal).
+    /// Sends the head until the queue is empty, <paramref name="shouldContinue"/> returns false,
+    /// or an answer says "try later". A retryable answer keeps the head in place and stops this
+    /// cycle, so no event is reordered. Returns the last answer, or null when nothing was sent
+    /// (empty queue, stopped before the first send, or another sender holds the terminal).
     /// </summary>
     public async Task<PosResult?> DrainAsync(Func<Entry, Task<PosResult>> send,
-                                             Action<Entry, PosResult>? settled = null)
+                                             Action<Entry, PosResult>? settled = null,
+                                             Func<bool>? shouldContinue = null)
     {
         FileStream lease;
         try
@@ -111,6 +113,11 @@ public sealed class DurableEventQueue
             PosResult? last = null;
             while (true)
             {
+                if (shouldContinue is not null && !shouldContinue())
+                {
+                    return last;
+                }
+
                 var entry = ReadState().Pending.FirstOrDefault();
                 if (entry is null)
                 {
