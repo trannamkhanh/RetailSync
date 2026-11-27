@@ -32,6 +32,7 @@ public sealed class MainForm : Form
     private readonly DataGridView _batches = Grid("Lô", "HSD", "SL");
     private readonly DataGridView _nearby = Grid("Cửa hàng", "Khoảng cách", "Số lượng");
     private readonly Label _nearbyNote = new() { AutoSize = true, ForeColor = Color.DimGray };
+    private readonly LatestRequest _searchRequests = new();
 
     // Alerts
     private readonly Label _alertCount = new() { AutoSize = true };
@@ -86,7 +87,7 @@ public sealed class MainForm : Form
 
         var statusBar = new StatusStrip();
         statusBar.Items.AddRange(new ToolStripItem[] { _status, _retry, _updated });
-        _retry.Click += async (_, _) => { if (_lastAction is not null) { await _lastAction(); } };
+        _retry.Click += async (_, _) => { if (_lastAction is not null) { await RunAsync(_lastAction); } };
 
         Controls.Add(tabs);
         Controls.Add(statusBar);
@@ -260,6 +261,9 @@ public sealed class MainForm : Form
 
     // --- Actions ------------------------------------------------------------
 
+    /// <summary>True once the window is closed: an answer that arrives later must not touch any control.</summary>
+    private bool Gone => IsDisposed || Disposing;
+
     private async Task RunAsync(Func<Task> action)
     {
         _lastAction = action;
@@ -267,6 +271,10 @@ public sealed class MainForm : Form
         try
         {
             await action();
+        }
+        catch (Exception) when (Gone)
+        {
+            // The window closed while the call ran (the client may be disposed too): nothing to show.
         }
         catch (FormatException error)
         {
@@ -300,6 +308,8 @@ public sealed class MainForm : Form
 
     private async Task SearchAsync()
     {
+        // A second Enter or scan makes the first search stale, so its answers never mix into the grids.
+        var ticket = _searchRequests.Next();
         var barcode = _barcode.Text.Trim();
         _batches.Rows.Clear();
         _nearby.Rows.Clear();
@@ -312,6 +322,11 @@ public sealed class MainForm : Form
 
         SetStatus($"Đang tra cứu {barcode}...", error: false);
         var result = await _api.GetProductAsync(barcode);
+        if (!_searchRequests.Applies(ticket, Gone))
+        {
+            return;
+        }
+
         if (!result.IsSuccess)
         {
             var message = UserMessages.For(result, ApiArea.Lookup);
@@ -321,7 +336,7 @@ public sealed class MainForm : Form
         }
 
         var product = ApiParsers.Product(result.Body);
-        _product.Text = $"{product.Name}\n{product.Sku} | {product.Category} | " +
+        _product.Text = $"{product.Name}\n{product.Sku} | {DisplayNames.Category(product.Category)} | " +
                         $"{product.UnitPrice.ToString("N0", Numbers)} VND\nTại cửa hàng này: {product.Quantity}";
         foreach (var batch in product.Batches)
         {
@@ -331,6 +346,11 @@ public sealed class MainForm : Form
         _batches.ClearSelection();
 
         var stock = await _api.GetCrossStoreStockAsync(barcode, _storeId);
+        if (!_searchRequests.Applies(ticket, Gone))
+        {
+            return;
+        }
+
         if (!stock.IsSuccess)
         {
             var message = UserMessages.For(stock, ApiArea.Lookup);
@@ -355,6 +375,11 @@ public sealed class MainForm : Form
     {
         SetStatus("Đang tải cảnh báo cận hạn...", error: false);
         var result = await _api.GetAlertsAsync();
+        if (Gone)
+        {
+            return;
+        }
+
         if (!result.IsSuccess)
         {
             Fail(UserMessages.For(result, ApiArea.Alerts));
@@ -382,6 +407,11 @@ public sealed class MainForm : Form
     {
         SetStatus("Đang tải đề xuất...", error: false);
         var result = await _api.GetRecommendationsAsync();
+        if (Gone)
+        {
+            return;
+        }
+
         if (!result.IsSuccess)
         {
             Fail(UserMessages.For(result, ApiArea.Recommendations));
@@ -400,9 +430,9 @@ public sealed class MainForm : Form
         var ticket = _discountRequests.Next();
         SetStatus("Đang tải giảm giá...", error: false);
         var result = await _api.GetDiscountsAsync(all);
-        if (!_discountRequests.IsCurrent(ticket))
+        if (!_discountRequests.Applies(ticket, Gone))
         {
-            return;  // the scope changed while this answer was on its way
+            return;  // the scope changed or the window closed while this answer was on its way
         }
 
         if (!result.IsSuccess)
@@ -494,9 +524,9 @@ public sealed class MainForm : Form
         var ticket = _detailRequests.Next();
         SetStatus($"Đang tải đề xuất {recId}...", error: false);
         var result = await _api.GetRecommendationAsync(recId);
-        if (!_detailRequests.IsCurrent(ticket))
+        if (!_detailRequests.Applies(ticket, Gone))
         {
-            return;  // the user selected another row, or the list was rebuilt
+            return;  // the user selected another row, the list was rebuilt, or the window closed
         }
 
         if (!result.IsSuccess)
@@ -549,6 +579,11 @@ public sealed class MainForm : Form
         _accept.Enabled = _reject.Enabled = false;
         SetStatus($"Đang gửi quyết định {verb.ToLowerInvariant()} đề xuất {recId}...", error: false);
         var result = await _api.DecideAsync(recId, accept);
+        if (Gone)
+        {
+            return;
+        }
+
         var outcome = _board.Apply(recId, result);
         if (outcome.Removed)
         {
@@ -577,7 +612,10 @@ public sealed class MainForm : Form
         {
             MessageBox.Show(this, message.Text, "RetailSync Staff App", MessageBoxButtons.OK, MessageBoxIcon.Information);
             await LoadRecommendationsAsync();
-            SetStatus(message.Text, error: true);
+            if (!Gone)
+            {
+                SetStatus(message.Text, error: true);
+            }
         }
     }
 

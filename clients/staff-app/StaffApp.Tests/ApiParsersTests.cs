@@ -78,7 +78,7 @@ public class ApiParsersTests
             var guardrail = new GuardrailLine("MAX_DISCOUNT", "ADJUSTED", 60.25m, 50m, null);
 
             Assert.Equal("12.5%", line.Level);
-            Assert.Equal("MAX_DISCOUNT: điều chỉnh 60.25 -> 50", guardrail.Text);
+            Assert.Equal("Giảm giá tối đa: Điều chỉnh 60.25 -> 50", guardrail.Text);
         }
         finally
         {
@@ -115,7 +115,7 @@ public class ApiParsersTests
         Assert.Equal("Giảm 50% SKU-0006, lô B-1033", detail.Title);
         Assert.Equal(new DateOnly(2026, 11, 2), detail.ExpiryDate);
         Assert.StartsWith("Batch B-1033 expires", detail.Reason);
-        Assert.Equal(new[] { "MIN_SHELF_LIFE: đạt", "MAX_DISCOUNT: điều chỉnh 60 -> 50 (capped at 50)" },
+        Assert.Equal(new[] { "Hạn dùng tối thiểu: Đạt", "Giảm giá tối đa: Điều chỉnh 60 -> 50 (capped at 50)" },
             detail.GuardrailResults.Select(line => line.Text));
     }
 
@@ -145,7 +145,7 @@ public class ApiParsersTests
         Assert.Equal(numbers.Summary.DiscountPct, strings.Summary.DiscountPct);
         Assert.Equal(numbers.GuardrailResults.Select(line => line.Text),
             strings.GuardrailResults.Select(line => line.Text));
-        Assert.Equal("MAX_DISCOUNT: điều chỉnh 30 -> 10", numbers.GuardrailResults[0].Text);
+        Assert.Equal("Giảm giá tối đa: Điều chỉnh 30 -> 10", numbers.GuardrailResults[0].Text);
     }
 
     [Fact]
