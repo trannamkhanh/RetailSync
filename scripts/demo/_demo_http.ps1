@@ -178,14 +178,22 @@ function Exit-Demo {
 }
 
 # The value of $Key in the repository .env, or $null when the file or the key is missing.
+# Read as Docker Compose does: the last line wins (even "KEY="), a quoted value is the text
+# inside the quotes, and an unquoted value drops a " # comment" (so "Pass#1!" keeps its '#').
 function Get-EnvValue {
     param([string]$Key)
     $envFile = Join-Path $script:DemoRepoRoot ".env"
     if (-not (Test-Path $envFile)) { return $null }
     $value = $null
     Get-Content $envFile | ForEach-Object {
-        if ($_ -match "^\s*$Key\s*=\s*(.+?)\s*$") {
-            $value = $Matches[1].Trim().Trim('"').Trim("'")
+        if ($_ -match "^\s*$Key\s*=(.*)$") {
+            $raw = $Matches[1].Trim()
+            if ($raw -match '^"([^"]*)"' -or $raw -match "^'([^']*)'") {
+                $value = $Matches[1]
+            }
+            else {
+                $value = ($raw -replace '\s+#.*$', '').Trim()
+            }
         }
     }
     return $value

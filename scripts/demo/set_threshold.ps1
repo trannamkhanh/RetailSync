@@ -22,7 +22,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "_demo_http.ps1")
-if (-not $BaseUrl) { $BaseUrl = Get-DemoBaseUrl }
+if ([string]::IsNullOrWhiteSpace($BaseUrl)) { $BaseUrl = Get-DemoBaseUrl }
 $common = New-DemoCommonArgs -TokensPath $TokensPath -CaPath $CaPath
 
 $url = "$($BaseUrl.TrimEnd('/'))/admin/near-expiry-thresholds/$([Uri]::EscapeDataString($Category))"

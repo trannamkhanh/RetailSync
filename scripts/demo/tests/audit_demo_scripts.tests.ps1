@@ -357,6 +357,47 @@ Invoke-Case "test_pb41_2_lan_bind_address_is_used" {
     Assert-AllCalled (Invoke-BaseUrlFixture -EnvLines $lines) "https://192.168.50.10:8443/api/v1" "LAN IP"
 }
 
+Invoke-Case "test_pb41_2_inline_comment_after_bind_address_is_dropped" {
+    # Sprint_3_Demo.md section 3 puts this line in .env on machine S.
+    $lines = @("MIDDLEWARE_BIND_ADDRESS=192.168.1.10 # middleware 8443")
+    Assert-AllCalled (Invoke-BaseUrlFixture -EnvLines $lines) "https://192.168.1.10:8443/api/v1" "inline comment"
+}
+
+Invoke-Case "test_pb41_2_later_empty_bind_address_falls_back_to_localhost" {
+    $lines = @("MIDDLEWARE_BIND_ADDRESS=192.168.1.10", "MIDDLEWARE_BIND_ADDRESS=")
+    Assert-AllCalled (Invoke-BaseUrlFixture -EnvLines $lines) "https://localhost:8443/api/v1" "later empty key"
+}
+
+# Get-EnvValue on its own: the real helper in a temporary repository with this .env.
+function Get-EnvValueFixture {
+    param([string[]]$EnvLines, [string]$Key)
+    $root = New-TempDir
+    try {
+        $demo = Join-Path $root "scripts\demo"
+        New-Item -ItemType Directory $demo | Out-Null
+        Copy-Item (Join-Path $DemoDir "_demo_http.ps1") $demo
+        Set-Content -Encoding ASCII (Join-Path $root ".env") $EnvLines
+        return & { . (Join-Path $demo "_demo_http.ps1"); Get-EnvValue $Key }
+    }
+    finally {
+        Remove-Item -Recurse -Force $root
+    }
+}
+
+Invoke-Case "test_pb41_2_env_value_quotes_and_hash" {
+    $cases = @(
+        @{ Line = 'SECRET="Pass #1! # not a comment" # comment'; Want = 'Pass #1! # not a comment' },
+        @{ Line = "SECRET='a#b' # comment"; Want = 'a#b' },
+        @{ Line = 'SECRET=Pass#1!'; Want = 'Pass#1!' },
+        @{ Line = 'SECRET=Pass#1! # rotated 25/11'; Want = 'Pass#1!' },
+        @{ Line = 'SECRET = spaced value  '; Want = 'spaced value' }
+    )
+    foreach ($case in $cases) {
+        $got = Get-EnvValueFixture -EnvLines @("OTHER=1", $case.Line) -Key "SECRET"
+        Assert-That ($got -ceq $case.Want) "'$($case.Line)' gave '$got', expected '$($case.Want)'"
+    }
+}
+
 Invoke-Case "test_pb41_2_explicit_base_url_wins" {
     $urls = Invoke-BaseUrlFixture -EnvLines @("MIDDLEWARE_BIND_ADDRESS=192.168.50.10") -Extra @{ BaseUrl = "https://10.0.0.7:8443/api/v1/" }
     Assert-AllCalled $urls "https://10.0.0.7:8443/api/v1" "explicit -BaseUrl"

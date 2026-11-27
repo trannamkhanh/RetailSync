@@ -19,7 +19,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "_demo_http.ps1")
-if (-not $BaseUrl) { $BaseUrl = Get-DemoBaseUrl }
+if ([string]::IsNullOrWhiteSpace($BaseUrl)) { $BaseUrl = Get-DemoBaseUrl }
 $common = New-DemoCommonArgs -TokensPath $TokensPath -CaPath $CaPath
 
 $result = Invoke-DemoApi -Method POST -Url "$($BaseUrl.TrimEnd('/'))/sync/run" -TokenName $Token @common
