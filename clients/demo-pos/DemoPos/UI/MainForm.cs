@@ -10,7 +10,13 @@ namespace DemoPos.UI;
 /// <summary>The demo screen: POS, monitor panels, terminals table and request log.</summary>
 public sealed class MainForm : Form
 {
-    private sealed record PendingRequest(TerminalConfig Terminal, string RawBody, bool ClearCartOnSuccess);
+    private sealed record PendingRequest(
+        TerminalConfig Terminal,
+        string RawBody,
+        bool ClearCartOnSuccess,
+        bool AddHistory = true,
+        ScenarioKind? Scenario = null,
+        bool DirectOnly = false);
 
     private readonly LoadedConfig _loaded;
     private readonly AppConfig _config;
@@ -258,6 +264,8 @@ public sealed class MainForm : Form
 
     internal Func<TerminalConfig, HttpMessageHandler>? DiscountHandlerFactory { get; set; }
 
+    internal Func<ScenarioKind, TerminalConfig, string, X509Certificate2?, string?, HttpMessageHandler>? ScenarioHandlerFactory { get; set; }
+
     internal string DiscountStatusText => _discountStatus.Text ?? string.Empty;
 
     internal string FilesStatusText => _filesStatus.Text ?? string.Empty;
@@ -292,6 +300,7 @@ public sealed class MainForm : Form
             _modeEpoch++;
             var epoch = _modeEpoch;
             _config.UseMock = true;
+            _pendingRetry = null;
             ApplyMode();
             ApplyCurrentDiscountsToUi();
             _resultPanel.ShowInfo("Đang ở chế độ MOCK — dữ liệu không đến middleware.");
@@ -334,6 +343,7 @@ public sealed class MainForm : Form
         _modeEpoch++;
         var liveEpoch = _modeEpoch;
         _config.UseMock = false;
+        _pendingRetry = null;
         EnsureLiveDiscountsHydrated();
         ApplyMode();
         ApplyCurrentDiscountsToUi();
@@ -1496,7 +1506,8 @@ public sealed class MainForm : Form
     private async Task<PosResult> SendCoreAsync(TerminalConfig terminal, PosEvent posEvent,
                                                 string rawBody, bool addHistory,
                                                 TerminalClient? directClient = null,
-                                                bool clearCartOnSuccess = false)
+                                                bool clearCartOnSuccess = false,
+                                                ScenarioKind? scenario = null)
     {
         var wasMock = _mockMode;
         var modeEpoch = _modeEpoch;
@@ -1527,7 +1538,13 @@ public sealed class MainForm : Form
             {
                 _resultPanel.ShowResult(result);
                 _pendingRetry = result.CanRetry
-                    ? new PendingRequest(terminal, rawBody, clearCartOnSuccess)
+                    ? new PendingRequest(
+                        terminal,
+                        rawBody,
+                        clearCartOnSuccess,
+                        AddHistory: addHistory,
+                        Scenario: scenario,
+                        DirectOnly: directClient is not null)
                     : null;
 
                 // Keep Pay and Retry consistent: a successful SALE empties the cart
@@ -1662,7 +1679,8 @@ public sealed class MainForm : Form
 
             var result = await queue.DrainAsync(
                 entry => SendQueuedAsync(terminal, entry),
-                (entry, settled) => OnQueuedSettled(terminal, entry, settled, modeEpoch, terminalEpoch));
+                (entry, settled) => OnQueuedSettled(terminal, entry, settled, modeEpoch, terminalEpoch),
+                shouldContinue: () => !_closing && !IsDisposed && !_mockMode && _modeEpoch == modeEpoch);
 
             if (_closing || IsDisposed || _mockMode || _modeEpoch != modeEpoch || result is null)
             {
@@ -2018,8 +2036,42 @@ public sealed class MainForm : Form
         try
         {
             var posEvent = PosEventJson.Deserialize(pending.RawBody);
-            await SendCoreAsync(pending.Terminal, posEvent, pending.RawBody, addHistory: true,
-                clearCartOnSuccess: pending.ClearCartOnSuccess);
+            if (pending.Scenario is { } scenario)
+            {
+                if (!TryCreateScenarioDirectClient(scenario, pending.Terminal,
+                        out var directClient, out var ownsClient, out var errorMessage))
+                {
+                    _pendingRetry = null;
+                    _resultPanel.ShowInfo(errorMessage!);
+                    return;
+                }
+
+                try
+                {
+                    await SendCoreAsync(pending.Terminal, posEvent, pending.RawBody,
+                        addHistory: pending.AddHistory, directClient: directClient,
+                        clearCartOnSuccess: pending.ClearCartOnSuccess, scenario: scenario);
+                }
+                finally
+                {
+                    if (ownsClient)
+                    {
+                        directClient?.Dispose();
+                    }
+                }
+
+                return;
+            }
+
+            if (pending.DirectOnly)
+            {
+                _pendingRetry = null;
+                _resultPanel.ShowInfo("Không thể Retry trực tiếp yêu cầu này — vui lòng chạy lại kịch bản.");
+                return;
+            }
+
+            await SendCoreAsync(pending.Terminal, posEvent, pending.RawBody,
+                addHistory: pending.AddHistory, clearCartOnSuccess: pending.ClearCartOnSuccess);
         }
         catch (Exception error)
         {
@@ -2032,6 +2084,97 @@ public sealed class MainForm : Form
         {
             _busy = false;
             SetBusy(false);
+        }
+    }
+
+    private bool TryCreateScenarioDirectClient(ScenarioKind kind, TerminalConfig terminal,
+                                               out TerminalClient? client, out bool ownsClient,
+                                               out string? errorMessage)
+    {
+        client = null;
+        ownsClient = false;
+        errorMessage = null;
+
+        if (kind is ScenarioKind.Conflict or ScenarioKind.InsufficientStock
+            or ScenarioKind.UnregisteredStore or ScenarioKind.ReturnLimit)
+        {
+            client = _mockMode ? null : GetLiveClient(terminal);
+            return true;
+        }
+
+        if (_mockMode)
+        {
+            errorMessage = "Kịch bản chứng chỉ/gateway chỉ chạy ở chế độ LIVE.";
+            return false;
+        }
+
+        _authority ??= ServerCertificateValidator.LoadAuthority(_loaded.Paths.CaCertificate);
+        var token = _loaded.TokenForTerminal(terminal)
+                    ?? throw new ConfigurationException(
+                        $"Missing token '{terminal.PosId}'.\nRun:\n  {SetupCommands.IssueTokens}");
+
+        switch (kind)
+        {
+            case ScenarioKind.WrongCertificate:
+                var other = _config.Terminals.FirstOrDefault(item =>
+                    !string.Equals(item.PosId, terminal.PosId, StringComparison.OrdinalIgnoreCase)
+                    && _certificates[item.PosId].IsUsable);
+                if (other is null)
+                {
+                    errorMessage = "Không có certificate của terminal khác để chạy kịch bản này.";
+                    return false;
+                }
+
+                var wrongCert = _certificates[other.PosId];
+                var wrongHandler = ScenarioHandlerFactory?.Invoke(
+                    kind, terminal, _config.PosBaseUrl, wrongCert.Certificate, other.PosId);
+                client = new TerminalClient(_config.PosBaseUrl, _authority,
+                    wrongCert.Certificate, other.PosId, token, _requestLog, wrongHandler);
+                ownsClient = true;
+                return true;
+
+            case ScenarioKind.NoCertificate:
+                var noCertHandler = ScenarioHandlerFactory?.Invoke(
+                    kind, terminal, _config.PosBaseUrl, null, null);
+                client = new TerminalClient(_config.PosBaseUrl, _authority,
+                    null, null, token, _requestLog, noCertHandler);
+                ownsClient = true;
+                return true;
+
+            case ScenarioKind.SkipGateway:
+                var skipHandler = ScenarioHandlerFactory?.Invoke(
+                    kind, terminal, _config.MonitorBaseUrl, null, null);
+                client = new TerminalClient(_config.MonitorBaseUrl, _authority,
+                    null, null, token, _requestLog, skipHandler);
+                ownsClient = true;
+                return true;
+
+            default:
+                errorMessage = $"Kịch bản không được hỗ trợ: {kind}.";
+                return false;
+        }
+    }
+
+    private async Task SendScenarioAsync(ScenarioKind kind, TerminalConfig terminal, PosEvent posEvent)
+    {
+        if (!TryCreateScenarioDirectClient(kind, terminal,
+                out var directClient, out var ownsClient, out var errorMessage))
+        {
+            _resultPanel.ShowInfo(errorMessage!);
+            return;
+        }
+
+        try
+        {
+            await SendCoreAsync(terminal, posEvent, PosEventJson.Serialize(posEvent),
+                addHistory: false, directClient: directClient, scenario: kind);
+        }
+        finally
+        {
+            if (ownsClient)
+            {
+                directClient?.Dispose();
+            }
         }
     }
 
@@ -2088,8 +2231,7 @@ public sealed class MainForm : Form
                         },
                     },
                     lastSale.TransactionId);
-                await SendCoreAsync(terminal, conflictEvent, PosEventJson.Serialize(conflictEvent),
-                    addHistory: false, directClient: _mockMode ? null : GetLiveClient(terminal));
+                await SendScenarioAsync(kind, terminal, conflictEvent);
                 return;
 
             case ScenarioKind.InsufficientStock:
@@ -2097,8 +2239,7 @@ public sealed class MainForm : Form
                 {
                     new PosEventItem { Sku = product.Sku, Quantity = 999, UnitPrice = product.UnitPrice },
                 });
-                await SendCoreAsync(terminal, big, PosEventJson.Serialize(big), addHistory: false,
-                    directClient: _mockMode ? null : GetLiveClient(terminal));
+                await SendScenarioAsync(kind, terminal, big);
                 return;
 
             case ScenarioKind.UnregisteredStore:
@@ -2106,8 +2247,7 @@ public sealed class MainForm : Form
                 {
                     new PosEventItem { Sku = product.Sku, Quantity = 1, UnitPrice = product.UnitPrice },
                 });
-                await SendCoreAsync(terminal, unknown, PosEventJson.Serialize(unknown),
-                    addHistory: false, directClient: _mockMode ? null : GetLiveClient(terminal));
+                await SendScenarioAsync(kind, terminal, unknown);
                 return;
 
             case ScenarioKind.ReturnLimit:
@@ -2129,74 +2269,17 @@ public sealed class MainForm : Form
                             UnitPrice = sold.UnitPrice,
                         },
                     });
-                await SendCoreAsync(terminal, overReturn, PosEventJson.Serialize(overReturn),
-                    addHistory: false, directClient: _mockMode ? null : GetLiveClient(terminal));
+                await SendScenarioAsync(kind, terminal, overReturn);
                 return;
-        }
 
-        if (_mockMode)
-        {
-            _resultPanel.ShowInfo("Kịch bản chứng chỉ/gateway chỉ chạy ở chế độ LIVE.");
-            return;
-        }
-
-        _authority ??= ServerCertificateValidator.LoadAuthority(_loaded.Paths.CaCertificate);
-        var token = _loaded.TokenForTerminal(terminal)
-                    ?? throw new ConfigurationException(
-                        $"Missing token '{terminal.PosId}'.\nRun:\n  {SetupCommands.IssueTokens}");
-
-        switch (kind)
-        {
             case ScenarioKind.WrongCertificate:
-                var other = _config.Terminals.FirstOrDefault(item =>
-                    !string.Equals(item.PosId, terminal.PosId, StringComparison.OrdinalIgnoreCase)
-                    && _certificates[item.PosId].IsUsable);
-                if (other is null)
-                {
-                    _resultPanel.ShowInfo("Không có certificate của terminal khác để chạy kịch bản này.");
-                    return;
-                }
-
-                var wrongCert = _certificates[other.PosId];
-                var wrongEvent = PosEvents.Sale(terminal.StoreId, terminal.PosId, new[]
-                {
-                    new PosEventItem { Sku = product.Sku, Quantity = 1, UnitPrice = product.UnitPrice },
-                });
-                using (var wrongClient = new TerminalClient(_config.PosBaseUrl, _authority,
-                           wrongCert.Certificate, other.PosId, token, _requestLog))
-                {
-                    await SendCoreAsync(terminal, wrongEvent, PosEventJson.Serialize(wrongEvent),
-                        addHistory: false, directClient: wrongClient);
-                }
-
-                return;
-
             case ScenarioKind.NoCertificate:
-                var noCertEvent = PosEvents.Sale(terminal.StoreId, terminal.PosId, new[]
-                {
-                    new PosEventItem { Sku = product.Sku, Quantity = 1, UnitPrice = product.UnitPrice },
-                });
-                using (var noCertClient = new TerminalClient(_config.PosBaseUrl, _authority,
-                           null, null, token, _requestLog))
-                {
-                    await SendCoreAsync(terminal, noCertEvent, PosEventJson.Serialize(noCertEvent),
-                        addHistory: false, directClient: noCertClient);
-                }
-
-                return;
-
             case ScenarioKind.SkipGateway:
-                var skipEvent = PosEvents.Sale(terminal.StoreId, terminal.PosId, new[]
+                var securityEvent = PosEvents.Sale(terminal.StoreId, terminal.PosId, new[]
                 {
                     new PosEventItem { Sku = product.Sku, Quantity = 1, UnitPrice = product.UnitPrice },
                 });
-                using (var skipClient = new TerminalClient(_config.MonitorBaseUrl, _authority,
-                           null, null, token, _requestLog))
-                {
-                    await SendCoreAsync(terminal, skipEvent, PosEventJson.Serialize(skipEvent),
-                        addHistory: false, directClient: skipClient);
-                }
-
+                await SendScenarioAsync(kind, terminal, securityEvent);
                 return;
         }
     }
