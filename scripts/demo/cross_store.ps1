@@ -17,12 +17,13 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9-]{1,30}$')][string]$Barcode,
     [ValidatePattern('^[A-Za-z0-9_-]{1,10}$')][string]$Store = "STORE-DN1",
     [string]$Token = "staff_dn1",
-    [string]$BaseUrl = "https://localhost:8443/api/v1",
+    [string]$BaseUrl,
     [string]$TokensPath,
     [string]$CaPath
 )
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "_demo_http.ps1")
+if (-not $BaseUrl) { $BaseUrl = Get-DemoBaseUrl }
 $common = New-DemoCommonArgs -TokensPath $TokensPath -CaPath $CaPath
 
 $url = "$($BaseUrl.TrimEnd('/'))/products/barcode/$Barcode/stock?from_store=$Store"

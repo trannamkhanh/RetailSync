@@ -14,13 +14,14 @@
 param(
     [ValidateRange(1, 500)][int]$Limit = 15,
     [ValidatePattern('^[A-Za-z0-9_-]{0,50}$')][string]$Action = "",
-    [string]$BaseUrl = "https://localhost:8443/api/v1",
+    [string]$BaseUrl,
     [string]$Token = "auditor",
     [string]$TokensPath,
     [string]$CaPath
 )
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "_demo_http.ps1")
+if (-not $BaseUrl) { $BaseUrl = Get-DemoBaseUrl }
 $common = New-DemoCommonArgs -TokensPath $TokensPath -CaPath $CaPath
 
 $url = "$($BaseUrl.TrimEnd('/'))/audit-logs?limit=$Limit"

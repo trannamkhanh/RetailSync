@@ -176,3 +176,24 @@ function Exit-Demo {
     if ($Result.Status -ge 200 -and $Result.Status -lt 300) { exit 0 }
     exit 1
 }
+
+# The value of $Key in the repository .env, or $null when the file or the key is missing.
+function Get-EnvValue {
+    param([string]$Key)
+    $envFile = Join-Path $script:DemoRepoRoot ".env"
+    if (-not (Test-Path $envFile)) { return $null }
+    $value = $null
+    Get-Content $envFile | ForEach-Object {
+        if ($_ -match "^\s*$Key\s*=\s*(.+?)\s*$") {
+            $value = $Matches[1].Trim().Trim('"').Trim("'")
+        }
+    }
+    return $value
+}
+
+# The middleware publishes 8443 on MIDDLEWARE_BIND_ADDRESS (the LAN IP in 3-laptop mode).
+function Get-DemoBaseUrl {
+    $apiHost = Get-EnvValue "MIDDLEWARE_BIND_ADDRESS"
+    if ([string]::IsNullOrWhiteSpace($apiHost) -or $apiHost -eq "0.0.0.0") { $apiHost = "localhost" }
+    return "https://${apiHost}:8443/api/v1"
+}

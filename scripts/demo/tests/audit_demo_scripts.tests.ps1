@@ -6,8 +6,10 @@
 .DESCRIPTION
     Each case copies the real script into a temporary folder laid out like the
     repository. reset_demo_db.ps1 runs against a stub `docker` function and a stub
-    _demo_http.ps1 (no HTTP, no database); export_terminal_tokens.ps1 runs on fake
-    tokens and certificate files. Exit code 0 when every case passes.
+    Invoke-DemoApi (no HTTP, no database); export_terminal_tokens.ps1 runs on fake
+    tokens and certificate files. The PB-41-2 cases run the six API scripts against
+    a temporary .env and record the URL they would call. Exit code 0 when every
+    case passes.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts/demo/tests/audit_demo_scripts.tests.ps1
@@ -68,7 +70,9 @@ function Invoke-ResetFixture {
     $demo = Join-Path $root "scripts\demo"
     New-Item -ItemType Directory $demo | Out-Null
     Copy-Item (Join-Path $DemoDir "reset_demo_db.ps1") $demo
-    Set-Content -Encoding ASCII (Join-Path $demo "_demo_http.ps1") $FakeDemoHttp
+    # The real helpers (the .env reader), then the stub Invoke-DemoApi replaces the real one.
+    Copy-Item (Join-Path $DemoDir "_demo_http.ps1") $demo
+    Add-Content -Encoding ASCII (Join-Path $demo "_demo_http.ps1") $FakeDemoHttp
     $envLines = @("MSSQL_SA_PASSWORD=$SqlPassword", "DB_NAME=RTS_DB_DEMO", "HQ_DB_NAME=RTS_HQ")
     if ($BindAddress) { $envLines += "MIDDLEWARE_BIND_ADDRESS=$BindAddress" }
     Set-Content -Encoding ASCII (Join-Path $root ".env") $envLines
@@ -273,10 +277,96 @@ Invoke-Case "test_audit11a_folder_inside_repo_still_warns_when_not_ignored" {
     finally { Set-Location $env:TEMP; Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue }
 }
 
+# --- PB-41-2: default base URL from .env MIDDLEWARE_BIND_ADDRESS ------------
+
+# Appended after the real helpers, so the real .env reader runs and no request is sent.
+$FakeApiCalls = @'
+
+function Invoke-DemoApi {
+    param([string]$Method, [string]$Url, [string]$TokenName, [string]$Body, [int]$TimeoutSeconds, [switch]$Quiet)
+    $global:Pb41Urls.Add($Url)
+    return [pscustomobject]@{ Status = 418; Body = "{}"; Error = "stub" }
+}
+function New-DemoCommonArgs { param([string]$TokensPath, [string]$CaPath) return @{} }
+function Exit-Demo { param($Result) }
+'@
+
+$Pb41Scripts = [ordered]@{
+    "audit_tail.ps1"    = @{}
+    "sync_run.ps1"      = @{}
+    "hq_snapshot.ps1"   = @{}
+    "run_job.ps1"       = @{ Name = "forecast" }
+    "set_threshold.ps1" = @{ Category = "Dairy"; Days = 7 }
+    "cross_store.ps1"   = @{ Barcode = "8930000000011" }
+}
+
+# Runs the six scripts in a temporary repository whose .env holds $EnvLines (no .env when $null).
+# Returns script name -> the URLs it called.
+function Invoke-BaseUrlFixture {
+    param([string[]]$EnvLines, [hashtable]$Extra = @{})
+    $root = New-TempDir
+    $demo = Join-Path $root "scripts\demo"
+    New-Item -ItemType Directory $demo | Out-Null
+    Copy-Item (Join-Path $DemoDir "_demo_http.ps1") $demo
+    Add-Content -Encoding ASCII (Join-Path $demo "_demo_http.ps1") $FakeApiCalls
+    if ($null -ne $EnvLines) { Set-Content -Encoding ASCII (Join-Path $root ".env") $EnvLines }
+    $urls = @{}
+    try {
+        foreach ($name in $Pb41Scripts.Keys) {
+            Copy-Item (Join-Path $DemoDir $name) $demo
+            $global:Pb41Urls = New-Object System.Collections.Generic.List[string]
+            $scriptArgs = $Pb41Scripts[$name] + $Extra
+            & (Join-Path $demo $name) @scriptArgs *> $null
+            $urls[$name] = @($global:Pb41Urls)
+        }
+    }
+    finally {
+        Remove-Item -Recurse -Force $root
+    }
+    return $urls
+}
+
+function Assert-AllCalled {
+    param([hashtable]$Urls, [string]$Prefix, [string]$Case)
+    foreach ($name in $Pb41Scripts.Keys) {
+        $calls = @($Urls[$name])
+        Assert-That ($calls.Count -eq 1) "${Case}: $name made $($calls.Count) calls"
+        Assert-That ($calls[0].StartsWith("$Prefix/")) "${Case}: $name called $($calls[0]), expected $Prefix/..."
+    }
+}
+
+Invoke-Case "test_pb41_2_unset_bind_address_defaults_to_localhost" {
+    $cases = [ordered]@{
+        "no .env"  = $null
+        "no key"   = @("DB_NAME=RTS_DB_DEMO")
+        "empty"    = @("MIDDLEWARE_BIND_ADDRESS=")
+        "0.0.0.0"  = @("MIDDLEWARE_BIND_ADDRESS=0.0.0.0")
+    }
+    foreach ($case in $cases.Keys) {
+        Assert-AllCalled (Invoke-BaseUrlFixture -EnvLines $cases[$case]) "https://localhost:8443/api/v1" $case
+    }
+}
+
+Invoke-Case "test_pb41_2_localhost_bind_address_is_used" {
+    Assert-AllCalled (Invoke-BaseUrlFixture -EnvLines @("MIDDLEWARE_BIND_ADDRESS=localhost")) "https://localhost:8443/api/v1" "localhost"
+    Assert-AllCalled (Invoke-BaseUrlFixture -EnvLines @("MIDDLEWARE_BIND_ADDRESS=127.0.0.1")) "https://127.0.0.1:8443/api/v1" "127.0.0.1"
+}
+
+Invoke-Case "test_pb41_2_lan_bind_address_is_used" {
+    $lines = @("DB_NAME=RTS_DB_DEMO", 'MIDDLEWARE_BIND_ADDRESS = "192.168.50.10"', "POS_BIND_ADDRESS=192.168.50.10")
+    Assert-AllCalled (Invoke-BaseUrlFixture -EnvLines $lines) "https://192.168.50.10:8443/api/v1" "LAN IP"
+}
+
+Invoke-Case "test_pb41_2_explicit_base_url_wins" {
+    $urls = Invoke-BaseUrlFixture -EnvLines @("MIDDLEWARE_BIND_ADDRESS=192.168.50.10") -Extra @{ BaseUrl = "https://10.0.0.7:8443/api/v1/" }
+    Assert-AllCalled $urls "https://10.0.0.7:8443/api/v1" "explicit -BaseUrl"
+}
+
 # --- hq_snapshot.ps1 (minor) -----------------------------------------------
 
 $FakeSnapshotHttp = @'
 function New-DemoCommonArgs { param([string]$TokensPath, [string]$CaPath) return @{} }
+function Get-DemoBaseUrl { return "https://localhost:8443/api/v1" }
 function Get-DemoErrorCode { param([string]$Body) return "SNAPSHOT_REJECTED" }
 function Exit-Demo { param($Result) }
 function Invoke-DemoApi {

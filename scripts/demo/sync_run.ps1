@@ -12,13 +12,14 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$BaseUrl = "https://localhost:8443/api/v1",
+    [string]$BaseUrl,
     [string]$Token = "admin",
     [string]$TokensPath,
     [string]$CaPath
 )
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "_demo_http.ps1")
+if (-not $BaseUrl) { $BaseUrl = Get-DemoBaseUrl }
 $common = New-DemoCommonArgs -TokensPath $TokensPath -CaPath $CaPath
 
 $result = Invoke-DemoApi -Method POST -Url "$($BaseUrl.TrimEnd('/'))/sync/run" -TokenName $Token @common

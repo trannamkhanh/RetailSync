@@ -13,7 +13,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9_-]{1,50}$')][string]$Name,
-    [string]$BaseUrl = "https://localhost:8443/api/v1",
+    [string]$BaseUrl,
     [string]$Token = "admin",
     [int]$TimeoutSeconds = 120,
     [string]$TokensPath,
@@ -21,6 +21,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "_demo_http.ps1")
+if (-not $BaseUrl) { $BaseUrl = Get-DemoBaseUrl }
 $common = New-DemoCommonArgs -TokensPath $TokensPath -CaPath $CaPath
 
 $url = "$($BaseUrl.TrimEnd('/'))/admin/jobs/$Name/run"
