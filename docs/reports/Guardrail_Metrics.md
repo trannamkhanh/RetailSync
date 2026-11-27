@@ -55,7 +55,7 @@ Acceptance uses staff_decision only; undecided PENDING/EXPIRED rows are separate
 
 ## Staff acceptance
 
-| Store / action | ACCEPT | REJECT | Acceptance rate | PENDING without decision | EXPIRED without decision |
+| Store | ACCEPT | REJECT | Acceptance rate | PENDING without decision | EXPIRED without decision |
 |---|---:|---:|---:|---:|---:|
 | STORE-DN1 | 2 | 1 | 66.67% (2/3) — small sample | 0 | 0 |
 | STORE-DN2 | 2 | 2 | 50.00% (2/4) — small sample | 0 | 0 |
@@ -88,4 +88,4 @@ Six of ten decisions were ACCEPT (60%). This is the scripted sample's mix, not a
 
 ## Verification
 
-Eight test_pb44_* SQL-backed/CLI cases cover outcome precedence, duplicate results of the same rule type, zero-percent BLOCKED, GENERATED exclusion, decision-only acceptance, undecided PENDING/EXPIRED, n/a, sample boundaries, and database-name refusal. Full-container result is recorded in the PR description after the final run. The Google Sheet PB-44 entries remain pending access to the shared workbook; they have not been silently marked PASS.
+Nine test_pb44_* SQL-backed/CLI/pure cases cover outcome precedence, duplicate results of the same rule type, zero-percent BLOCKED, GENERATED exclusion, decision-only acceptance, undecided PENDING/EXPIRED, n/a, sample boundaries, database-name refusal, two-store TOTAL counts, and report headers. Full-container result is recorded in the PR description after the final run. The Google Sheet PB-44 entries remain pending access to the shared workbook; they have not been silently marked PASS.

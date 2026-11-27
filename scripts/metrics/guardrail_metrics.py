@@ -112,11 +112,12 @@ def report(data):
               "| Store / rule type | Recommendations checked | PASSED | ADJUSTED | BLOCKED |",
               "|---|---:|---:|---:|---:|"]
     lines.extend(outcome_row(f"{store} / {rule}", rules[store, rule]) for store in groups for rule in RULES)
-    header = ["| Store / action | ACCEPT | REJECT | Acceptance rate | PENDING without decision | EXPIRED without decision |",
+    header = ["| Store | ACCEPT | REJECT | Acceptance rate | PENDING without decision | EXPIRED without decision |",
               "|---|---:|---:|---:|---:|---:|"]
     lines += ["", "## Staff acceptance", "", *header]
     lines.extend(decision_row(store, acceptance[store]) for store in groups)
-    lines += ["", "## Acceptance per action type", "", *header]
+    lines += ["", "## Acceptance per action type", "",
+              header[0].replace("| Store |", "| Store / action |"), header[1]]
     lines.extend(decision_row(f"{store} / {action}", actions[store, action])
                  for store in groups for action in ACTIONS)
     return "\n".join(lines)

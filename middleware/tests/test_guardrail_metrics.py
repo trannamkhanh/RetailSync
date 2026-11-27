@@ -91,3 +91,37 @@ def test_pb44_no_decisions_is_na_and_small_sample(db_session, fixed_rows):
 def test_pb44_refuses_development_and_invalid_database(database):
     with pytest.raises(SystemExit):
         metrics.parse_args(["--db", database])
+
+
+def test_pb44_two_store_totals_and_report_tables():
+    rows = [
+        {"rec_id": 1, "store_id": "STORE-A", "action_type": "DISCOUNT", "status": "PENDING"},
+        {"rec_id": 2, "store_id": "STORE-A", "action_type": "DISCOUNT", "status": "ACCEPTED"},
+        {"rec_id": 3, "store_id": "STORE-B", "action_type": "CLEARANCE", "status": "BLOCKED"},
+        {"rec_id": 4, "store_id": "STORE-B", "action_type": "DISCOUNT", "status": "REJECTED"},
+        {"rec_id": 5, "store_id": "STORE-B", "action_type": "DISCOUNT", "status": "GENERATED"},
+        {"rec_id": 6, "store_id": "STORE-B", "action_type": "REDISTRIBUTION", "status": "EXPIRED"},
+    ]
+    results = [
+        (1, "MAX_DISCOUNT", "PASSED"),
+        (2, "MAX_DISCOUNT", "PASSED"), (2, "MAX_DISCOUNT", "ADJUSTED"),
+        (3, "MAX_DISCOUNT", "ADJUSTED"), (3, "MIN_SHELF_LIFE", "BLOCKED"),
+        (4, "MAX_DISCOUNT", "PASSED"),
+        (5, "MAX_DISCOUNT", "ADJUSTED"),
+        (6, "MAX_DISCOUNT", "PASSED"),
+    ]
+    data = metrics.summarize(rows, results, {2: "ACCEPT", 4: "REJECT"}, ["STORE-A", "STORE-B"])
+    assert data[1]["STORE-A"] == {"PASSED": 1, "ADJUSTED": 1}
+    assert data[1]["STORE-B"] == {"PASSED": 2, "BLOCKED": 1}
+    assert data[1]["TOTAL"] == {"PASSED": 3, "ADJUSTED": 1, "BLOCKED": 1}
+    assert data[2]["TOTAL", "MAX_DISCOUNT"] == {"PASSED": 3, "ADJUSTED": 2}
+    assert data[3]["TOTAL"] == {"ACCEPT": 1, "REJECT": 1, "PENDING": 1, "EXPIRED": 1}
+    output = metrics.report(data)
+    staff = output.split("## Staff acceptance\n", 1)[1].split("## Acceptance per action type", 1)[0]
+    actions = output.split("## Acceptance per action type\n", 1)[1]
+    assert "| Store | ACCEPT | REJECT |" in staff
+    assert "| Store / action | ACCEPT | REJECT |" in actions
+    assert ("| TOTAL | 5 | 60.00% (3/5) — small sample | 20.00% (1/5) — small sample "
+            "| 20.00% (1/5) — small sample |") in output
+    assert "| TOTAL | 1 | 1 | 50.00% (1/2) — small sample | 1 | 1 |" in staff
+    assert "| TOTAL / DISCOUNT | 1 | 1 | 50.00% (1/2) — small sample | 1 | 0 |" in actions
