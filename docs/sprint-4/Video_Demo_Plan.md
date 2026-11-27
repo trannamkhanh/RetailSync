@@ -1,172 +1,283 @@
-# Video demo plan (PB-42-3 script and data, PB-42-4 recording)
+# Kế hoạch quay video demo RetailSync (PB-42-4)
 
-**Owner:** Quang (machine S, recording and editing) · **Recorded:** 1/12/2026 · **Narration:** Kiệt
-**Base:** the commit tagged `v1.0` (frozen 30/11). Video and report must use the same commit.
-**Fills:** the path `docs/sprint-4/Video_Demo_Plan.md` that the 27/11 brief references but which did not exist in the repository before this file (`UAT_Capstone_1_List.md` §11.2).
-
----
-
-## 1. What this document is
-
-A step-by-step recording plan: machine setup, the order of acts, what is on screen at each moment, and what to do when something fails live. It is written against what is actually on `main` at `a5f509b`, so it contains **no** Dự báo tab in the Staff App and **no** 30-product Vietnamese catalogue — neither exists (`UAT_Capstone_1_List.md` §11.1). If PB-51/52/53 merge before the freeze, add their steps in §5 and re-record those acts.
+**Ngày quay:** 1/12/2026 · **Code:** tag `v1.0` (commit đã freeze lúc 12:00 30/11) · **Thời lượng:** khoảng 20 phút
+**Người:** Kiệt dẫn chuyện · Quang điều khiển máy S, quay và dựng · Khánh máy A (Hải Châu) · Sang máy B (Thanh Khê)
+**Dựa trên:** `docs/Demo_Plan.md` (7 màn), `docs/demo/Sprint_3_Demo.md` (lệnh chi tiết)
 
 ---
 
-## 2. Machine setup (do the night before, 30/11)
+## Phần A. Kế hoạch từng bước
 
-### 2.1 Machine S — the presenter machine, and what is filmed
+| Bước | Thời gian | Việc | Ai |
+|---|---|---|---|
+| A1 | 30/11 tối | Gắn tag `v1.0`, mỗi máy `git fetch --tags` rồi `git checkout v1.0` | Kiệt, cả nhóm |
+| A2 | 30/11 tối (còn Internet) | Build mọi thứ trên S, A, B (mục B1, B3) | Quang, Khánh, Sang |
+| A3 | 1/12, 8:00 | Dựng router và mạng, kiểm tra A, B gọi được S (B2) | Quang |
+| A4 | 8:30 | Reset dữ liệu, smoke check, **reset lại** (B1.4) | Quang |
+| A5 | 8:45 | Xuất token, chép sang A và B, mở ứng dụng (B1.5, B3) | Quang, Khánh, Sang |
+| A6 | 9:00 | Cài phần mềm quay, quay thử 30 giây trên mỗi máy, nghe lại tiếng (B4) | Quang |
+| A7 | 9:15 | Tập nhanh màn 2 và màn 6 một lần (không quay), rồi **reset lại** | Cả nhóm |
+| A8 | 9:45 | **Quay** màn 1–7, quay từng màn thành một đoạn riêng (Phần C) | Cả nhóm |
+| A9 | 11:00 | Xem lại từng đoạn; đoạn nào lỗi thì quay lại riêng đoạn đó (Phần D) | Quang, Kiệt |
+| A10 | Chiều | Dựng video: ghép đoạn, chèn tiêu đề màn, phụ đề số liệu màn 7, xuất MP4 1080p | Quang |
+| A11 | Tối | Cả nhóm xem bản dựng; Kiệt duyệt | Kiệt |
 
-1. `git checkout v1.0`, confirm `git describe --tags` prints `v1.0`, then `docker compose pull` / `build` **while still online**.
-2. `.env`: `DB_NAME=RTS_DB_DEMO`, `SYNC_INTERVAL=3600`, `SYNC_RETRY_BASE_SECONDS=10`, `POS_BIND_ADDRESS` and `MIDDLEWARE_BIND_ADDRESS` set to S's static IP on the private network. Both values match `Sprint_3_Demo.md` §1.2 and the lines `reset_demo_db.ps1 -DemoMode` prints: `3600` keeps the scheduler from syncing in the middle of act 5, and `10` keeps a retry from waiting a full minute.
-3. Certificates regenerated so the SAN contains S's IP. Do **not** recreate the CA — A and B hold copies of `ca.crt`.
-4. `docker compose up -d --wait sqlserver` — the reset script needs the server up; it does not start it.
-5. `powershell -File scripts/demo/reset_demo_db.ps1 -DemoMode` — resets the demo database and prints the demo-mode env lines.
-6. `sprint2_smoke.py` twice, both all PASS.
-7. **Reset `RTS_DB_DEMO` once more** — the smoke test writes sales into the database, so without this second reset act 2 starts on stock the smoke run already changed.
-8. Open the demo console; confirm five tabs load with no red error lines: **Tồn và lô**, **Giao dịch và audit**, **Đồng bộ và HQ**, **Job**, **Doanh thu**.
-9. Set display scaling so the console is readable at 1080p on the recording — `FontSize` **16–20** is the readable range; 20–24 crowds the wider grids at 1080p.
-10. Agree the seating plan with Kiệt (who sits at A, B and S) — settle it by 1/12, not on the day.
-
-### 2.2 Machines A and B
-
-- A: Demo POS on `POS-DN1-01`, plus Staff App with `staff_dn1`.
-- B: Demo POS on `POS-DN2-01`.
-- Each machine has `ca.crt`, its own terminal certificate and key, and its token file. `appsettings.Local.json` points at `https://<S IP>:9443/api/v1`; the Staff App points at `https://<S IP>:8443/api/v1`.
-- Both run from a path on drive C if the app fails to start from another drive — a known environment limit (see `Retest_Skipped_Cases.md` §4.1).
+Quay theo từng màn, không quay một mạch 20 phút. Hỏng ở màn nào thì chỉ quay lại màn đó. Trước khi quay lại màn 2 hoặc màn 6, phải reset dữ liệu, vì tồn kho và đề xuất đã thay đổi.
 
 ---
 
-## 3. Recording setup
+## Phần B. Cách setup máy
 
-| Item | Setting |
+### B1. Máy S (Quang): Docker, middleware, HQ, bảng điều khiển
+
+**B1.1. Tối 30/11, khi còn Internet:**
+
+```powershell
+git fetch --tags
+```
+
+```powershell
+git checkout v1.0
+```
+
+```powershell
+docker compose build middleware hq-demo
+```
+
+```powershell
+docker compose pull sqlserver pos-gateway
+```
+
+```powershell
+dotnet build clients/demo-console/DemoConsole/DemoConsole.csproj -c Debug
+```
+
+**B1.2. `.env`** (sửa tay, không commit):
+- `DB_NAME=RTS_DB_DEMO`, `HQ_DB_NAME=RTS_HQ`
+- `SYNC_INTERVAL=3600` (batch chỉ được tạo khi bấm "Chạy đồng bộ"), `SYNC_RETRY_BASE_SECONDS=10`
+- `POS_BIND_ADDRESS` và `MIDDLEWARE_BIND_ADDRESS` = IP tĩnh của S, ví dụ `192.168.1.10`
+
+**B1.3. Chứng chỉ:** chứng chỉ server phải có IP của S (`docs/demo/Sprint_3_Demo.md` mục 3). Không tạo lại CA.
+
+**B1.4. Reset, khởi động, smoke check, reset lại:**
+
+```powershell
+docker compose up -d --wait sqlserver
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/demo/reset_demo_db.ps1 -NoBuild
+```
+
+```powershell
+docker compose run --rm --no-deps --volume "${PWD}:/repo" --workdir /repo middleware python scripts/demo/sprint2_smoke.py
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/demo/reset_demo_db.ps1 -NoBuild
+```
+
+Kết quả đúng sau lần reset cuối:
+- Tồn: STORE-DN1 360, STORE-DN2 225, STORE-DN3 135.
+- Hải Châu và Thanh Khê: Bread hết hạn sau 1 ngày, Fresh milk 2 ngày, Yogurt 3 ngày, Sponge cake đã hết hạn.
+- HQ trống.
+- Dòng `Forecast job ran.`
+
+**B1.5. Xuất token cho A và B** (sau lần reset cuối cùng):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/demo/export_terminal_tokens.ps1 -Terminal POS-DN1-01 -Staff staff_dn1 -Out .\out\A
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/demo/export_terminal_tokens.ps1 -Terminal POS-DN2-01 -Staff staff_dn2 -Out .\out\B
+```
+
+Chép `out\A` sang máy A, `out\B` sang máy B bằng USB, rồi xóa thư mục `out` (trong đó có khóa riêng).
+
+**B1.6. Bảng điều khiển:** tạo `clients/demo-console/DemoConsole/appsettings.Local.json` với `{ "FontSize": 16 }`, rồi mở:
+
+```powershell
+clients/demo-console/DemoConsole/bin/Debug/net8.0-windows/DemoConsole.exe
+```
+
+Tiêu đề có `(RTS_DB_DEMO)`, mọi tab xanh "Không có lỗi".
+
+### B2. Mạng
+
+- Router riêng không nối Internet. Cả 3 máy **cắm dây**, không dùng Wi-Fi. Windows đặt mạng **Private**.
+- S có IP tĩnh. Mở firewall cổng 9443 và 8443 trên S (`scripts/demo/open_firewall.ps1`).
+- Kiểm tra từ A và B: `Test-NetConnection <IP S> -Port 9443` và `-Port 8443` đều `True`.
+
+### B3. Máy A (Khánh) và máy B (Sang)
+
+1. Tối 30/11: `git checkout v1.0` rồi build Demo POS:
+
+```powershell
+dotnet build clients/demo-pos/DemoPos/DemoPos.csproj -c Debug
+```
+
+2. Chép nội dung `out\A` (hoặc `out\B`) vào thư mục gốc của repo.
+3. `clients/demo-pos/DemoPos/appsettings.Local.json` trỏ về `https://<IP S>:9443/api/v1`, terminal `POS-DN1-01` (A) hoặc `POS-DN2-01` (B).
+4. Chạy Demo POS:
+
+```powershell
+dotnet run --project clients/demo-pos/DemoPos/DemoPos.csproj --no-build
+```
+
+5. **Riêng máy A, Staff App:** publish ra `C:\RetailSync\StaffApp`, chép `ca.crt`. Tạo `appsettings.Local.json` với `BaseUrl https://<IP S>:8443/api/v1`, `TokenName staff_dn1`. Mở `StaffApp.exe`; tiêu đề phải hiện `STORE-DN1 | Staff: staff_dn1`, giao diện tiếng Việt.
+
+### B4. Quay hình và tiếng
+
+- **Máy S:** OBS Studio quay toàn màn hình (bảng điều khiển là phần chiếu chính), 1920×1080, 30 fps. Micro cài áo hoặc micro điện thoại cho Kiệt, thu thành một track riêng.
+- **Máy A và B:** OBS (hoặc Xbox Game Bar, `Win+Alt+R`) quay màn hình Demo POS và Staff App. Quang ghép hình nhỏ (picture-in-picture) khi dựng.
+- **Một điện thoại** quay cảnh rút dây mạng ở màn 4, để người xem thấy đây là thao tác thật.
+- Tắt thông báo Windows, Zalo, Teams trên cả 3 máy. Bật chế độ không làm phiền.
+- Đầu mỗi đoạn, Quang vỗ tay một lần để dễ khớp hình và tiếng khi dựng.
+
+---
+
+## Phần C. Kịch bản quay và lời dẫn của Kiệt
+
+Lời dẫn là gợi ý, Kiệt nói tự nhiên theo ý mình, không cần đọc từng chữ. Chữ *nghiêng* là thao tác trên màn hình.
+
+### Màn 1: Mở đầu và kiến trúc (2 phút)
+
+*Màn hình: slide sơ đồ kiến trúc, sau đó quay toàn cảnh 3 máy và router.*
+
+> "Xin chào thầy cô và các bạn. Nhóm C1SE.24 xin giới thiệu RetailSync, một middleware khu vực giữa máy POS của nhiều cửa hàng và trụ sở HQ.
+>
+> Bài toán của chuỗi bán lẻ là: mỗi cửa hàng bán hàng liên tục, tồn kho phải đúng từng giây, không được đếm trùng khi mạng chập chờn, và cửa hàng vẫn phải bán được khi mất kết nối về trụ sở. Ngoài ra, hàng sắp hết hạn cần được phát hiện và giảm giá kịp thời, nhưng phải có kiểm soát.
+>
+> Hôm nay nhóm dùng 3 laptop. Máy S là trung tâm khu vực: middleware, cơ sở dữ liệu, cổng POS có xác thực chứng chỉ, và HQ mô phỏng. Máy A là cửa hàng Hải Châu, máy B là cửa hàng Thanh Khê, mỗi máy có một thu ngân thật bán hàng. Chiếc router này đóng vai mạng WAN riêng giữa cửa hàng và trung tâm, không nối Internet.
+>
+> Dữ liệu nằm ở ba nơi: máy POS chỉ giữ hàng đợi khi mất mạng, middleware giữ tồn kho và giao dịch của cả khu vực, còn HQ chỉ nhận tổng doanh số."
+
+### Màn 2: Bán hàng thời gian thực (3 phút)
+
+*Khánh bán 2 Fresh milk ở A → Sang bán một giỏ ở B → hai người bán cùng lúc. Quay bảng điều khiển trên S.*
+
+> "Khánh ở Hải Châu bán 2 hộp sữa tươi. Trên màn hình trung tâm, tồn kho Hải Châu giảm ngay, và hệ thống trừ vào **lô có hạn sớm nhất trước**, gọi là FEFO, để hàng cũ được bán trước. Mỗi thay đổi đều có một dòng nhật ký audit.
+>
+> Sang ở Thanh Khê bán một giỏ nhiều món. Giao dịch của hai cửa hàng đổ về cùng một middleware, nhưng tồn kho mỗi cửa hàng được giữ riêng.
+>
+> Bây giờ hai bạn bấm thanh toán gần như cùng lúc. Cả hai đều thành công và tồn kho đều đúng, vì middleware khóa đúng lô hàng khi trừ, không để hai giao dịch giẫm lên nhau."
+
+### Màn 3: Tin cậy và bảo mật (3 phút)
+
+*Sang gửi lại giao dịch → kịch bản xung đột → chứng chỉ sai → Khánh trả hàng → hủy đơn.*
+
+> "Mạng thật hay bị lỗi giữa chừng, nên POS có thể gửi lại cùng một giao dịch. Sang bấm gửi lại: hệ thống nhận ra trùng, trả về DUPLICATE, tồn kho không đổi. Mỗi giao dịch có một mã duy nhất.
+>
+> Nếu cùng mã đó mà nội dung khác, đây là xung đột, hệ thống từ chối với mã 409 và không thay đổi gì.
+>
+> Về bảo mật: mỗi máy POS có chứng chỉ riêng, kết nối qua TLS hai chiều. Gửi bằng chứng chỉ của máy khác thì bị chặn 403, và lần thử đó được ghi vào audit.
+>
+> Khánh trả lại một món: tồn kho được cộng lại đúng vào lô đã trừ lúc bán. Hủy một đơn chưa có trả hàng: mọi lô trở về như trước. Còn đơn đã có trả hàng thì không cho hủy, để số liệu không bị sai."
+
+### Màn 4: Mất mạng WAN (3 phút)
+
+*Quay bằng điện thoại cảnh Quang rút dây máy B. Sang bán 3 đơn; Khánh vẫn bán ở A. Cắm lại dây.*
+
+> "Đây là phần nhóm muốn nhấn mạnh nhất. Quang rút dây mạng của cửa hàng Thanh Khê, giống như đường WAN bị đứt.
+>
+> Sang vẫn tiếp tục bán 3 đơn. Máy POS không báo lỗi với khách, mà lưu đơn vào hàng đợi trên ổ đĩa, kể cả khi tắt máy cũng không mất. Trong khi đó, Hải Châu không bị ảnh hưởng gì.
+>
+> Quang cắm lại dây. Máy B tự gửi bù 3 đơn **theo đúng thứ tự**, với đúng mã giao dịch cũ. Trên màn hình trung tâm: đủ 3 giao dịch, không mất, không trùng, tồn kho Thanh Khê đúng."
+
+### Màn 5: Đồng bộ lên HQ (3 phút)
+
+*Quang dùng tab Đồng bộ và HQ: chạy đồng bộ → HQ OFFLINE → bán thêm → HQ ONLINE → gửi snapshot.*
+
+> "Mỗi giờ, middleware gom doanh số thành một batch cho mỗi cửa hàng và gửi lên HQ. Trong demo, nhóm bấm nút cho nhanh. Batch đi từ PENDING sang SENT, rồi ACKED khi HQ xác nhận. Tổng doanh số ở HQ khớp với giao dịch.
+>
+> Bây giờ HQ bị sập. Cửa hàng vẫn bán bình thường: middleware chạy độc lập. Batch mới nằm chờ ở PENDING, ghi số lần thử và lỗi, và thử lại với thời gian chờ tăng dần.
+>
+> HQ hoạt động lại. Các batch được gửi từ cũ đến mới, HQ không cộng trùng nhờ mã batch duy nhất.
+>
+> Còn nếu HQ gửi xuống một bản chụp tồn kho cũ thì sao? Hệ thống từ chối, vì tồn kho thật nằm ở cửa hàng; ghi đè bằng số cũ sẽ làm sai. Nhờ chỉ gửi tổng theo sản phẩm, dữ liệu lên HQ giảm gần 99% so với gửi từng giao dịch."
+
+### Màn 6: Cận hạn, dự báo, đề xuất và giảm giá (5 phút)
+
+*Quang chạy job cận hạn và job đề xuất → hạ mức giảm tối đa, chạy lại → Khánh mở Staff App: cảnh báo, tra mã vạch, đề xuất, Chấp nhận → Demo POS bán giá giảm → tab Giảm giá.*
+
+> "Mỗi đêm, hệ thống tự chạy ba việc: kiểm tra hàng cận hạn, dự báo nhu cầu, và đưa ra đề xuất. Trong demo, Quang chạy ngay. Các lô sữa và bánh sắp hết hạn được cảnh báo, và hệ thống đề xuất giảm giá, thanh lý hoặc điều chuyển sang cửa hàng khác, kèm lý do.
+>
+> Nhưng đề xuất của máy không được đi thẳng tới nhân viên. Mọi đề xuất phải qua **guardrail**, tức các quy tắc kinh doanh do quản lý đặt: giảm tối đa bao nhiêu phần trăm, giá không dưới mức nào, hàng còn bao nhiêu ngày. Quang hạ mức giảm tối đa xuống rồi chạy lại: đề xuất vượt ngưỡng bị kéo về giới hạn, hoặc bị chặn và nhân viên không nhìn thấy.
+>
+> Khánh là nhân viên Hải Châu, mở Staff App. Cảnh báo được xếp theo độ khẩn: hàng đã hết hạn lên đầu. Tra một mã vạch đã hết hàng ở Hải Châu: app chỉ ra cửa hàng gần nhất còn hàng, Thanh Khê đứng đầu, kèm khoảng cách, để nhân viên hướng dẫn khách.
+>
+> Khánh mở một đề xuất giảm giá, xem lý do và kết quả guardrail, rồi bấm Chấp nhận. Quyết định được lưu kèm người và thời gian, không thể đổi lại.
+>
+> Điểm mới là: khi nhân viên chấp nhận giảm giá, **máy POS tự cập nhật giá** trong vòng một phút. Khánh bán món đó: giá niêm yết bị gạch ngang, khách trả giá đã giảm. Đúng như cửa hàng tiện lợi đổi giá hàng cận hạn vào đầu ngày.
+>
+> Trên tab Giảm giá, món vừa bán hiện 'Đã bán giá giảm: Có'. Chuyển sang 'Tất cả cửa hàng', nhân viên thấy cả giảm giá đang áp dụng ở Thanh Khê, để báo cho khách nơi nào đang bán rẻ hơn."
+
+### Màn 7: Audit, doanh thu và số liệu đo (2 phút)
+
+*Quang mở nhật ký audit (Auditor) → tab Doanh thu → slide bảng số liệu (dựng chèn phụ đề).*
+
+> "Mọi thay đổi vừa rồi, từ bán hàng, từ chối, gửi trùng, đồng bộ, guardrail đến quyết định của nhân viên, đều được ghi lại và chỉ người kiểm toán mới xem được.
+>
+> Tab Doanh thu cho thấy doanh thu thuần theo ngày, theo danh mục và so sánh giữa các cửa hàng. Hệ thống tính theo thời điểm POS bán thật, nên đơn gửi bù sau khi mất mạng vẫn được tính đúng ngày.
+>
+> Cuối cùng là các số liệu nhóm đo bằng bộ mô phỏng:
+> - độ trễ POS ở phân vị 95 là khoảng 227 mili giây khi có TLS hai chiều và độ trễ mạng 50 mili giây, dưới mục tiêu 500;
+> - tra cứu liên cửa hàng khoảng 137 mili giây;
+> - dữ liệu gửi HQ giảm gần 99%, 100% batch được xác nhận;
+> - dự báo tốt hơn phương pháp cơ sở ở cả ba nhóm hàng;
+> - phát hiện cận hạn đúng 32 trên 32 lô;
+> - [tỉ lệ guardrail và tỉ lệ chấp nhận: điền từ `Guardrail_Metrics.md` sau khi PB-44 xong].
+>
+> Cảm ơn thầy cô và các bạn đã theo dõi."
+
+---
+
+## Phần D. Kiểm tra sau mỗi đoạn và cách quay lại
+
+| Màn | Đạt khi | Lỗi thường gặp và cách xử lý |
+|---|---|---|
+| 2 | Tồn giảm đúng, lô sớm nhất bị trừ, có audit | Bảng điều khiển chưa làm mới: chờ 5 giây hoặc bấm Làm mới |
+| 3 | DUPLICATE, 409, 403 hiện đúng | 403 không hiện: kiểm tra đã chọn đúng kịch bản F12 "chứng chỉ terminal khác" |
+| 4 | Đủ 3 đơn gửi bù, đúng thứ tự | Máy B không tự gửi: chờ tối đa 5 giây sau khi cắm dây; vẫn không thì quay lại màn 4 |
+| 5 | ACKED, PENDING khi HQ OFFLINE, gửi bù khi ONLINE | Chưa có batch: phải bán ít nhất 1 đơn trước khi bấm Chạy đồng bộ |
+| 6 | Có đề xuất, ADJUSTED/BLOCKED, POS bán giá giảm | Chưa có giá giảm trên POS: chờ đủ 60 giây; nếu quay lại màn 6 thì reset dữ liệu trước |
+| 7 | Audit đủ, tab Doanh thu có số hôm nay | — |
+
+Lỗi nặng (Docker hoặc SQL Server trên S hỏng): dừng quay, chạy lại B1.4 rồi B1.5 (token mới), chép lại token sang A và B, quay lại từ màn bị hỏng.
+
+Cách tránh hai lỗi đã biết, nếu PB-41 chưa sửa xong lúc quay: script dự phòng phải truyền `-BaseUrl https://<IP S>:8443/api/v1`; trong Staff App, chờ có kết quả rồi mới bấm tiếp, không đóng app giữa chừng.
+
+---
+
+## Phụ lục: dự phòng khi quay và dựng
+
+### 1. Dự phòng ngoài các lỗi trong Phần D
+
+| Sự cố | Xử lý |
 |---|---|
-| Recorder | Windows Game Bar (`Win+G`) on S, 1080p 30 fps, microphone on |
-| Narration | Kiệt, live over the recording, not dubbed afterwards — a live voice matches the live clicks |
-| Console | Full screen on S, not windowed, so tab labels are legible |
-| A and B | Capture only when the act needs them; cut to them, do not split-screen (text becomes unreadable) |
-| Clock | Show the console status line so timestamps in the video match the audit entries |
+| A hoặc B không gọi được S | Kiểm IP, firewall cổng 9443/8443, mạng Windows ở chế độ Private; chuyển sang laptop dự phòng đã cài sẵn như A hoặc B |
+| Lỗi chứng chỉ | Tạo lại chứng chỉ trên S sao cho SAN có IP của S, chép `ca.crt` sang A/B, quay lại đoạn bị ảnh hưởng; không tạo lại CA |
+| Bảng điều khiển không mở | Quay bằng các script một thao tác (`sync_run.ps1`, `hq_mode.ps1`, `run_job.ps1`, `cross_store.ps1`, `audit_tail.ps1`) và quay terminal |
+| Router hoặc mạng riêng hỏng | Dùng hotspot dự phòng; nếu không còn cách nào, chạy hai Demo POS trên máy S và mô phỏng mất WAN bằng cách dừng pos-gateway |
+| Micro hỏng | Thu bằng điện thoại, đồng bộ sóng khi dựng; không lồng tiếng sau |
+| Hết giờ | Bỏ bước guardrail của màn 6 và bước bán đồng thời của màn 2, đúng thứ tự Kiệt đã duyệt |
+| Thiếu hình kiến trúc | Repo không có file hình; xuất hình từ tài liệu thiết kế ra PNG trước ngày quay và để ngoài repo |
+| Ổ quay đầy | Chuyển sang ổ ngoài; kiểm dung lượng trước mỗi màn |
 
----
+### 2. Quy tắc dữ liệu giữa các đoạn
 
-## 4. Shot list
+- Sau mỗi lần reset, chạy thêm job recommendation: B1.4 chỉ chạy forecast, nên tập đề xuất `PENDING` cho màn 6 phải được tạo trước khi quay.
+- Kiểm số dòng sau reset: 27 dòng dự báo (9 SKU × 3 cửa hàng). Nếu PB-52 merge và danh mục thành 30 sản phẩm, con số là 90 và mọi số trong `docs/reports/` phải được đo lại trước khi quay màn 6, 7.
+- Không quay trên `RTS_DB` và không quay trên trạng thái cuối của buổi hồi quy 30/11.
+- Không sửa số trong báo cáo cho khớp video; video phải đọc đúng số trong `docs/reports/`.
+- Giữ take cũ của đoạn vừa quay lại cho đến khi dựng xong, để đối chiếu nếu Kiệt đổi lời dẫn.
 
-Record in this order, in one take per act where possible. Name files `act-<n>-<take>.mp4`.
+### 3. Dựng và xuất bản cuối
 
-### 4.0 Slate (20 s)
-
-Console full screen, all five tabs visible. Narration: three machines, one private WAN, what each plays. No clicking.
-
-### 4.1 Act 1 — architecture (60 s)
-
-Show the architecture diagram, then the console. State the three data locations: POS has no business database, middleware holds the region, HQ holds SKU totals only.
-
-**There is no diagram asset in the repository** (`docs/` holds no `.png`, `.svg` or `.drawio`; the diagrams live inside the Word design documents, which are not committed). Before recording, export the architecture figure from `C1SE.24_ArchitectureDesign_v1.5_3.docx` to PNG and keep it outside the repo in a local `video/` folder. Do not plan a shot around a file that has to be produced on the day.
-
-### 4.2 Act 2 — live selling (90 s)
-
-1. A sells 2 × `SKU-0001`; cut to S: stock 40 → 38, the earliest-expiry batch reduced first, one audit line appears.
-2. B sells a multi-item basket; cut to S: the Thanh Khê rows appear in the same grid.
-3. A and B sell almost simultaneously; both `OK`, each store's stock independent.
-
-**On-screen proof to hold for two seconds:** the `current_stock` value and the batch row.
-
-### 4.3 Act 3 — reliability and security (90 s)
-
-1. B presses **Gửi lại**: `200 DUPLICATE / DUPLICATE_IGNORED`, stock unchanged.
-2. Resend with different content: `409 CONFLICT`.
-3. Send with the other terminal's certificate: `403 FORBIDDEN`, and the `EVENT_REJECTED` audit line on S.
-4. A returns one item: stock goes back up on the same batch.
-5. A cancels a sale: batches restored.
-
-Do **not** script the "cancel a sale that has returns" case; it is API-only and would need a console moment the video does not have.
-
-### 4.4 Act 4 — WAN outage (90 s)
-
-1. Show A and B both selling, then pull B's cable on camera.
-2. B sells 3 orders; each shows as queued.
-3. A keeps selling; Hải Châu unaffected.
-4. Plug the cable back; B drains 3 orders in order, same transaction ids.
-5. Cut to S: exactly 3 transactions, none lost, none duplicated, Thanh Khê stock correct.
-
-This act is the strongest segment. Do not cut the drain — the automatic catch-up is the point.
-
-### 4.5 Act 5 — HQ sync (90 s)
-
-1. Press **Chạy đồng bộ**: each store one batch `PENDING → SENT → ACKED`; HQ totals match.
-2. Switch HQ `OFFLINE`; A and B sell more; batches stay `PENDING` with attempts and last error.
-3. Switch HQ `ONLINE`; batches ACK oldest-first; totals right, nothing double-counted.
-4. Send a snapshot from HQ: `422 SNAPSHOT_REJECTED`, stock unchanged, audit line.
-
-### 4.6 Act 6 — near-expiry, forecast, recommendations (150 s)
-
-1. Run the near-expiry job, then the recommendation job. Alerts for the Dairy/Bakery batches; proposals with reasons.
-2. Lower the guardrail max discount, rerun: the over-limit proposal is `ADJUSTED` or `BLOCKED` and disappears from the staff list.
-3. Cut to A, Staff App **Cảnh báo cận hạn**: `EXPIRED` first, then fewest days.
-4. Barcode lookup of a product sold out at Hải Châu: own batches and expiry, then nearby stores **nearest first — Sơn Trà (~1.7 km) above Thanh Khê (~4.4 km)**, each row carrying its distance.
-5. Open a proposal, read reason and guardrail result, **Chấp nhận**; reject another. Press Accept again: "already decided".
-6. Staff App **Giảm giá**, switch *Cửa hàng của tôi* / *Tất cả cửa hàng*.
-
-### 4.7 Act 7 — dashboard, audit and numbers (90 s)
-
-1. **Doanh thu** tab (token `admin`), scope **Toàn hệ thống**, bucket **Ngày**: the three charts and the KPI. Say plainly that the 90-day history is simulated by `tools/history-generator`, not transactions from this demo.
-2. Switch to one store: line and pie narrow, the bar chart still compares all three — say this is by design, so nobody reads it as a bug.
-3. **Làm mới**: the status line reads "Làm mới lúc HH:mm:ss. Không có lỗi."
-4. Audit log with the Auditor token: every change from acts 2–6 is there.
-5. Show the measured-numbers table, reading each figure from `docs/reports/` — p95 latency 226.60 ms, 98.91% reduction, 100% ACK, WAPE vs seasonal naive, near-expiry 32/32, guardrail PASSED/ADJUSTED/BLOCKED, staff acceptance 60% (6/10), E2E reconciliation.
-
-### 4.8 Outro (20 s)
-
-Group shot, the tag `v1.0` on screen in a terminal.
-
----
-
-## 5. If a new feature merges before the freeze
-
-If PB-51/52/53 land before 12:00 30/11, add:
-
-- a Vietnamese demo catalogue segment in act 2 (30 products, six categories) — but only after resetting `RTS_DB_DEMO` with the new seed, and only after re-running the forecast and recommendation jobs, because the report figures are measured on the 9-SKU seed;
-- a Dự báo tab segment in act 6 — only if the tab and both charts exist and the table sorts shortage → surplus → balanced;
-- the Vietnamese duplicate sentence in act 3 — replace the English `Transaction already recorded` shot.
-
-Re-record affected acts entirely; do not splice half an act from before the change and half from after.
-
----
-
-## 6. Contingencies
-
-| Failure | Action |
-|---|---|
-| A or B cannot reach S | Check IP, firewall, network profile Private. Switch to the spare laptop already configured |
-| Certificate error | Regenerate on S, copy to A/B, retry the act. Rehearsed, so unlikely |
-| Docker or SQL Server on S dies | Cut to the rehearsal recording of that act and keep the narration live. Say so plainly |
-| Console will not start | Fall back to the one-action scripts (`sync_run.ps1`, `hq_mode.ps1`, `run_job.ps1`, `cross_store.ps1`, `audit_tail.ps1`) and film the terminal |
-| Out of time | Drop act 6 step 2 (guardrail) and act 2 step 3 (simultaneous sales) — this is the order Kiệt approved in `Demo_Plan.docx` |
-
----
-
-## 7. Data rules for the recording
-
-- Record on a **freshly reset** `RTS_DB_DEMO`: stock 40/25/15, clean alert set, clean proposal set, new forecast.
-- Never record on the regression end-state from 30/11.
-- Reset and re-seed **between takes** if a sale changed the numbers the narration reads.
-- Never record against `RTS_DB`.
-
----
-
-## 8. Editing
-
-1. Cut by act; keep the act titles as lower-third text, Vietnamese.
-2. Keep live narration; do not replace with text cards.
-3. Blur or crop any token, certificate fingerprint, or password that appears.
-4. Target 12–15 minutes final. Anything longer loses the viewer; the mentor Q&A is separate.
-5. Export 1080p H.264, plus a 720p copy for upload.
-6. Store the master outside the repo (a local `video/` folder) and put only the link in the report.
-
----
-
-## 9. Done when
-
-- Every act 2–7 has a recorded segment on the `v1.0` commit.
-- The numbers spoken in act 7 match `docs/reports/` exactly.
-- A dry review pass by Kiệt is done before 1/12 evening.
-- The final cut exists in three places: local master, cloud copy, and the link in the report.
+1. Ghép theo màn; tiêu đề màn dạng lower-third tiếng Việt, không thay lời dẫn bằng text card.
+2. Giữ lời dẫn trực tiếp; chỉ cắt khoảng lặng và thao tác lặp, không cắt bằng chứng.
+3. Che token, mật khẩu, fingerprint chứng chỉ và thông báo có tên máy cá nhân nếu xuất hiện.
+4. Bản dựng 15–18 phút; nếu dài hơn 20 phút thì cắt phần lặp, không cắt bằng chứng.
+5. Xuất 1080p H.264 và thêm bản 720p để tải lên; kiểm âm lượng; thêm phụ đề `.srt` nếu kịp.
+6. Lưu master ngoài repo; chỉ đưa link vào báo cáo, không đưa đường dẫn cá nhân vào tài liệu.

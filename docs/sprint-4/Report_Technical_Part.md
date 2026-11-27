@@ -183,4 +183,4 @@ Fresh evidence, not a re-quote of the simulator report:
 | Regression runbook and evidence | `docs/sprint-4/Regression_v1.0_Runbook.md`, `docs/sprint-4/Regression_Evidence_v1.0.md` |
 | UAT list and bug list | `docs/sprint-4/UAT_Capstone_1_List.md`, `docs/sprint-4/Bug_List_PB-38-3.md` |
 | Test-case review and re-test notes | `docs/sprint-4/Review_Test_Case_Sprint2-3.md`, `docs/sprint-4/Retest_Skipped_Cases.md`, `docs/sprint-4/Bao_Cao_Kiem_Thu_Sang_26-11.md` |
-| Video plan | `docs/sprint-4/Video_Demo_Plan.md` |
+| Video plan | `docs/sprint-4/Video_Demo_Plan.md` — Kiet's Vietnamese plan of record (Phần A–D); the Dự báo tab in màn 6 is recorded only if PB-53 merges before the 12:00 30/11 freeze |

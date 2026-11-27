@@ -209,16 +209,18 @@ If the three do not merge by 12:00 30/11, they are left unticked with that sente
 
 Before the freeze, Khanh and Sang must say in the team chat which branch, if any, carries PB-51/52/53; if none does, those lines are dropped from the UAT and the report records the gap (§6 of `Report_Technical_Part.md`).
 
-### 11.2 Other documents the briefs reference that the repo does not have
+### 11.2 Other documents the briefs reference
 
 | Path as written in the brief | Referenced by | In repo? |
 |---|---|---|
 | `docs/Demo_Plan.md` | `Huong_Dan_Trien_Khai.md`, `Quang.md` | No, at any commit |
-| `docs/sprint-4/Video_Demo_Plan.md` | `Quang.md` | No — written fresh as part of this deliverable |
+| `docs/sprint-4/Video_Demo_Plan.md` | `Quang.md` | Yes — Kiet's Vietnamese plan of record (Phần A–D, khoảng 20 phút), committed in this PR |
 | `docs/mentor-review-27-11/` | `Quang.md` (27 Nov) | No |
 | `docs/Demo_Setup_14-11.md` | `Quang.md` (27 Nov, "step 7") | No; `docs/demo/Sprint_3_Demo.md` §1.4 covers reset + smoke |
 | `Kiem_Thu_Test_Case.md` | `Huong_Dan_Trien_Khai.md`, `Quang.md` | No — it exists only in a local working folder outside the repository |
 | `scripts/demo/run_client_tests.ps1` | Quang's own `Retest_Skipped_Cases.md` §3 | No; only `run_console_tests.ps1`, hard-coded to the demo console |
+
+The video plan is no longer a missing path: `docs/sprint-4/Video_Demo_Plan.md` is Kiet's Vietnamese plan of record, and it is the plan this UAT and the report point at. Its màn 6 covers the forecast; the **Dự báo** tab is recorded only if PB-53 merges before the 12:00 30/11 freeze, otherwise the video shows the forecast grid in the demo console's Job tab and says the tab is not in the build.
 
 The three Sprint 4 notes Quang already wrote (`Bao_Cao_Kiem_Thu_Sang_26-11.md`, `Retest_Skipped_Cases.md`, `Review_Test_Case_Sprint2-3.md`) exist only in the old checkout on `docs/no-deps-and-audit-followups` and have never been merged; they are copied into this branch under `docs/sprint-4/` so the report can cite them. Each carries a banner saying it is a 26/11 historical record, and that its `evidence/` files and helper scripts are not in the repository.
 
