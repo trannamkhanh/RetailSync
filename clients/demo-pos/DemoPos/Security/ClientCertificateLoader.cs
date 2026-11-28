@@ -50,7 +50,7 @@ public static class ClientCertificateLoader
                 KeyPath = keyPath,
                 CertificateExists = crtExists,
                 KeyExists = keyExists,
-                Error = $"Missing {(crtExists ? "key" : "certificate")} for {posId}.",
+                Error = $"Thiếu {(crtExists ? "khóa riêng" : "chứng chỉ")} cho máy POS {posId}.",
             };
         }
 
@@ -73,7 +73,7 @@ public static class ClientCertificateLoader
                     KeyPath = keyPath,
                     CertificateExists = true,
                     KeyExists = true,
-                    Error = $"Certificate for {posId} has no private key.",
+                    Error = $"Chứng chỉ của máy POS {posId} không có khóa riêng.",
                 };
             }
 
@@ -96,7 +96,7 @@ public static class ClientCertificateLoader
                 KeyPath = keyPath,
                 CertificateExists = true,
                 KeyExists = true,
-                Error = $"Could not load the certificate for {posId}: {error.Message}",
+                Error = $"Không tải được chứng chỉ của máy POS {posId}: {error.Message}",
             };
         }
     }

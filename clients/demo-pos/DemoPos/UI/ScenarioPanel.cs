@@ -20,7 +20,7 @@ public sealed class ScenarioPanel : UserControl
     {
         var group = new GroupBox
         {
-            Text = "Kịch bản (F12) — mỗi nút gửi một request thật và hiện mã mong đợi",
+            Text = "Kịch bản kiểm thử (F12) — mỗi nút gửi một yêu cầu thật và hiện mã phản hồi mong đợi",
             Dock = DockStyle.Fill,
             Padding = new Padding(8),
             Font = new Font("Segoe UI", 9F),
@@ -34,13 +34,13 @@ public sealed class ScenarioPanel : UserControl
             Padding = new Padding(2),
         };
 
-        Add(flow, ScenarioKind.Conflict, "Conflict → 409 CONFLICT");
+        Add(flow, ScenarioKind.Conflict, "Trùng mã khác nội dung → 409 CONFLICT");
         Add(flow, ScenarioKind.InsufficientStock, "Bán 999 → 409 INSUFFICIENT_STOCK");
-        Add(flow, ScenarioKind.UnregisteredStore, "Store lạ → 422 UNREGISTERED");
-        Add(flow, ScenarioKind.ReturnLimit, "Trả quá số → 409 RETURN_QTY_EXCEEDED");
-        Add(flow, ScenarioKind.WrongCertificate, "Sai chứng chỉ → 403");
-        Add(flow, ScenarioKind.NoCertificate, "Không chứng chỉ → 400 gateway");
-        Add(flow, ScenarioKind.SkipGateway, "Bỏ qua gateway → 403");
+        Add(flow, ScenarioKind.UnregisteredStore, "Cửa hàng lạ → 422 UNREGISTERED_STORE_OR_POS");
+        Add(flow, ScenarioKind.ReturnLimit, "Trả quá số lượng → 409 RETURN_QTY_EXCEEDED");
+        Add(flow, ScenarioKind.WrongCertificate, "Sai chứng chỉ → 403 FORBIDDEN");
+        Add(flow, ScenarioKind.NoCertificate, "Không chứng chỉ → 400 cổng POS");
+        Add(flow, ScenarioKind.SkipGateway, "Bỏ qua cổng POS → 403 FORBIDDEN");
 
         _mockButton = new Button
         {

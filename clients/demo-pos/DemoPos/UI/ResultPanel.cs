@@ -1,4 +1,5 @@
 using DemoPos.Models;
+using DemoPos.Services;
 
 namespace DemoPos.UI;
 
@@ -86,7 +87,7 @@ public sealed class ResultPanel : UserControl
         _time.Text = string.Empty;
 
         _retry.Dock = DockStyle.Fill;
-        _retry.Text = "Retry";
+        _retry.Text = "Thử lại";
         _retry.Visible = false;
         _retry.Click += (_, _) => RetryRequested?.Invoke(this, EventArgs.Empty);
 
@@ -113,12 +114,12 @@ public sealed class ResultPanel : UserControl
             _ => (ErrorColor, Color.FromArgb(255, 244, 224)),
         };
 
-        _outcome.Text = result.Outcome == PosOutcome.OK ? "OK" : result.Outcome.ToString();
+        _outcome.Text = PosDisplayNames.Outcome(result.Outcome);
         _code.Text = result.Code;
-        _message.Text = result.Message;
+        _message.Text = PosDisplayNames.ServerMessage(result.Code, result.Message);
         _stock.Text = result.CurrentStock.Count == 0
             ? string.Empty
-            : "current_stock: " + result.StockText;
+            : "Tồn kho hiện tại: " + result.StockText;
         _time.Text = $"{result.ElapsedMs:0} ms · HTTP {result.HttpStatus}";
         _retry.Visible = result.CanRetry;
         ApplyColors(color, background);
@@ -126,7 +127,7 @@ public sealed class ResultPanel : UserControl
 
     public void ShowInfo(string message)
     {
-        _outcome.Text = "INFO";
+        _outcome.Text = "Thông báo";
         _code.Text = string.Empty;
         _message.Text = message;
         _stock.Text = string.Empty;

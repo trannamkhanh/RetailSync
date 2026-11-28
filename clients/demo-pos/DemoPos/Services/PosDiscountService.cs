@@ -68,7 +68,7 @@ public sealed class PosDiscountClient : IDisposable
                     IsSuccess = false,
                     HttpStatus = status,
                     ElapsedMs = elapsed,
-                    Error = $"{status} {parsedError.Code}: {parsedError.Message}",
+                    Error = $"{status} {parsedError.Code}: {PosDisplayNames.ServerMessage(parsedError.Code, parsedError.Message)}",
                 };
             }
 
@@ -90,7 +90,7 @@ public sealed class PosDiscountClient : IDisposable
                     IsSuccess = false,
                     HttpStatus = status,
                     ElapsedMs = elapsed,
-                    Error = parseError ?? "Invalid discount response.",
+                    Error = parseError ?? "Phản hồi danh sách giảm giá không hợp lệ.",
                 };
             }
 
@@ -112,7 +112,7 @@ public sealed class PosDiscountClient : IDisposable
                 IsSuccess = false,
                 HttpStatus = 0,
                 ElapsedMs = elapsed,
-                Error = "No answer within 5 seconds.",
+                Error = "Không có phản hồi trong 5 giây.",
             };
         }
         catch (HttpRequestException error)
@@ -125,7 +125,7 @@ public sealed class PosDiscountClient : IDisposable
                 IsSuccess = false,
                 HttpStatus = 0,
                 ElapsedMs = elapsed,
-                Error = $"Could not reach the POS gateway: {error.Message}",
+                Error = $"Không kết nối được tới cổng POS: {error.Message}",
             };
         }
     }

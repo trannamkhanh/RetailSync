@@ -13,6 +13,11 @@ namespace DemoConsole.UI;
 /// </summary>
 internal sealed class MainForm : Form
 {
+    private sealed record CategoryOption(string Code)
+    {
+        public override string ToString() => ConsoleDisplayNames.Category(Code);
+    }
+
     private const int TransactionLimit = 30;
     private const int AuditLimit = 30;
     private const int SyncBatchLimit = 40;
@@ -194,10 +199,10 @@ internal sealed class MainForm : Form
 
         // --- Tab 2: transactions and audit ----------------------------------
         _activityStatus = StatusLine();
-        _transactionGrid = Theme.Grid(_font, ("txn", "Giao dịch", 30), ("store", "Cửa hàng", 14), ("pos", "POS", 14),
-            ("type", "Loại", 14), ("status", "TT", 8), ("time", "Giờ (UTC+7)", 13), ("batch", "sync_batch_id", 22));
-        _auditGrid = Theme.Grid(_font, ("time", "Giờ (UTC+7)", 12), ("action", "Action", 18),
-            ("key", "Entity key", 22), ("details", "Chi tiết", 48));
+        _transactionGrid = Theme.Grid(_font, ("txn", "Giao dịch", 30), ("store", "Cửa hàng", 14), ("pos", "Máy POS", 14),
+            ("type", "Loại", 14), ("status", "Trạng thái", 12), ("time", "Giờ (UTC+7)", 13), ("batch", "Mã lô đồng bộ", 22));
+        _auditGrid = Theme.Grid(_font, ("time", "Giờ (UTC+7)", 12), ("action", "Hành động", 18),
+            ("key", "Khóa đối tượng", 22), ("details", "Chi tiết", 48));
         var activity = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
         activity.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         activity.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
@@ -205,19 +210,19 @@ internal sealed class MainForm : Form
         activity.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
         activity.Controls.Add(Title($"{TransactionLimit} giao dịch mới nhất (không tính lịch sử HIST-)"), 0, 0);
         activity.Controls.Add(_transactionGrid, 0, 1);
-        activity.Controls.Add(Title($"{AuditLimit} dòng audit mới nhất (GET /audit-logs, auditor)"), 0, 2);
+        activity.Controls.Add(Title($"{AuditLimit} dòng nhật ký kiểm toán mới nhất (GET /audit-logs, kiểm toán)"), 0, 2);
         activity.Controls.Add(_auditGrid, 0, 3);
-        tabs.TabPages.Add(Page("Giao dịch và audit", _activityStatus, activity));
+        tabs.TabPages.Add(Page("Giao dịch và kiểm toán", _activityStatus, activity));
 
         // --- Tab 3: sync and HQ ---------------------------------------------
         _syncStatus = StatusLine();
         _runSync = Theme.ActionButton("Chạy đồng bộ", _font + 1);
         _runSync.Click += async (_, _) => await RunSyncAsync();
-        _sendSnapshot = Theme.ActionButton("Gửi snapshot", _font + 1);
+        _sendSnapshot = Theme.ActionButton("Gửi bản chụp HQ", _font + 1);
         _sendSnapshot.Click += async (_, _) => await SendSnapshotAsync();
         var syncButtons = ButtonRow(_runSync);
         syncButtons.Controls.Add(Theme.Line(_font, bold: true));
-        syncButtons.Controls[^1].Text = "   HQ:";
+        syncButtons.Controls[^1].Text = "   Chế độ HQ:";
         foreach (var mode in HqModes)
         {
             var button = Theme.ActionButton(mode, _font);
@@ -231,10 +236,10 @@ internal sealed class MainForm : Form
         _syncFeatureLine.ForeColor = Theme.Warn;
         _hqModeLine = Theme.Line(_font, bold: true);
         _hqTotalLine = Theme.Line(_font, bold: true);
-        _syncGrid = Theme.Grid(_font, ("id", "sync_batch_id", 26), ("store", "Cửa hàng", 12), ("status", "Trạng thái", 11),
+        _syncGrid = Theme.Grid(_font, ("id", "Mã lô đồng bộ", 26), ("store", "Cửa hàng", 12), ("status", "Trạng thái", 13),
             ("attempts", "Lần thử", 8), ("txns", "GD", 6), ("error", "Lỗi gần nhất", 22), ("retry", "Thử lại lúc", 12),
-            ("acked", "ACK lúc", 12));
-        _hqBatchGrid = Theme.Grid(_font, ("id", "Batch ở HQ", 30), ("store", "Cửa hàng", 14), ("txns", "GD", 8),
+            ("acked", "Xác nhận lúc", 12));
+        _hqBatchGrid = Theme.Grid(_font, ("id", "Lô ở HQ", 30), ("store", "Cửa hàng", 14), ("txns", "GD", 8),
             ("received", "Nhận lúc (UTC+7)", 18), ("dups", "Trùng", 8));
         _hqTotalGrid = Theme.Grid(_font, ("store", "Cửa hàng", 16), ("sku", "SKU", 14), ("sold", "Bán", 10),
             ("returned", "Trả", 10), ("revenue", "Doanh thu ròng", 18));
@@ -252,7 +257,7 @@ internal sealed class MainForm : Form
         sync.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
         sync.Controls.Add(syncButtons, 0, 0);
         sync.Controls.Add(_syncFeatureLine, 0, 1);
-        sync.Controls.Add(Title("sync_batch ở middleware (SQL chỉ đọc)"), 0, 2);
+        sync.Controls.Add(Title("Lô đồng bộ ở middleware (SQL chỉ đọc)"), 0, 2);
         sync.Controls.Add(_syncGrid, 0, 3);
         var hqHeader = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = true };
         hqHeader.Controls.Add(_hqModeLine);
@@ -271,10 +276,18 @@ internal sealed class MainForm : Form
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
             Font = Theme.Regular(_font),
-            Width = (int)(_font * 11),
+            Width = (int)(_font * 13),
             Margin = new Padding(16, 8, 4, 4),
         };
-        _thresholdCategory.Items.AddRange(new object[] { "Dairy", "Bakery", "Dry goods" });
+        _thresholdCategory.Items.AddRange(new object[]
+        {
+            new CategoryOption("Dairy"),
+            new CategoryOption("Bakery"),
+            new CategoryOption("Dry goods"),
+            new CategoryOption("Beverages"),
+            new CategoryOption("Snacks"),
+            new CategoryOption("Frozen"),
+        });
         _thresholdCategory.SelectedIndex = 0;
         _thresholdDays = new NumericUpDown
         {
@@ -295,10 +308,10 @@ internal sealed class MainForm : Form
         _jobFeatureLine.ForeColor = Theme.Warn;
         _alertGrid = Theme.Grid(_font, ("store", "Cửa hàng", 12), ("sku", "SKU", 11), ("name", "Sản phẩm", 18),
             ("batch", "Lô", 24), ("expiry", "Hạn", 12), ("days", "Còn (ngày)", 9), ("qty", "SL", 7),
-            ("type", "Loại", 13), ("status", "TT", 8));
+            ("type", "Loại", 13), ("status", "Trạng thái", 10));
         _forecastGrid = Theme.Grid(_font, ("store", "Cửa hàng", 12), ("sku", "SKU", 11), ("name", "Sản phẩm", 18),
             ("horizon", "Số ngày", 8), ("demand", "Nhu cầu dự báo", 13), ("gap", "Thừa(+)/thiếu(-)", 13),
-            ("balance", "Kết luận", 12), ("model", "Mô hình", 12), ("at", "Lúc (UTC+7)", 12));
+            ("balance", "Trạng thái", 12), ("model", "Mô hình", 12), ("at", "Lúc (UTC+7)", 12));
         _forecastEmpty = Theme.Line(_font);
         _forecastEmpty.ForeColor = Theme.Muted;
         var jobs = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6 };
@@ -317,7 +330,7 @@ internal sealed class MainForm : Form
         forecastHeader.Controls.Add(_forecastEmpty);
         jobs.Controls.Add(forecastHeader, 0, 4);
         jobs.Controls.Add(_forecastGrid, 0, 5);
-        tabs.TabPages.Add(Page("Job", _jobStatus, jobs));
+        tabs.TabPages.Add(Page("Tác vụ", _jobStatus, jobs));
 
         // --- Tab 5: revenue dashboard (PB-49) -------------------------------
         // Its own timer: see DashboardRefreshSeconds. It is deliberately absent from
@@ -826,7 +839,13 @@ internal sealed class MainForm : Form
                 _transactionChanges.Update(
                     transactions.ToDictionary(row => row.TxnId, row => $"{row.Status}|{row.SyncBatchId}"), now);
                 GridFiller.Fill(_transactionGrid, transactions.Select(row => new GridRow(row.TxnId,
-                    new object?[] { row.TxnId, row.StoreId, row.PosId, row.TxnType, row.Status, LocalTime(row.CreatedAtUtc), row.SyncBatchId ?? "-" },
+                    new object?[]
+                    {
+                        row.TxnId, row.StoreId, row.PosId,
+                        ConsoleDisplayNames.TransactionType(row.TxnType),
+                        ConsoleDisplayNames.TransactionStatus(row.Status),
+                        LocalTime(row.CreatedAtUtc), row.SyncBatchId ?? "-",
+                    },
                     _transactionChanges.IsHighlighted(row.TxnId, now) ? Theme.Changed : null)).ToList());
             }
             catch (Exception error)
@@ -894,7 +913,7 @@ internal sealed class MainForm : Form
                 GridFiller.Fill(_syncGrid, batches.Select(row => new GridRow(row.SyncBatchId,
                     new object?[]
                     {
-                        row.SyncBatchId, row.StoreId, row.Status, row.Attempts, row.TxnCount,
+                        row.SyncBatchId, row.StoreId, ConsoleDisplayNames.SyncStatus(row.Status), row.Attempts, row.TxnCount,
                         row.LastError ?? "-", row.NextRetryAtUtc is { } retry ? LocalTime(retry) : "-",
                         row.AckedAtUtc is { } acked ? LocalTime(acked) : "-",
                     },
@@ -932,7 +951,7 @@ internal sealed class MainForm : Form
                         new object?[] { t.StoreId, t.Sku, t.SoldQty, t.ReturnedQty, t.NetRevenue.ToString("N0", CultureInfo.InvariantCulture) },
                         _hqTotalChanges.IsHighlighted(key, now) ? Theme.Changed : null);
                 }).ToList());
-                _hqTotalLine.Text = $"   Tổng ở HQ: {view.Batches.Count} batch, {view.Batches.Sum(b => b.TxnCount)} giao dịch, bán {view.Totals.Sum(t => t.SoldQty)}, trả {view.Totals.Sum(t => t.ReturnedQty)}, doanh thu ròng {view.Totals.Sum(t => t.NetRevenue).ToString("N0", CultureInfo.InvariantCulture)}";
+                _hqTotalLine.Text = $"   Tổng ở HQ: {view.Batches.Count} lô, {view.Batches.Sum(b => b.TxnCount)} giao dịch, bán {view.Totals.Sum(t => t.SoldQty)}, trả {view.Totals.Sum(t => t.ReturnedQty)}, doanh thu ròng {view.Totals.Sum(t => t.NetRevenue).ToString("N0", CultureInfo.InvariantCulture)}";
             }
             catch (FormatException error)
             {
@@ -967,7 +986,13 @@ internal sealed class MainForm : Form
 
             _alertChanges.Update(alerts.ToDictionary(a => a.BatchId, a => $"{a.AlertType}|{a.RemainingQty}|{a.DaysLeft}"), now);
             GridFiller.Fill(_alertGrid, alerts.Select(a => new GridRow(a.BatchId,
-                new object?[] { a.StoreId, a.Sku, SkuName(a.Sku), a.BatchId, a.ExpiryDate.ToString("yyyy-MM-dd"), a.DaysLeft, a.RemainingQty, a.AlertType, a.Status },
+                new object?[]
+                {
+                    a.StoreId, a.Sku, SkuName(a.Sku), a.BatchId, a.ExpiryDate.ToString("yyyy-MM-dd"),
+                    a.DaysLeft, a.RemainingQty,
+                    ConsoleDisplayNames.AlertType(a.AlertType),
+                    ConsoleDisplayNames.AlertStatus(a.Status),
+                },
                 _alertChanges.IsHighlighted(a.BatchId, now) ? Theme.Changed : null,
                 a.AlertType == "EXPIRED" ? Theme.Expired : Theme.Near)).ToList());
         }
@@ -984,14 +1009,14 @@ internal sealed class MainForm : Form
                 return null;
             }
 
-            _forecastEmpty.Text = forecasts.Count == 0 ? "  (bảng forecast chưa có dòng nào)" : $"  ({forecasts.Count} dòng)";
+            _forecastEmpty.Text = forecasts.Count == 0 ? "  (chưa có dòng dự báo nào)" : $"  ({forecasts.Count} dòng)";
             GridFiller.Fill(_forecastGrid, forecasts.Select(f => new GridRow($"{f.StoreId}|{f.Sku}",
                 new object?[]
                 {
                     f.StoreId, f.Sku, SkuName(f.Sku), f.HorizonDays,
                     f.PredictedDemand.ToString("0.##", CultureInfo.InvariantCulture),
                     f.SurplusShortage.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture),
-                    f.BalanceStatus, f.ModelVersion, LocalTime(f.CreatedAtUtc),
+                    ConsoleDisplayNames.BalanceStatus(f.BalanceStatus), f.ModelVersion, LocalTime(f.CreatedAtUtc),
                 },
                 Fore: f.BalanceStatus switch { "SHORTAGE" => Theme.Expired, "SURPLUS" => Theme.Near, _ => null })).ToList());
         }
@@ -1041,14 +1066,14 @@ internal sealed class MainForm : Form
         var syncReasons = new[]
         {
             _syncFeature == FeatureState.NotDeployed ? "Chạy đồng bộ: /sync/run chưa có trên middleware (404), chờ chu kỳ SYNC_INTERVAL." : null,
-            _snapshotFeature == FeatureState.NotDeployed ? "Gửi snapshot: /hq/snapshot chưa có (404)." : null,
+            _snapshotFeature == FeatureState.NotDeployed ? "Gửi bản chụp HQ: /hq/snapshot chưa có (404)." : null,
         }.Where(text => text is not null);
         _syncFeatureLine.Text = string.Join("   ", syncReasons);
 
         var jobReasons = new[]
         {
             _nearExpiryFeature == FeatureState.NotDeployed ? "Cận hạn và ngưỡng: chưa có trên middleware (404, chờ #43)." : null,
-            _forecastFeature == FeatureState.NotDeployed ? "Dự báo: chưa có job forecast (404, chờ PB-22/23); mở lại bảng điều khiển sau khi merge." : null,
+            _forecastFeature == FeatureState.NotDeployed ? "Dự báo: chưa có tác vụ dự báo (404, chờ PB-22/23); mở lại bảng điều khiển sau khi merge." : null,
         }.Where(text => text is not null);
         _jobFeatureLine.Text = string.Join("   ", jobReasons);
 
@@ -1077,7 +1102,7 @@ internal sealed class MainForm : Form
             try
             {
                 var run = ApiParsers.SyncRun(answer.Body);
-                ShowResult($"Chạy đồng bộ: HTTP {answer.Status}, tạo {run.BatchesCreated} batch, gửi {run.BatchesSent}, còn chờ {run.BatchesPending}", Theme.Ok);
+                ShowResult($"Chạy đồng bộ: HTTP {answer.Status}, tạo {run.BatchesCreated} lô, gửi {run.BatchesSent}, còn chờ {run.BatchesPending}", Theme.Ok);
             }
             catch (FormatException error)
             {
@@ -1125,7 +1150,7 @@ internal sealed class MainForm : Form
 
     private async Task SendSnapshotAsync()
     {
-        var answer = await RunActionAsync(_sendSnapshot, "Gửi snapshot", () => _api.SendSnapshotAsync(DateTime.UtcNow));
+        var answer = await RunActionAsync(_sendSnapshot, "Gửi bản chụp HQ", () => _api.SendSnapshotAsync(DateTime.UtcNow));
         if (Gone)
         {
             return;
@@ -1134,7 +1159,7 @@ internal sealed class MainForm : Form
         _snapshotFeature = FeatureAvailability.FromAction(answer, _snapshotFeature);
         if (answer.Status == 422 && answer.Code == "SNAPSHOT_REJECTED")
         {
-            ShowResult($"Gửi snapshot: HTTP 422 SNAPSHOT_REJECTED, đúng như mong đợi: tồn không đổi, có audit SNAPSHOT_REJECTED", Theme.Ok);
+            ShowResult($"Gửi bản chụp HQ: HTTP 422 SNAPSHOT_REJECTED — {ConsoleDisplayNames.ServerMessage(answer.Code, answer.Message)} (tồn kho không đổi, đã ghi nhận nhật ký kiểm toán)", Theme.Ok);
         }
 
         UpdateFeatureControls();
@@ -1167,7 +1192,7 @@ internal sealed class MainForm : Form
             try
             {
                 var run = ApiParsers.JobRun(answer.Body);
-                ShowResult($"{label}: HTTP {answer.Status}, job {run.Job} {run.Status} ({answer.ElapsedMs / 1000:0.0} s)", Theme.Ok);
+                ShowResult($"{label}: HTTP {answer.Status}, tác vụ {run.Job} — {ConsoleDisplayNames.JobStatus(run.Status)} ({answer.ElapsedMs / 1000:0.0} giây)", Theme.Ok);
             }
             catch (FormatException error)
             {
@@ -1181,10 +1206,10 @@ internal sealed class MainForm : Form
 
     private async Task SetThresholdAsync()
     {
-        var category = (string)_thresholdCategory.SelectedItem!;
+        var selected = (CategoryOption)_thresholdCategory.SelectedItem!;
         var days = (int)_thresholdDays.Value;
-        var answer = await RunActionAsync(_setThreshold, $"Ngưỡng {category} = {days}",
-            () => _api.SetThresholdAsync(category, days));
+        var answer = await RunActionAsync(_setThreshold, $"Ngưỡng {selected} = {days} ngày",
+            () => _api.SetThresholdAsync(selected.Code, days));
         if (Gone)
         {
             return;

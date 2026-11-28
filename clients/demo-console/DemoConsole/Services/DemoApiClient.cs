@@ -184,7 +184,7 @@ public sealed class DemoApiClient : IDisposable
         string? token = null;
         if (tokenName is not null && !_tokens.TryGetValue(tokenName, out token))
         {
-            return new ApiResult(0, string.Empty, $"no token '{tokenName}' in .tokens/demo_tokens.json", string.Empty, 0);
+            return new ApiResult(0, string.Empty, $"Không có token '{tokenName}' trong .tokens/demo_tokens.json", string.Empty, 0);
         }
 
         using var request = new HttpRequestMessage(method, url);
@@ -208,7 +208,7 @@ public sealed class DemoApiClient : IDisposable
         }
         catch (OperationCanceledException)
         {
-            return new ApiResult(0, string.Empty, $"no answer within {timeout.TotalSeconds:0} s", string.Empty,
+            return new ApiResult(0, string.Empty, $"Không nhận được phản hồi trong {timeout.TotalSeconds:0} giây", string.Empty,
                 stopwatch.Elapsed.TotalMilliseconds);
         }
         catch (HttpRequestException error)

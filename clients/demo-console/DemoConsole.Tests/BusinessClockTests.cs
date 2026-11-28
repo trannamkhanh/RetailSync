@@ -13,9 +13,9 @@ public class BusinessClockTests
     }
 
     [Theory]
-    [InlineData("2026-11-13", "EXPIRED")]
-    [InlineData("2026-11-14", "OK, 0 d left")]
-    [InlineData("2026-11-16", "OK, 2 d left")]
+    [InlineData("2026-11-13", "Đã hết hạn")]
+    [InlineData("2026-11-14", "Còn 0 ngày")]
+    [InlineData("2026-11-16", "Còn 2 ngày")]
     public void A_batch_is_expired_only_before_today(string expiry, string expected)
     {
         Assert.Equal(expected, BusinessClock.BatchState(DateOnly.Parse(expiry), new DateOnly(2026, 11, 14)));

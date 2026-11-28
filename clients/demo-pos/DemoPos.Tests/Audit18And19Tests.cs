@@ -493,7 +493,7 @@ public sealed class Audit18And19Tests
             Assert.True(form.IsMockMode);
 
             var outcomeLabel = GetPrivateField<Label>(form.Result, "_outcome");
-            Assert.Equal("INFO", outcomeLabel.Text);
+            Assert.Equal("Thông báo", outcomeLabel.Text);
 
             // Complete the stale LIVE drain.
             sendRelease.SetResult(new HttpResponseMessage(HttpStatusCode.OK)
@@ -508,7 +508,7 @@ public sealed class Audit18And19Tests
             WaitForIdleRefreshes(form);
 
             // Must NOT overwrite MOCK mode's INFO banner with the stale LIVE OK result.
-            Assert.Equal("INFO", outcomeLabel.Text);
+            Assert.Equal("Thông báo", outcomeLabel.Text);
         });
     }
 
@@ -620,7 +620,7 @@ public sealed class Audit18And19Tests
             var middlewareStatus = GetPrivateField<ToolStripStatusLabel>(form, "_middlewareStatus");
             var gatewayStatus = GetPrivateField<ToolStripStatusLabel>(form, "_gatewayStatus");
             Assert.Equal("Middleware: MOCK", middlewareStatus.Text);
-            Assert.Equal("Gateway: MOCK", gatewayStatus.Text);
+            Assert.Equal("Cổng POS: MOCK", gatewayStatus.Text);
         });
     }
 
@@ -672,7 +672,7 @@ public sealed class Audit18And19Tests
             var middlewareStatus = GetPrivateField<ToolStripStatusLabel>(form, "_middlewareStatus");
             var gatewayStatus = GetPrivateField<ToolStripStatusLabel>(form, "_gatewayStatus");
             Assert.Equal("Middleware: MOCK", middlewareStatus.Text);
-            Assert.Equal("Gateway: MOCK", gatewayStatus.Text);
+            Assert.Equal("Cổng POS: MOCK", gatewayStatus.Text);
         });
     }
 

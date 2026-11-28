@@ -1,3 +1,5 @@
+using DemoPos.Services;
+
 namespace DemoPos.Models;
 
 public sealed class TxnRecord
@@ -34,7 +36,9 @@ public sealed class TxnRecord
 
     public string TimeText => Time.ToString("HH:mm:ss");
 
-    public string TypeText => EventType;
+    public string TypeText => PosDisplayNames.EventType(EventType);
+
+    public string OutcomeText => PosDisplayNames.OutcomeText(Outcome);
 }
 
 public sealed class ProductRow

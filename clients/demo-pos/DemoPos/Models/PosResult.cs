@@ -79,7 +79,7 @@ public static class PosResultParser
                 Outcome = PosOutcome.ERROR,
                 Code = "INVALID_RESPONSE",
                 Message = string.IsNullOrWhiteSpace(body)
-                    ? "The service answered 200 without the expected JSON body."
+                    ? "Dịch vụ trả về HTTP 200 nhưng không có nội dung JSON hợp lệ."
                     : CleanBody(body),
                 HttpStatus = httpStatus,
                 ElapsedMs = Math.Round(elapsedMs, 1),
@@ -159,15 +159,15 @@ public static class PosResultParser
 
         return status switch
         {
-            400 => "The POS gateway answered 400; the request had no valid client certificate.",
-            401 => "Missing, invalid or expired token.",
-            403 => "The middleware refused the request (403 FORBIDDEN).",
-            404 => "The requested resource or original sale was not found.",
-            409 => "The middleware rejected the event by a business rule.",
-            422 => "The middleware rejected the event body (422).",
-            503 => "The service is unavailable. Retry with the same transaction_id.",
-            0 => "No answer from the middleware.",
-            _ => outcome == PosOutcome.OK ? "Event applied." : $"HTTP {status}.",
+            400 => "Cổng POS trả về HTTP 400; yêu cầu thiếu hoặc sai chứng chỉ máy khách.",
+            401 => "Thiếu token hoặc token không hợp lệ / đã hết hạn.",
+            403 => "Middleware từ chối yêu cầu (403 FORBIDDEN).",
+            404 => "Không tìm thấy tài nguyên hoặc giao dịch bán gốc.",
+            409 => "Middleware từ chối sự kiện theo quy tắc nghiệp vụ.",
+            422 => "Middleware từ chối nội dung sự kiện (422).",
+            503 => "Dịch vụ tạm thời không khả dụng. Hãy thử lại cùng mã giao dịch.",
+            0 => "Không nhận được phản hồi từ middleware.",
+            _ => outcome == PosOutcome.OK ? "Đã áp dụng giao dịch." : $"HTTP {status}.",
         };
     }
 

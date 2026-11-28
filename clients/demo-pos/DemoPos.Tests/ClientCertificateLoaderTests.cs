@@ -18,7 +18,7 @@ public sealed class ClientCertificateLoaderTests
         Assert.False(info.CertificateExists);
         Assert.False(info.KeyExists);
         Assert.NotNull(info.Error);
-        Assert.Contains("Missing", info.Error);
+        Assert.Contains("Thiếu", info.Error);
     }
 
     [Fact]

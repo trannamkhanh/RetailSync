@@ -62,7 +62,7 @@ public sealed class ReturnDialog : Form
             FlowDirection = FlowDirection.RightToLeft,
             Dock = DockStyle.Fill,
         };
-        var ok = new Button { Text = "Gửi RETURN", DialogResult = DialogResult.OK, AutoSize = true };
+        var ok = new Button { Text = "Gửi trả hàng", DialogResult = DialogResult.OK, AutoSize = true };
         var cancel = new Button { Text = "Hủy", DialogResult = DialogResult.Cancel, AutoSize = true };
         ok.Click += (_, _) => ValidateSelection();
         buttons.Controls.Add(ok);

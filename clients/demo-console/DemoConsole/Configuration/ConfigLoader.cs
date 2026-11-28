@@ -77,19 +77,19 @@ public static class ConfigLoader
         var problems = new List<string>();
         if (!File.Exists(paths.CaCertificate))
         {
-            problems.Add($"Missing CA certificate: {paths.CaCertificate}");
+            problems.Add($"Thiếu chứng chỉ CA: {paths.CaCertificate}");
         }
 
         var tokens = TokenStore.Load(paths.TokensFile);
         foreach (var name in RequiredTokens(config).Where(name => !tokens.ContainsKey(name)))
         {
-            problems.Add($"No token '{name}' in {paths.TokensFile}. Run scripts/demo/reset_demo_db.ps1.");
+            problems.Add($"Không có token '{name}' trong {paths.TokensFile}. Hãy chạy scripts/demo/reset_demo_db.ps1.");
         }
 
         var password = EnvFile.Read(paths.EnvFile).GetValueOrDefault("MSSQL_SA_PASSWORD") ?? string.Empty;
         if (password.Length == 0)
         {
-            problems.Add($"No MSSQL_SA_PASSWORD in {paths.EnvFile}; the SQL panels stay empty.");
+            problems.Add($"Thiếu MSSQL_SA_PASSWORD trong {paths.EnvFile}; các bảng SQL chỉ đọc sẽ để trống.");
         }
 
         return new LoadedConsoleConfig

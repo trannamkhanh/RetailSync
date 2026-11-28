@@ -45,8 +45,8 @@ public static class FeatureAvailability
 
     public static string Reason(string feature, FeatureState state) => state switch
     {
-        FeatureState.NotDeployed => $"{feature}: not on this middleware yet (404). It works after its pull request merges and the middleware restarts.",
-        FeatureState.Unknown => $"{feature}: not checked yet.",
+        FeatureState.NotDeployed => $"{feature}: chưa có trên middleware hiện tại (404). Tính năng sẽ hoạt động sau khi PR được merge và khởi động lại middleware.",
+        FeatureState.Unknown => $"{feature}: chưa kiểm tra.",
         _ => string.Empty,
     };
 }

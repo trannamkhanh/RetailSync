@@ -224,7 +224,7 @@ public static class ConfigLoader
 
         if (!File.Exists(paths.CaCertificate))
         {
-            problems.Add($"Missing CA certificate: {paths.CaCertificate}\nRun:\n  {SetupCommands.GenerateCertificates}");
+            problems.Add($"Thiếu chứng chỉ CA: {paths.CaCertificate}\nChạy:\n  {SetupCommands.GenerateCertificates}");
         }
 
         foreach (var terminal in config.Terminals)
@@ -234,15 +234,15 @@ public static class ConfigLoader
             if (!File.Exists(crt) || !File.Exists(key))
             {
                 problems.Add(
-                    $"Missing client certificate or key for {terminal.PosId}: {crt} / {key}\n" +
-                    $"Run:\n  {SetupCommands.GenerateCertificates}\n" +
-                    $"Then register the fingerprints:\n  {SetupCommands.RegisterFingerprints}");
+                    $"Thiếu chứng chỉ hoặc khóa riêng cho máy POS {terminal.PosId}: {crt} / {key}\n" +
+                    $"Chạy:\n  {SetupCommands.GenerateCertificates}\n" +
+                    $"Sau đó đăng ký vân tay:\n  {SetupCommands.RegisterFingerprints}");
             }
         }
 
         if (!File.Exists(paths.TokensFile))
         {
-            problems.Add($"Missing token file: {paths.TokensFile}\nRun:\n  {SetupCommands.IssueTokens}");
+            problems.Add($"Thiếu tệp token: {paths.TokensFile}\nChạy:\n  {SetupCommands.IssueTokens}");
             return problems;
         }
 
@@ -250,7 +250,7 @@ public static class ConfigLoader
         {
             if (!tokens.ContainsKey(terminal.PosId))
             {
-                problems.Add($"Missing token '{terminal.PosId}' in {paths.TokensFile}.\nRun:\n  {SetupCommands.IssueTokens}");
+                problems.Add($"Thiếu token '{terminal.PosId}' trong {paths.TokensFile}.\nChạy:\n  {SetupCommands.IssueTokens}");
             }
         }
 
@@ -259,7 +259,7 @@ public static class ConfigLoader
             var key = TokenNames.StaffForStore(storeId);
             if (key is null || !tokens.ContainsKey(key))
             {
-                problems.Add($"Missing store token '{key ?? "staff_*"}' for {storeId}.\nRun:\n  {SetupCommands.IssueTokens}");
+                problems.Add($"Thiếu token cửa hàng '{key ?? "staff_*"}' cho {storeId}.\nChạy:\n  {SetupCommands.IssueTokens}");
             }
         }
 
