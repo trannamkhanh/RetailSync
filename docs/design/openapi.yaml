@@ -468,6 +468,57 @@ paths:
         '422':
           $ref: '#/components/responses/ValidationError'
 
+
+  /staff/forecasts:
+    get:
+      tags: [Staff]
+      summary: Latest forecasts for the caller's store
+      description: |
+        PB-53-1. Staff and Manager, own store only; query parameters cannot change scope.
+        A caller without a store gets 403. Read-only, no audit row.
+        One latest forecast per SKU (created_at descending, forecast_id descending on ties).
+        SKUs without a forecast are omitted. sellable_stock sums positive quantities of
+        batches expiring today or later, on the UTC+7 business date.
+        sold_last_7_days sums SALE quantity minus RETURN and CANCELLATION quantity
+        for status OK events by effective_at in the seven completed business days:
+        [business_date - 7 days at 00:00, business_date at 00:00), converted to UTC.
+        Return SHORTAGE, SURPLUS, BALANCED, then sku. Categories remain stored keys.
+        Numeric quantities and decimals are JSON numbers, never numeric strings.
+      operationId: listStaffForecasts
+      x-roles: [Staff, Manager]
+      responses:
+        '200':
+          description: Latest forecasts, possibly empty
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [business_date, items]
+                properties:
+                  business_date: {type: string, format: date}
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [sku, name, category, horizon_days, predicted_demand, sellable_stock,
+                        surplus_shortage, balance_status, model_version, created_at, sold_last_7_days]
+                      properties:
+                        sku: {type: string}
+                        name: {type: string}
+                        category: {type: string}
+                        horizon_days: {type: integer}
+                        predicted_demand: {type: number}
+                        sellable_stock: {type: integer}
+                        surplus_shortage: {type: number}
+                        balance_status: {type: string, enum: [SHORTAGE, SURPLUS, BALANCED]}
+                        model_version: {type: string}
+                        created_at: {type: string, format: date-time}
+                        sold_last_7_days: {type: integer}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /staff/discounts:
     get:
       tags: [Staff]
