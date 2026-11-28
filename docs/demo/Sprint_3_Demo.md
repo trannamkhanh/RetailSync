@@ -81,16 +81,18 @@ ngày nghiệp vụ UTC+7. Khi `.env` có `DB_NAME=RTS_DB_DEMO`, script tự kh�
 service và chạy job `forecast` nếu đã có; lệnh `up` sau đó chỉ khởi động lại ba service một
 lần nữa, vô hại. Mất khoảng 45 giây.
 
-Kết quả đúng (cuối output của reset):
+Kết quả đúng (cuối output của reset, sau PB-52 mở rộng 30 sản phẩm trên DB demo):
 
-- Tồn: STORE-DN1 360, STORE-DN2 225, STORE-DN3 135 (9 SKU mỗi cửa hàng, 40/25/15).
-- Lô cận hạn ở STORE-DN1 và STORE-DN2: Bread hết hạn sau 1 ngày, Fresh milk 2 ngày,
-  Yogurt 3 ngày, Sponge cake **đã hết hạn** từ hôm qua và vẫn còn hàng. STORE-DN3 không
-  có lô cận hạn. Các lô sớm khác nằm ngay ngoài ngưỡng (Dairy 6 ngày, Bakery 5 ngày,
-  Dry goods 60 ngày).
-- `history_transactions` 2320, từ 90 ngày trước đến hôm qua.
+- Danh mục: 6 danh mục (`Dairy`, `Bakery`, `Dry goods`, `Beverages`, `Snacks`, `Frozen`), mỗi danh mục 5 sản phẩm (tổng 30 SKU tên tiếng Việt; giữ nguyên mã SKU và barcode của 9 sản phẩm đầu).
+- Tồn: STORE-DN1 1585, STORE-DN2 1135, STORE-DN3 765 (30 SKU mỗi cửa hàng; 9 SKU gốc giữ nguyên 40/25/15, 21 SKU mới chia 3 mức bán chậm 80/60/45, bán vừa 55/45/30, bán nhanh 40/25/15).
+- Lô cận hạn ở STORE-DN1 và STORE-DN2: Bánh mì 400g (`SKU-0004`) hết hạn sau 1 ngày, Sữa tươi 1L (`SKU-0001`) 2 ngày,
+  Sữa chua 100g (`SKU-0002`) 3 ngày, Bánh bông lan 300g (`SKU-0005`) **đã hết hạn** từ hôm qua và vẫn còn hàng. STORE-DN3 không
+  có lô cận hạn. Các lô sớm khác của 9 SKU gốc nằm ngay ngoài ngưỡng (Dairy 6 ngày, Bakery 5 ngày,
+  Dry goods 60 ngày) và mọi lô của 21 SKU mới đều nằm ngoài ngưỡng cảnh báo.
+- `history_transactions` 7958, từ 90 ngày trước đến hôm qua (phủ đủ 30 sản phẩm).
 - HQ: `hq_batches 0`, `hq_total_rows 0`.
-- `Forecast job ran.` hoặc `Forecast skipped: no forecast job on main yet.`
+- `Forecast job ran.` (90 dòng: `SURPLUS` 50, `SHORTAGE` 35, `BALANCED` 5) hoặc `Forecast skipped: no forecast job on main yet.`
+- Sau khi chạy thêm job `recommendation`: 16 đề xuất `PENDING` (`DISCOUNT` 10 gồm 6 cận hạn + 4 giảm giá 10% S2 trên `SKU-0025`/`SKU-0030` ở cả DN1 và DN2; `REDISTRIBUTION` 6 gồm 3 sản phẩm S1 `SKU-0017`/`SKU-0020`/`SKU-0022` thừa ở Thanh Khê → thiếu ở Hải Châu).
 
 Smoke phải kết thúc bằng `ALL CHECKS PASSED`. Smoke ghi vào database demo, nên **reset lại
 một lần nữa** trước khi bắt đầu.

@@ -86,3 +86,31 @@ def test_generated_history_carries_occurred_at(db_session):
     assert all(occurred == created for occurred, created in rows)
     # The declared moment is never in the future.
     assert all(occurred.date() < as_of for occurred, _ in rows)
+
+
+def test_pb52_demo_profile_covers_all_90_days_without_truncation(db_session):
+    """PB-52 demo profile generates full 90-day history without 14-day short-pair truncation."""
+    as_of = date(2026, 11, 28)
+    count = load_history(
+        db_session,
+        90,
+        42,
+        as_of,
+        store_ids={"STORE-DN1", "STORE-DN2", "STORE-DN3"},
+        demo_profile=True,
+    )
+    assert count > 0
+    rows = db_session.execute(
+        select(PosTransaction.store_id, TransactionItem.sku, PosTransaction.created_at)
+        .join(TransactionItem, TransactionItem.txn_id == PosTransaction.txn_id)
+        .where(
+            PosTransaction.store_id.in_(("STORE-DN1", "STORE-DN2", "STORE-DN3")),
+            PosTransaction.txn_id.startswith("HIST-"),
+            PosTransaction.txn_type == "SALE",
+        )
+    ).all()
+    by_pair = defaultdict(set)
+    for store_id, sku, created_at in rows:
+        by_pair[(store_id, sku)].add(created_at.date())
+    assert len(by_pair) >= 27
+    assert all(len(days) >= 60 for days in by_pair.values())

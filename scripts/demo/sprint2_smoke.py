@@ -276,7 +276,7 @@ def run() -> int:
     status, body = call("GET", f"{MIDDLEWARE}/stores/{STORE_DN1}/inventory",
                         token=TOKENS["staff_dn1"])
     check(10, "Staff reads STORE-DN1",
-          status == 200 and isinstance(body, dict) and len(body.get("items", [])) == 9,
+          status == 200 and isinstance(body, dict) and len(body.get("items", [])) >= 9,
           f"{status}, {len(body.get('items', [])) if isinstance(body, dict) else '?'} SKUs")
     status, body = call("GET", f"{MIDDLEWARE}/stores/STORE-DN2/inventory",
                         token=TOKENS["staff_dn1"])
