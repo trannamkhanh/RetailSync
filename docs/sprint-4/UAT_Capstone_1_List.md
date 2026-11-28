@@ -186,26 +186,28 @@ Point by point, what can and cannot be ticked:
 | Every screen in Vietnamese | **Yes, as behaviour.** Console tabs are `Tồn và lô / Giao dịch và audit / Đồng bộ và HQ / Job / Doanh thu`; Staff App tabs are `Tra cứu / Cảnh báo cận hạn / Đề xuất / Giảm giá`. This is pre-existing, not a PB-51 delivery | `MainForm.cs` (both clients) |
 | Duplicate shows code `DUPLICATE_IGNORED` | **Yes** | `MockPosBackend.cs:137`, and the same code on the server in `middleware/app/services/pos_events.py:43`, `pos_return.py:29`, `pos_cancellation.py:39` |
 | Duplicate shows the exact sentence "Giao dịch đã được ghi trước đó" | **No.** The message is English: `"Transaction already recorded"` (`MockPosBackend.cs:138`); the sentence appears nowhere in `clients/` | same |
-| Staff App statuses/alerts/rules/categories/reasons in Vietnamese | **Partly.** Vietnamese UI text exists (`Chấp nhận`, `Từ chối`, `Đã tải đề xuất.`); no dedicated enum/status mapping layer, and no commit claims one | `StaffApp/UI/MainForm.cs` |
+| Staff App statuses/alerts/rules/categories/reasons in Vietnamese | **Mostly.** The display mapping landed on `main` as PR #97: `clients/staff-app/StaffApp/Services/DisplayNames.cs` maps balance status, alert type, guardrail rule, outcome, category, action type and decision status (`SURPLUS` → `Thừa hàng`, `BLOCKED` → `Chặn`, `Dry goods` → `Hàng khô`, …), unknown codes as sent. **Not** covered: the recommendation `reason`, which is server text and stays English (`middleware/app/services/recommendation.py:25,41`) | `DisplayNames.cs` on `main`; `recommendation.py` for the reason |
 | Dự báo tab with two charts | **No.** `git grep -i 'Dự báo\|forecast\|chart'` over `clients/staff-app` is empty; the Staff App has four tabs and no forecast tab. The only forecast view is a **grid** in the *demo console* (`MainForm.cs:316`, `ReadOnlySql.cs:42`), with no charts and no shortage→surplus→balanced sort | git grep |
-| 30 products, six categories, Vietnamese names | **No.** The seed inserts **9 products in 3 categories** (`Dairy`, `Bakery`, `Dry goods`) with English names (`Fresh milk 1L`, `Bread 400g`, …) | `database/seed/002_demo_catalog.sql` |
+| 30 products, six categories, Vietnamese names | **No.** The seed inserts **9 products in 3 categories** (`Dairy`, `Bakery`, `Dry goods`) with English names (`Fresh milk 1L`, `Bread 400g`, …). The category *names* on screen are Vietnamese since PR #97; the catalogue itself is still English and still 9 SKUs | `database/seed/002_demo_catalog.sql` |
 | The 9 old SKUs still have stock 40/25/15 | **Yes** | same seed: `CASE s.store_id WHEN 'STORE-DN1' THEN 40 WHEN 'STORE-DN2' THEN 25 ELSE 15 END` |
 
-Consequence: the act tables in §2–§7 use only what is on `main`. Ticking the three "No" lines would put a false claim in front of the mentor.
+Consequence: the act tables in §2–§7 use only what is on `main`. Ticking the open lines would put a false claim in front of the mentor.
 
 ### 11.1b Checklist to paste into the UAT issue
 
 These are the lines at stake, as checkboxes, so the 30/11 UAT can tick them or leave them with a stated reason. The "No" lines cannot be ticked until PB-51/PB-52/PB-53 merge; **waiting on that merge before the freeze at 12:00 30/11.**
 
-```
+> Pasted into issue #99 **without** a code fence, so the boxes can be ticked in the GitHub UI. Keep it that way when editing the issue.
+
 - [x] Duplicate sale shows code DUPLICATE_IGNORED — checked on main a5f509b (POS45-3)
 - [x] Every screen in Vietnamese, as it stands on main — behaviour only, not a PB-51 delivery
+- [x] Staff App shows codes as Vietnamese labels — `DisplayNames.cs` on main since PR #97 maps balance status, alert type, guardrail rule, outcome, category, action type and decision status (`SURPLUS` → `Thừa hàng`, `BLOCKED` → `Chặn`, …); an unknown code shows as sent
+- [ ] Staff App shows the recommendation *reason* in Vietnamese — waiting on the PB-52/PB-53 merge before the 12:00 30/11 freeze; the reason is server text and is English on main (`middleware/app/services/recommendation.py:25,41`, e.g. "Batch B-… expires in 2 day(s); 3 of 16 units may not sell in time."), and no translation layer exists for it
 - [ ] Duplicate sale shows the sentence "Giao dịch đã được ghi trước đó" — waiting on the PB-51 merge before the 12:00 30/11 freeze; main shows the English "Transaction already recorded"
 - [ ] Staff App has a Dự báo tab with two charts, sorted shortage → surplus → balanced — waiting on the PB-53 merge before the 12:00 30/11 freeze; not on main (four tabs, no forecast tab)
 - [ ] Demo catalogue is 30 products in six categories with Vietnamese names — waiting on the PB-52 merge before the 12:00 30/11 freeze; main seeds 9 products in three categories
-```
 
-If the three do not merge by 12:00 30/11, they are left unticked with that sentence as the reason, and §6 of `Report_Technical_Part.md` records the gap.
+If the lines that are still open do not merge by 12:00 30/11, they are left unticked with that sentence as the reason, and §6 of `Report_Technical_Part.md` records the gap.
 
 Before the freeze, Khanh and Sang must say in the team chat which branch, if any, carries PB-51/52/53; if none does, those lines are dropped from the UAT and the report records the gap (§6 of `Report_Technical_Part.md`).
 
@@ -238,4 +240,3 @@ What the issue body carries, so it can be checked against this file:
 `Bug_List_PB-38-3.md` stays the bug-list section for the same issue; its rows are added as the run happens and pasted into the issue, per that file's header. Its §4 is still deliberately empty — the list is created by the run, not before it.
 
 One item remains manual, and it is not a repository edit: §11.1b's checkboxes have to be re-ticked on 30/11 as the run proves or disproves each line. Nothing in the repository can tick them for the team.
-

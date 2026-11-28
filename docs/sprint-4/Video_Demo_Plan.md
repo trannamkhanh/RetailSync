@@ -2,6 +2,7 @@
 
 **Ngày quay:** 1/12/2026 · **Code:** tag `v1.0` (commit đã freeze lúc 12:00 30/11) · **Thời lượng:** khoảng 20 phút
 **Người:** Kiệt dẫn chuyện · Quang điều khiển máy S, quay và dựng · Khánh máy A (Hải Châu) · Sang máy B (Thanh Khê)
+**Sơ đồ chỗ ngồi:** cách chia máy A/B và người ngồi ở trên là **dự kiến**, chốt lại với Kiệt trước ngày quay (1/12), không để tới hôm quay mới đổi.
 **Dựa trên:** `docs/Demo_Plan.md` (7 màn), `docs/demo/Sprint_3_Demo.md` (lệnh chi tiết)
 
 ---
@@ -125,7 +126,7 @@ dotnet build clients/demo-pos/DemoPos/DemoPos.csproj -c Debug
 dotnet run --project clients/demo-pos/DemoPos/DemoPos.csproj --no-build
 ```
 
-5. **Riêng máy A, Staff App:** publish ra `C:\RetailSync\StaffApp`, chép `ca.crt`. Tạo `appsettings.Local.json` với `BaseUrl https://<IP S>:8443/api/v1`, `TokenName staff_dn1`. Mở `StaffApp.exe`; tiêu đề phải hiện `STORE-DN1 | Staff: staff_dn1`, giao diện tiếng Việt.
+5. **Riêng máy A, Staff App:** publish ra `C:\RetailSync\StaffApp`, chép `ca.crt`. Tạo `appsettings.Local.json` với `BaseUrl https://<IP S>:8443/api/v1`, `TokenName staff_dn1`. Mở `StaffApp.exe`; tiêu đề phải hiện `RetailSync Staff App - STORE-DN1 | Nhân viên: staff_dn1`, giao diện tiếng Việt.
 
 ### B4. Quay hình và tiếng
 
@@ -205,13 +206,21 @@ Lời dẫn là gợi ý, Kiệt nói tự nhiên theo ý mình, không cần đ
 >
 > Nhưng đề xuất của máy không được đi thẳng tới nhân viên. Mọi đề xuất phải qua **guardrail**, tức các quy tắc kinh doanh do quản lý đặt: giảm tối đa bao nhiêu phần trăm, giá không dưới mức nào, hàng còn bao nhiêu ngày. Quang hạ mức giảm tối đa xuống rồi chạy lại: đề xuất vượt ngưỡng bị kéo về giới hạn, hoặc bị chặn và nhân viên không nhìn thấy.
 >
-> Khánh là nhân viên Hải Châu, mở Staff App. Cảnh báo được xếp theo độ khẩn: hàng đã hết hạn lên đầu. Tra một mã vạch đã hết hàng ở Hải Châu: app chỉ ra cửa hàng gần nhất còn hàng, Thanh Khê đứng đầu, kèm khoảng cách, để nhân viên hướng dẫn khách.
+> Khánh là nhân viên Hải Châu, mở Staff App. Cảnh báo được xếp theo độ khẩn: hàng đã hết hạn lên đầu. Tra một mã vạch đã hết hàng ở Hải Châu: app chỉ ra các cửa hàng **gần nhất trước**, **Sơn Trà (~1.7 km) đứng đầu rồi mới tới Thanh Khê (~4.4 km)**, kèm khoảng cách, để nhân viên hướng dẫn khách. Thứ tự này là do middleware xếp theo khoảng cách thật từ toạ độ seed, không phải thứ tự cửa hàng.
 >
 > Khánh mở một đề xuất giảm giá, xem lý do và kết quả guardrail, rồi bấm Chấp nhận. Quyết định được lưu kèm người và thời gian, không thể đổi lại.
 >
 > Điểm mới là: khi nhân viên chấp nhận giảm giá, **máy POS tự cập nhật giá** trong vòng một phút. Khánh bán món đó: giá niêm yết bị gạch ngang, khách trả giá đã giảm. Đúng như cửa hàng tiện lợi đổi giá hàng cận hạn vào đầu ngày.
 >
 > Trên tab Giảm giá, món vừa bán hiện 'Đã bán giá giảm: Có'. Chuyển sang 'Tất cả cửa hàng', nhân viên thấy cả giảm giá đang áp dụng ở Thanh Khê, để báo cho khách nơi nào đang bán rẻ hơn."
+
+**Đoạn tab `Dự báo` — có điều kiện (chỉ quay nếu PB-53 merge trước freeze 12:00 30/11):**
+
+Nếu PB-53 **đã** merge và tab `Dự báo` cùng hai biểu đồ có trong bản `v1.0`, quay thêm một đoạn 40–60 giây trong màn 6: mở tab, chỉ hai biểu đồ, và nói rõ bảng xếp theo thứ tự **thiếu hàng → thừa hàng → cân bằng**.
+
+Nếu PB-53 **chưa** merge, **không** dựng lại cảnh này và **không** nói tab đó tồn tại. Thay vào đó quay lưới dự báo ở tab **Job** của Demo Console (cùng nội dung dự báo, khác chỗ hiển thị) và nói đúng một câu: bản `v1.0` chưa có tab `Dự báo` trên Staff App, số liệu dự báo đang xem ở bảng điều khiển. Ghi khoảng trống này vào §6 của `Report_Technical_Part.md`, không che đi.
+
+Trong cả hai trường hợp, trước khi quay phải chạy job `forecast` (và `recommendation` cho đề xuất) rồi kiểm số dòng: 27 dòng dự báo trên seed 9 SKU, hoặc 90 dòng nếu danh mục đã thành 30 sản phẩm.
 
 ### Màn 7: Audit, doanh thu và số liệu đo (2 phút)
 
@@ -227,7 +236,8 @@ Lời dẫn là gợi ý, Kiệt nói tự nhiên theo ý mình, không cần đ
 > - dữ liệu gửi HQ giảm gần 99%, 100% batch được xác nhận;
 > - dự báo tốt hơn phương pháp cơ sở ở cả ba nhóm hàng;
 > - phát hiện cận hạn đúng 32 trên 32 lô;
-> - [tỉ lệ guardrail và tỉ lệ chấp nhận: điền từ `Guardrail_Metrics.md` sau khi PB-44 xong].
+> - guardrail: 31.25% đề xuất đạt (5/16), 31.25% bị điều chỉnh (5/16), 37.50% bị chặn (6/16);
+> - tỉ lệ nhân viên chấp nhận đề xuất 60.00% (6/10; riêng giảm giá 55.56% — 5/9).
 >
 > Cảm ơn thầy cô và các bạn đã theo dõi."
 
@@ -246,7 +256,11 @@ Lời dẫn là gợi ý, Kiệt nói tự nhiên theo ý mình, không cần đ
 
 Lỗi nặng (Docker hoặc SQL Server trên S hỏng): dừng quay, chạy lại B1.4 rồi B1.5 (token mới), chép lại token sang A và B, quay lại từ màn bị hỏng.
 
-Cách tránh hai lỗi đã biết, nếu PB-41 chưa sửa xong lúc quay: script dự phòng phải truyền `-BaseUrl https://<IP S>:8443/api/v1`; trong Staff App, chờ có kết quả rồi mới bấm tiếp, không đóng app giữa chừng.
+Hai lỗi PB-41 từng gặp **đã sửa trên `main`**: PB-41-2 (#95) cho script dự phòng đọc địa chỉ từ `.env` thay vì mặc định `localhost:8443`, và PB-41-3 (#97) cho Staff App không ghi vào control đã bị hủy khi đóng app giữa chừng. PB-41-4 (#98) và PB-41-7 (#94) cũng đã merge.
+
+Hệ quả cho ngày quay:
+- Script dự phòng chạy trên máy S **không cần** truyền `-BaseUrl` nữa; trên máy A/B vẫn truyền `-BaseUrl https://<IP S>:8443/api/v1` vì `.env` của A/B không có địa chỉ của S.
+- Trong Staff App, nếu lỡ đóng app giữa lúc đang gọi API thì mở lại bình thường, không còn lỗi ghi vào control đã hủy. Vẫn nên chờ có kết quả rồi mới bấm tiếp để đoạn quay liền mạch.
 
 ---
 
