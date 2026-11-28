@@ -22,7 +22,7 @@ def near_expiry_proposal(
     at_risk = max(0, ceil(remaining - Fraction(daily_demand) * (days + 1)))
     if at_risk == 0:
         return None
-    reason = f"Batch {batch_id} expires in {days} day(s); {at_risk} of {remaining} units may not sell in time."
+    reason = f"Lô {batch_id} hết hạn sau {days} ngày; {at_risk}/{remaining} đơn vị có thể không bán kịp."
     if days <= 1 and at_risk * 5 >= remaining * 4:
         return Proposal("CLEARANCE", reason, proposed_qty=at_risk)
     discount = 50 if days <= 1 else 30 if days <= 3 else 15
@@ -38,10 +38,10 @@ def surplus_proposal(
         other_store, units_short = shortage
         quantity = int(min(surplus, units_short))
         if quantity > 0:
-            reason = f"{other_store} is short of {units_short:g} units; this store has {surplus:g} extra."
+            reason = f"{other_store} thiếu {units_short:g} đơn vị; cửa hàng này thừa {surplus:g}."
             return Proposal("REDISTRIBUTION", reason, proposed_qty=quantity)
     if surplus >= demand:
         stock = demand + surplus
-        return Proposal("DISCOUNT", f"Forecast demand is {demand:g} units for 7 days; stock is {stock:g}.",
+        return Proposal("DISCOUNT", f"Dự báo cần {demand:g} đơn vị trong 7 ngày; tồn {stock:g}.",
                         discount_pct=10)
     return None

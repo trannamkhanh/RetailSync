@@ -105,7 +105,7 @@ public class ApiParsersTests
         var detail = ApiParsers.Detail("""
             {"rec_id":11,"sku":"SKU-0006","action_type":"DISCOUNT","discount_pct":"50.00","proposed_qty":null,
              "status":"PENDING","batch_id":"B-1033","expiry_date":"2026-11-02",
-             "reason":"Batch B-1033 expires in 1 day(s); 10 of 14 units may not sell in time.",
+             "reason":"Lô B-1033 hết hạn sau 1 ngày; 10/14 đơn vị có thể không bán kịp.",
              "guardrail_results":[
                {"rule_type":"MIN_SHELF_LIFE","outcome":"PASSED","original_value":null,"adjusted_value":null,"message":null},
                {"rule_type":"MAX_DISCOUNT","outcome":"ADJUSTED","original_value":"60.00","adjusted_value":"50.00",
@@ -114,7 +114,7 @@ public class ApiParsersTests
 
         Assert.Equal("Giảm 50% SKU-0006, lô B-1033", detail.Title);
         Assert.Equal(new DateOnly(2026, 11, 2), detail.ExpiryDate);
-        Assert.StartsWith("Batch B-1033 expires", detail.Reason);
+        Assert.StartsWith("Lô B-1033 hết hạn", detail.Reason);
         Assert.Equal(new[] { "Hạn dùng tối thiểu: Đạt", "Giảm giá tối đa: Điều chỉnh 60 -> 50 (capped at 50)" },
             detail.GuardrailResults.Select(line => line.Text));
     }

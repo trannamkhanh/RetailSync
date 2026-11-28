@@ -51,7 +51,7 @@ def load_rules(session: Session) -> list[GuardrailRule]:
         return guardrail_rules.active_rules(session)
     except Exception as error:  # noqa: BLE001 - any failure must write nothing
         raise GuardrailRulesUnavailable(
-            "The guardrail rules could not be loaded.") from error
+            "Không thể tải các quy tắc kiểm soát.") from error
 
 
 def apply_guardrails(session: Session, recommendation: Recommendation,
@@ -150,7 +150,7 @@ def _check_shelf_life(rule: GuardrailRule,
     threshold = int(rule.threshold)
     if days < threshold:
         return (BLOCKED, Decimal(days), None,
-                f"{days} day(s) of shelf life left; the minimum is {threshold}.")
+                f"Còn {days} ngày hạn dùng; tối thiểu là {threshold} ngày.")
     return (PASSED, Decimal(days), None, None)
 
 
@@ -160,10 +160,10 @@ def _check_max_discount(rule: GuardrailRule, recommendation: Recommendation
     if discount > rule.threshold:
         if rule.threshold == 0:
             return (BLOCKED, discount, Decimal("0.00"),
-                    "MAX_DISCOUNT would reduce the discount to 0%; no discount remains.")
+                    "Giới hạn giảm giá đưa mức giảm về 0%; không còn giảm giá để áp dụng.")
         recommendation.discount_pct = rule.threshold
         return (ADJUSTED, discount, rule.threshold,
-                f"The discount {discount}% is above the limit of {rule.threshold}%.")
+                f"Giảm {discount}% vượt mức tối đa {rule.threshold}%.")
     return (PASSED, discount, None, None)
 
 
@@ -173,17 +173,17 @@ def _check_min_price(rule: GuardrailRule, recommendation: Recommendation, target
     price, minimum = target.unit_price, rule.threshold
     if price < minimum:
         return (BLOCKED, discount, None,
-                f"The list price {price} is below the minimum price {minimum}.")
+                f"Giá niêm yết {price} thấp hơn giá tối thiểu {minimum}.")
     if _price_after(price, discount) >= minimum:
         return (PASSED, discount, None, None)
     adjusted = _largest_discount(price, minimum)
     if adjusted == 0:
         return (BLOCKED, discount, adjusted,
-                "MIN_PRICE would reduce the discount to 0% after rounding down; "
-                "no discount remains.")
+                "Giá tối thiểu đưa mức giảm về 0% sau khi làm tròn xuống; "
+                "không còn giảm giá để áp dụng.")
     recommendation.discount_pct = adjusted
     return (ADJUSTED, discount, adjusted,
-            f"A discount of {discount}% goes below the minimum price of {minimum}.")
+            f"Giảm {discount}% làm giá bán thấp hơn giá tối thiểu {minimum}.")
 
 
 def _discount(recommendation: Recommendation) -> Decimal:

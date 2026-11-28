@@ -288,7 +288,7 @@ def test_pb32_a_redistribution_without_a_batch_is_listed_and_readable(
     """DS-06 REDISTRIBUTION has no batch and never expires."""
     rec = add_recommendation(db_session, world, with_batch=False,
                              action_type="REDISTRIBUTION", discount_pct=None,
-                             proposed_qty=4, reason="STORE-X is short of 4 units")
+                             proposed_qty=4, reason="STORE-X thiếu 4 đơn vị")
     db_session.commit()
 
     body = get_recommendations(client, world).json()
@@ -302,7 +302,7 @@ def test_pb32_a_redistribution_without_a_batch_is_listed_and_readable(
     assert detail.status_code == 200, detail.text
     assert detail.json()["batch_id"] is None
     assert detail.json()["expiry_date"] is None
-    assert detail.json()["reason"] == "STORE-X is short of 4 units"
+    assert detail.json()["reason"] == "STORE-X thiếu 4 đơn vị"
 
 
 def test_pb32_a_surplus_discount_without_a_batch_is_listed_and_readable(
@@ -310,7 +310,7 @@ def test_pb32_a_surplus_discount_without_a_batch_is_listed_and_readable(
     """The surplus DISCOUNT of DS-06 rule S2 also has no batch."""
     rec = add_recommendation(db_session, world, with_batch=False,
                              action_type="DISCOUNT", discount_pct=Decimal("10"),
-                             reason="Forecast demand is 20 units for 7 days")
+                             reason="Dự báo cần 20 đơn vị trong 7 ngày")
     db_session.commit()
 
     body = get_recommendations(client, world).json()

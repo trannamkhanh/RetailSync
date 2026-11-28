@@ -209,7 +209,7 @@ def test_rec25_7_reason_contains_actual_values(db_session, recommendation_world)
     db_session.commit()
     assert job.run_recommendations()[store] == 1
     row, = recommendations(db_session, store)
-    assert row.reason == f"Batch {batch} expires in 2 day(s); 7 of 10 units may not sell in time."
+    assert row.reason == f"Lô {batch} hết hạn sau 2 ngày; 7/10 đơn vị có thể không bán kịp."
 
 
 def decide(session, row, decision, decided_at):
