@@ -130,6 +130,20 @@ ul { margin:6px 0; padding-left:20px; }
   <div class="status">Cập nhật lúc 14:35:10</div>
 </div>
 <p class="note">"(tôi)" marks the caller's store; Khoảng cách is empty for it. Lô shows "(SKU)" for a discount without a batch, and HSD is then empty. Giá is the discounted price the POS sells at. Từ lúc is the decision time in local time. Đã bán giá giảm is Có when the store sold the product below its list price today after the decision, otherwise Chưa. Empty state: "Không có giảm giá đang áp dụng."; errors as in the common rules.</p>
+
+<h2>Screen 5: Dự báo (PB-53)</h2>
+<p class="note">Read-only GET /staff/forecasts, own store. The latest forecast per SKU is shown; no forecast means no row. Both Staff and Manager may read it. Categories and statuses use the same DisplayNames mapping as every other tab.</p>
+<div class="window">
+<div class="title"><span>RetailSync Staff App — STORE-DN1</span><span>Nhân viên: staff_dn1</span></div>
+<div class="tabs"><div class="tab">Tra cứu</div><div class="tab">Cảnh báo cận hạn</div><div class="tab">Đề xuất</div><div class="tab">Giảm giá</div><div class="tab on">Dự báo</div></div>
+<div class="body"><div class="row"><b>Dự báo nhu cầu</b><span class="btn">Làm mới</span></div>
+<div class="cols"><div class="box"><b>Top 10 bán chạy</b><p>Horizontal paired bars: Dự báo 7 ngày tới / Đã bán 7 ngày qua. Highest predicted_demand first, SKU breaks ties.</p></div>
+<div class="box"><b>Hàng thiếu</b><p>SHORTAGE products only: Dự báo / Tồn bán được.</p></div></div>
+<div class="wrap"><table><tr><th>Sản phẩm</th><th>Danh mục</th><th>Dự báo 7 ngày tới</th><th>Tồn bán được</th><th>Thừa/Thiếu</th><th>Trạng thái</th><th>Mô hình</th><th>Cập nhật lúc</th></tr>
+<tr style="background:#fff3cd"><td>Sữa tươi 1L</td><td>Sữa</td><td>64</td><td>20</td><td>-44</td><td>Thiếu hàng</td><td>hgb-v1</td><td>28/11 08:00</td></tr>
+<tr style="background:#e2f0d9"><td>Bánh mì</td><td>Bánh tươi</td><td>22</td><td>50</td><td>28</td><td>Thừa hàng</td><td>seasonal-naive-v1</td><td>28/11 08:00</td></tr></table></div></div>
+<div class="status">Đã tải dự báo.</div></div>
+<p class="note">Orange shortage rows and green surplus rows also show their text status. Empty: “Chưa có dự báo cho cửa hàng này.” Errors use the common Retry flow. LatestRequest and the window-disposal guard discard stale/late answers. The table retains API order (SHORTAGE, SURPLUS, BALANCED, then SKU); charts select/order independently. Charts do not mutate data.</p>
 </main>
 </body>
 </html>
