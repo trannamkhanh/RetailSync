@@ -347,7 +347,7 @@ public sealed class MainForm : Form
         EnsureLiveDiscountsHydrated();
         ApplyMode();
         ApplyCurrentDiscountsToUi();
-        _resultPanel.ShowInfo("Đang ở chế độ LIVE — mọi request đi vào middleware thật.");
+        _resultPanel.ShowInfo("Đang ở chế độ LIVE — mọi yêu cầu gửi tới middleware thật.");
         var discountTask = RefreshDiscountsAsync();
         await RefreshMonitorAsync();
         if (_closing || IsDisposed || _mockMode || _modeEpoch != liveEpoch)
@@ -384,7 +384,7 @@ public sealed class MainForm : Form
         };
         toolbar.Controls.Add(new Label
         {
-            Text = "Terminal",
+            Text = "Máy POS",
             AutoSize = true,
             Margin = new Padding(3, 8, 6, 3),
             Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
@@ -416,10 +416,10 @@ public sealed class MainForm : Form
         _statusStrip.Dock = DockStyle.Bottom;
         _statusStrip.SizingGrip = false;
         _middlewareStatus.Text = "Middleware: —";
-        _gatewayStatus.Text = "Gateway: —";
+        _gatewayStatus.Text = "Cổng POS: —";
         _discountStatus.Text = "Giảm giá: —";
-        _queueStatus.Text = "Chờ gửi: 0 · Bị từ chối: 0 · Link: —";
-        _filesStatus.Text = "CA: — · tokens: —";
+        _queueStatus.Text = "Chờ gửi: 0 · Bị từ chối: 0 · Kết nối: —";
+        _filesStatus.Text = "CA: — · Token: —";
         _modeStatus.Text = "LIVE";
         _clockStatus.Text = string.Empty;
         _clockStatus.Spring = true;
@@ -472,7 +472,7 @@ public sealed class MainForm : Form
         var search = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
         search.Controls.Add(new Label { Text = "Tìm", AutoSize = true, Margin = new Padding(3, 8, 4, 3) });
         _searchBox.Width = 240;
-        _searchBox.PlaceholderText = "SKU, tên hoặc barcode";
+        _searchBox.PlaceholderText = "SKU, tên hoặc mã vạch";
         _searchBox.Margin = new Padding(3, 4, 3, 3);
         search.Controls.Add(_searchBox);
         productLayout.Controls.Add(search, 0, 0);
@@ -480,7 +480,7 @@ public sealed class MainForm : Form
         ConfigureGrid(_productGrid);
         AddColumn(_productGrid, nameof(ProductRow.Sku), "SKU", 70);
         AddColumn(_productGrid, nameof(ProductRow.Name), "Tên", 150);
-        AddColumn(_productGrid, nameof(ProductRow.Barcode), "Barcode", 100);
+        AddColumn(_productGrid, nameof(ProductRow.Barcode), "Mã vạch", 100);
         AddColumn(_productGrid, nameof(ProductRow.OriginalPriceText), "Giá gốc", 70);
         AddColumn(_productGrid, nameof(ProductRow.UnitPriceText), "Giá", 130);
         _productGrid.DataSource = _productView;
@@ -516,7 +516,7 @@ public sealed class MainForm : Form
         _clearButton.Text = "Xóa giỏ";
         _clearButton.AutoSize = true;
         cartButtons.Controls.Add(_clearButton);
-        _payButton.Text = "Pay · gửi SALE (F9)";
+        _payButton.Text = "Thanh toán · gửi bán hàng (F9)";
         _payButton.AutoSize = true;
         _payButton.BackColor = Color.FromArgb(30, 122, 52);
         _payButton.ForeColor = Color.White;
@@ -533,19 +533,19 @@ public sealed class MainForm : Form
         layout.Controls.Add(_resultPanel, 0, 1);
         layout.SetColumnSpan(_resultPanel, 2);
 
-        var historyGroup = new GroupBox { Text = "Lịch sử sự kiện của terminal", Dock = DockStyle.Fill, Padding = new Padding(8) };
+        var historyGroup = new GroupBox { Text = "Lịch sử sự kiện của máy POS", Dock = DockStyle.Fill, Padding = new Padding(8) };
         var historyLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
         historyLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         historyLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         var historyButtons = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
-        _returnButton.Text = "Return…";
+        _returnButton.Text = "Trả hàng…";
         _returnButton.AutoSize = true;
         _returnButton.Enabled = false;
-        _cancelButton.Text = "Cancel";
+        _cancelButton.Text = "Hủy đơn";
         _cancelButton.AutoSize = true;
         _cancelButton.Enabled = false;
-        _sendAgainButton.Text = "Send again (cùng transaction_id)";
+        _sendAgainButton.Text = "Gửi lại (cùng mã giao dịch)";
         _sendAgainButton.AutoSize = true;
         _sendAgainButton.Enabled = false;
         historyButtons.Controls.Add(_returnButton);
@@ -553,7 +553,7 @@ public sealed class MainForm : Form
         historyButtons.Controls.Add(_sendAgainButton);
         historyButtons.Controls.Add(new Label
         {
-            Text = "Chọn một dòng SALE đã OK để Return/Cancel.",
+            Text = "Chọn một giao dịch bán thành công để trả hàng hoặc hủy đơn.",
             AutoSize = true,
             ForeColor = Color.FromArgb(90, 90, 90),
             Margin = new Padding(12, 8, 3, 3),
@@ -563,10 +563,10 @@ public sealed class MainForm : Form
         ConfigureGrid(_historyGrid);
         AddColumn(_historyGrid, nameof(TxnRecord.TimeText), "Giờ", 65);
         AddColumn(_historyGrid, nameof(TxnRecord.TypeText), "Loại", 90);
-        AddColumn(_historyGrid, nameof(TxnRecord.TransactionId), "Transaction id", 230);
-        AddColumn(_historyGrid, nameof(TxnRecord.ItemsText), "Items", 200);
-        AddColumn(_historyGrid, nameof(TxnRecord.Outcome), "Kết quả", 85);
-        AddColumn(_historyGrid, nameof(TxnRecord.Code), "Code", 150);
+        AddColumn(_historyGrid, nameof(TxnRecord.TransactionId), "Mã giao dịch", 230);
+        AddColumn(_historyGrid, nameof(TxnRecord.ItemsText), "Mặt hàng", 200);
+        AddColumn(_historyGrid, nameof(TxnRecord.OutcomeText), "Kết quả", 85);
+        AddColumn(_historyGrid, nameof(TxnRecord.Code), "Mã phản hồi", 150);
         _historyGrid.DataSource = _historyView;
         historyLayout.Controls.Add(_historyGrid, 0, 1);
         historyGroup.Controls.Add(historyLayout);
@@ -598,7 +598,7 @@ public sealed class MainForm : Form
         _autoSeed.AutoSize = true;
         _autoSeed.ForeColor = Color.FromArgb(90, 90, 90);
         _autoSeed.Margin = new Padding(10, 10, 3, 3);
-        _autoSeed.Text = "Seed: chưa chạy";
+        _autoSeed.Text = "Hạt giống: chưa chạy";
         row.Controls.Add(_autoToggle);
         row.Controls.Add(new Label { Text = "mỗi", AutoSize = true, Margin = new Padding(4, 10, 2, 3) });
         row.Controls.Add(_autoInterval);
@@ -641,11 +641,11 @@ public sealed class MainForm : Form
 
         var seed = Environment.TickCount;
         _autoSales = new AutomaticSales(_config.Products, seed);
-        _autoSeed.Text = $"Seed: {seed}";
+        _autoSeed.Text = $"Hạt giống: {seed}";
         _autoTimer.Interval = (int)_autoInterval.Value * 1000;
         _autoTimer.Start();
         _resultPanel.ShowInfo(
-            $"Chế độ tự động: mỗi {_autoInterval.Value} giây một SALE ngẫu nhiên, seed {seed}.");
+            $"Chế độ tự động: mỗi {_autoInterval.Value} giây một đơn bán ngẫu nhiên, hạt giống {seed}.");
     }
 
     private void StopAutomatic(string message)
@@ -705,7 +705,7 @@ public sealed class MainForm : Form
             if (wasMock && _mockMode && _modeEpoch == modeEpoch && result is not null && !result.IsSuccess)
             {
                 StopAutomaticQuietly();
-                _resultPanel.ShowInfo($"Chế độ tự động đã dừng: {result.Code} — {result.Message}");
+                _resultPanel.ShowInfo($"Chế độ tự động đã dừng: {result.Code} — {PosDisplayNames.ServerMessage(result.Code, result.Message)}");
             }
         }
         catch (Exception error)
@@ -726,18 +726,18 @@ public sealed class MainForm : Form
 
     private TabPage BuildMonitorPage()
     {
-        var page = new TabPage("Monitor (chỉ đọc)") { Padding = new Padding(6) };
+        var page = new TabPage("Giám sát (chỉ đọc)") { Padding = new Padding(6) };
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         var top = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
-        _refreshMonitor.Text = "Refresh ngay";
+        _refreshMonitor.Text = "Làm mới ngay";
         _refreshMonitor.AutoSize = true;
         top.Controls.Add(_refreshMonitor);
         top.Controls.Add(new Label
         {
-            Text = "Tự động mỗi 2 giây · tồn kho dùng staff_dn*, audit dùng auditor",
+            Text = "Tự động mỗi 2 giây · tồn kho dùng token nhân viên, nhật ký dùng token kiểm toán",
             AutoSize = true,
             Margin = new Padding(12, 8, 3, 3),
             ForeColor = Color.FromArgb(90, 90, 90),
@@ -748,7 +748,7 @@ public sealed class MainForm : Form
         columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
         columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));
 
-        var stockGroup = new GroupBox { Text = "Tồn kho của store", Dock = DockStyle.Fill, Padding = new Padding(8) };
+        var stockGroup = new GroupBox { Text = "Tồn kho cửa hàng", Dock = DockStyle.Fill, Padding = new Padding(8) };
         var stockLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
         stockLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         stockLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
@@ -763,15 +763,15 @@ public sealed class MainForm : Form
         stockLayout.Controls.Add(_stockStatus, 0, 1);
         stockGroup.Controls.Add(stockLayout);
 
-        var auditGroup = new GroupBox { Text = "Audit log — 20 dòng mới nhất", Dock = DockStyle.Fill, Padding = new Padding(8) };
+        var auditGroup = new GroupBox { Text = "Nhật ký kiểm toán — 20 dòng mới nhất", Dock = DockStyle.Fill, Padding = new Padding(8) };
         var auditLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
         auditLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         auditLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
         ConfigureGrid(_auditGrid);
         AddColumn(_auditGrid, nameof(AuditRow.TimeText), "Giờ", 70);
-        AddColumn(_auditGrid, nameof(AuditRow.Action), "Action", 120);
-        AddColumn(_auditGrid, nameof(AuditRow.EntityKey), "Entity key", 220);
-        AddColumn(_auditGrid, nameof(AuditRow.Details), "Details", 260);
+        AddColumn(_auditGrid, nameof(AuditRow.Action), "Hành động", 120);
+        AddColumn(_auditGrid, nameof(AuditRow.EntityKey), "Khóa đối tượng", 220);
+        AddColumn(_auditGrid, nameof(AuditRow.Details), "Chi tiết", 260);
         _auditGrid.DataSource = _auditView;
         auditLayout.Controls.Add(_auditGrid, 0, 0);
         _auditStatus.AutoSize = true;
@@ -788,23 +788,23 @@ public sealed class MainForm : Form
 
     private TabPage BuildTerminalsPage()
     {
-        var page = new TabPage("Terminals") { Padding = new Padding(6) };
+        var page = new TabPage("Máy POS") { Padding = new Padding(6) };
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.Controls.Add(new Label
         {
-            Text = "6 máy POS đã cấu hình. Fingerprint là 12 ký tự đầu của SHA-256 (DER).",
+            Text = "6 máy POS đã cấu hình. Vân tay chứng chỉ là 12 ký tự đầu của SHA-256 (DER).",
             AutoSize = true,
             Margin = new Padding(3, 8, 3, 3),
             ForeColor = Color.FromArgb(70, 70, 70),
         }, 0, 0);
         ConfigureGrid(_terminalsGrid);
-        AddColumn(_terminalsGrid, nameof(TerminalRow.StoreName), "Store", 160);
-        AddColumn(_terminalsGrid, nameof(TerminalRow.PosId), "POS id", 110);
-        AddColumn(_terminalsGrid, nameof(TerminalRow.CertificateText), "Cert", 60);
-        AddColumn(_terminalsGrid, nameof(TerminalRow.KeyText), "Key", 60);
-        AddColumn(_terminalsGrid, nameof(TerminalRow.Fingerprint), "Fingerprint (12)", 130);
+        AddColumn(_terminalsGrid, nameof(TerminalRow.StoreName), "Cửa hàng", 160);
+        AddColumn(_terminalsGrid, nameof(TerminalRow.PosId), "Mã máy POS", 110);
+        AddColumn(_terminalsGrid, nameof(TerminalRow.CertificateText), "Chứng chỉ", 65);
+        AddColumn(_terminalsGrid, nameof(TerminalRow.KeyText), "Khóa riêng", 65);
+        AddColumn(_terminalsGrid, nameof(TerminalRow.Fingerprint), "Vân tay (12)", 130);
         AddColumn(_terminalsGrid, nameof(TerminalRow.LastResult), "Kết quả gần nhất", 150);
         AddColumn(_terminalsGrid, nameof(TerminalRow.LastTime), "Lúc", 80);
         _terminalsGrid.DataSource = _terminalsView;
@@ -815,7 +815,7 @@ public sealed class MainForm : Form
 
     private TabPage BuildLogPage()
     {
-        var page = new TabPage("Request log") { Padding = new Padding(6) };
+        var page = new TabPage("Nhật ký yêu cầu") { Padding = new Padding(6) };
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 60));
@@ -826,20 +826,20 @@ public sealed class MainForm : Form
         _logFilter.DropDownStyle = ComboBoxStyle.DropDownList;
         _logFilter.Items.AddRange(new object[]
         {
-            "POS event + kịch bản",
-            "Tất cả (kể cả monitor/health)",
-            "Chỉ monitor/health",
+            "Sự kiện POS + kịch bản",
+            "Tất cả (kể cả giám sát/sức khỏe)",
+            "Chỉ giám sát/sức khỏe",
         });
         _logFilter.SelectedIndex = 0;
         _logFilter.Width = 240;
         _logFilter.Margin = new Padding(3, 5, 12, 3);
         top.Controls.Add(_logFilter);
-        var clear = new Button { Text = "Xóa log", AutoSize = true };
+        var clear = new Button { Text = "Xóa nhật ký", AutoSize = true };
         clear.Click += (_, _) => _requestLog.Clear();
         top.Controls.Add(clear);
         top.Controls.Add(new Label
         {
-            Text = "Không bao giờ hiển thị bearer token; chỉ role/subject. Giữ 200 dòng mới nhất.",
+            Text = "Không bao giờ hiển thị bearer token; chỉ vai trò/chủ thể. Giữ 200 dòng mới nhất.",
             AutoSize = true,
             Margin = new Padding(12, 8, 3, 3),
             ForeColor = Color.FromArgb(90, 90, 90),
@@ -848,12 +848,12 @@ public sealed class MainForm : Form
 
         ConfigureGrid(_logGrid);
         AddColumn(_logGrid, nameof(RequestLogEntry.TimeText), "Giờ", 65);
-        AddColumn(_logGrid, nameof(RequestLogEntry.Method), "Method", 55);
+        AddColumn(_logGrid, nameof(RequestLogEntry.Method), "Phương thức", 70);
         AddColumn(_logGrid, nameof(RequestLogEntry.Url), "URL", 300);
-        AddColumn(_logGrid, nameof(RequestLogEntry.StatusText), "Status", 65);
+        AddColumn(_logGrid, nameof(RequestLogEntry.StatusText), "Trạng thái HTTP", 85);
         AddColumn(_logGrid, nameof(RequestLogEntry.ElapsedText), "Thời gian", 70);
-        AddColumn(_logGrid, nameof(RequestLogEntry.CertificateText), "Cert", 95);
-        AddColumn(_logGrid, nameof(RequestLogEntry.IdentityText), "Role / subject", 130);
+        AddColumn(_logGrid, nameof(RequestLogEntry.CertificateText), "Chứng chỉ", 95);
+        AddColumn(_logGrid, nameof(RequestLogEntry.IdentityText), "Vai trò / chủ thể", 130);
         _logGrid.DataSource = _logView;
         layout.Controls.Add(_logGrid, 0, 1);
 
@@ -1304,7 +1304,7 @@ public sealed class MainForm : Form
                     _discountCacheStore.Clear(terminalPosId);
                 }
 
-                liveBook.ApplyFailure("Missing certificate or POS token.", utcNow);
+                liveBook.ApplyFailure("Thiếu chứng chỉ hoặc token POS.", utcNow);
                 ApplyCurrentDiscountsToUi();
                 return;
             }
@@ -1631,14 +1631,14 @@ public sealed class MainForm : Form
         if (!info.IsUsable)
         {
             throw new ConfigurationException(
-                $"Terminal {terminal.PosId} cannot send: {info.Error ?? "certificate missing"}.\n" +
-                $"Run:\n  {SetupCommands.GenerateCertificates}\n" +
-                $"Then:\n  {SetupCommands.RegisterFingerprints}");
+                $"Máy POS {terminal.PosId} không thể gửi: {info.Error ?? "thiếu chứng chỉ"}.\n" +
+                $"Chạy:\n  {SetupCommands.GenerateCertificates}\n" +
+                $"Sau đó:\n  {SetupCommands.RegisterFingerprints}");
         }
 
         var token = _loaded.TokenForTerminal(terminal)
                     ?? throw new ConfigurationException(
-                        $"Missing token '{terminal.PosId}'.\nRun:\n  {SetupCommands.IssueTokens}");
+                        $"Thiếu token '{terminal.PosId}'.\nChạy:\n  {SetupCommands.IssueTokens}");
         _authority ??= ServerCertificateValidator.LoadAuthority(_loaded.Paths.CaCertificate);
         var client = new TerminalClient(_config.PosBaseUrl, _authority, info.Certificate,
             terminal.PosId, token, _requestLog);
@@ -1695,7 +1695,7 @@ public sealed class MainForm : Form
                 if (_terminalEpoch == terminalEpoch
                     && string.Equals(CurrentTerminal?.PosId, terminal.PosId, StringComparison.OrdinalIgnoreCase))
                 {
-                    _resultPanel.ShowInfo("Mất liên lạc tới gateway — sự kiện đã lưu, sẽ gửi lại.");
+                    _resultPanel.ShowInfo("Mất kết nối tới cổng POS — sự kiện đã lưu, sẽ tự gửi lại.");
                 }
             }
             else
@@ -1783,8 +1783,8 @@ public sealed class MainForm : Form
 
         var pending = _queues.Values.Sum(queue => queue.Count);
         var rejected = _queues.Values.Sum(queue => queue.Rejected.Count);
-        var link = _linkUp switch { true => "UP", false => "DOWN", _ => "—" };
-        _queueStatus.Text = $"Chờ gửi: {pending} · Bị từ chối: {rejected} · Link: {link}";
+        var link = _linkUp switch { true => "Sẵn sàng", false => "Mất kết nối", _ => "—" };
+        _queueStatus.Text = $"Chờ gửi: {pending} · Bị từ chối: {rejected} · Kết nối: {link}";
         _queueStatus.ForeColor = _linkUp == false
             ? Color.FromArgb(179, 38, 30)
             : Color.FromArgb(30, 122, 52);
@@ -1793,7 +1793,7 @@ public sealed class MainForm : Form
     private void ShowRejected()
     {
         var rows = _queues.SelectMany(pair => pair.Value.Rejected.Select(item =>
-            $"{pair.Key}: {item.Code} ({item.HttpStatus}) — {item.Message}\n{item.Body}"));
+            $"{pair.Key}: {item.Code} ({item.HttpStatus}) — {PosDisplayNames.ServerMessage(item.Code, item.Message)}\n{item.Body}"));
         MessageBox.Show(this, string.Join("\n\n", rows.DefaultIfEmpty("Không có sự kiện bị từ chối.")),
             "Sự kiện bị từ chối");
     }
@@ -1835,7 +1835,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        row.LastResult = $"{result.Outcome} {result.Code}";
+        row.LastResult = $"{PosDisplayNames.Outcome(result.Outcome)} ({result.Code})";
         row.LastTime = DateTime.Now.ToString("HH:mm:ss");
         _terminalsView.ResetBindings();
         UpdateTerminalHighlight();
@@ -1863,7 +1863,7 @@ public sealed class MainForm : Form
             string.Equals(item.PosId, record.PosId, StringComparison.OrdinalIgnoreCase));
         if (terminal is null)
         {
-            _resultPanel.ShowInfo($"Terminal {record.PosId} không còn trong cấu hình.");
+            _resultPanel.ShowInfo($"Máy POS {record.PosId} không còn trong cấu hình.");
             return;
         }
 
@@ -1911,7 +1911,7 @@ public sealed class MainForm : Form
 
         return MessageBox.Show(this,
                    $"Hủy toàn bộ đơn {record.TransactionId}?\nTồn kho sẽ được hoàn lại.",
-                   "Xác nhận CANCELLATION", MessageBoxButtons.YesNo, MessageBoxIcon.Question)
+                   "Xác nhận hủy đơn", MessageBoxButtons.YesNo, MessageBoxIcon.Question)
                == DialogResult.Yes;
     }
 
@@ -1940,7 +1940,7 @@ public sealed class MainForm : Form
             string.Equals(item.PosId, record.PosId, StringComparison.OrdinalIgnoreCase));
         if (terminal is null)
         {
-            _resultPanel.ShowInfo($"Terminal {record.PosId} không còn trong cấu hình.");
+            _resultPanel.ShowInfo($"Máy POS {record.PosId} không còn trong cấu hình.");
             return;
         }
 
@@ -1992,7 +1992,7 @@ public sealed class MainForm : Form
             string.Equals(item.PosId, record.PosId, StringComparison.OrdinalIgnoreCase));
         if (terminal is null)
         {
-            _resultPanel.ShowInfo($"Terminal {record.PosId} không còn trong cấu hình.");
+            _resultPanel.ShowInfo($"Máy POS {record.PosId} không còn trong cấu hình.");
             return;
         }
 
@@ -2025,7 +2025,7 @@ public sealed class MainForm : Form
         {
             if (!_closing && !IsDisposed)
             {
-                _resultPanel.ShowInfo("Không có request nào để Retry.");
+                _resultPanel.ShowInfo("Không có yêu cầu nào để thử lại.");
             }
 
             return;
@@ -2066,7 +2066,7 @@ public sealed class MainForm : Form
             if (pending.DirectOnly)
             {
                 _pendingRetry = null;
-                _resultPanel.ShowInfo("Không thể Retry trực tiếp yêu cầu này — vui lòng chạy lại kịch bản.");
+                _resultPanel.ShowInfo("Không thể thử lại trực tiếp yêu cầu này — vui lòng chạy lại kịch bản.");
                 return;
             }
 
@@ -2104,14 +2104,14 @@ public sealed class MainForm : Form
 
         if (_mockMode)
         {
-            errorMessage = "Kịch bản chứng chỉ/gateway chỉ chạy ở chế độ LIVE.";
+            errorMessage = "Kịch bản chứng chỉ/cổng POS chỉ chạy ở chế độ LIVE.";
             return false;
         }
 
         _authority ??= ServerCertificateValidator.LoadAuthority(_loaded.Paths.CaCertificate);
         var token = _loaded.TokenForTerminal(terminal)
                     ?? throw new ConfigurationException(
-                        $"Missing token '{terminal.PosId}'.\nRun:\n  {SetupCommands.IssueTokens}");
+                        $"Thiếu token '{terminal.PosId}'.\nChạy:\n  {SetupCommands.IssueTokens}");
 
         switch (kind)
         {
@@ -2121,7 +2121,7 @@ public sealed class MainForm : Form
                     && _certificates[item.PosId].IsUsable);
                 if (other is null)
                 {
-                    errorMessage = "Không có certificate của terminal khác để chạy kịch bản này.";
+                    errorMessage = "Không có chứng chỉ của máy POS khác để chạy kịch bản này.";
                     return false;
                 }
 
@@ -2216,7 +2216,7 @@ public sealed class MainForm : Form
             case ScenarioKind.Conflict:
                 if (lastSale is null || lastSale.Items.Count == 0)
                 {
-                    _resultPanel.ShowInfo("Cần một SALE đã OK trước khi chạy Conflict.");
+                    _resultPanel.ShowInfo("Cần một giao dịch bán thành công trước khi chạy kịch bản trùng mã (CONFLICT).");
                     return;
                 }
 
@@ -2253,7 +2253,7 @@ public sealed class MainForm : Form
             case ScenarioKind.ReturnLimit:
                 if (lastSale is null || lastSale.Items.Count == 0)
                 {
-                    _resultPanel.ShowInfo("Cần một SALE đã OK trước khi chạy Return limit.");
+                    _resultPanel.ShowInfo("Cần một giao dịch bán thành công trước khi chạy kịch bản trả quá số lượng.");
                     return;
                 }
 
@@ -2315,7 +2315,7 @@ public sealed class MainForm : Form
 
             if (_monitorClient is null)
             {
-                _stockStatus.Text = "Chưa có monitor client.";
+                _stockStatus.Text = "Chưa khởi tạo kết nối giám sát.";
                 return;
             }
 
@@ -2323,7 +2323,7 @@ public sealed class MainForm : Form
             var auditorToken = _loaded.AuditorToken;
             if (staffToken is null && auditorToken is null)
             {
-                _stockStatus.Text = "Thiếu token staff/auditor.";
+                _stockStatus.Text = "Thiếu token nhân viên và kiểm toán.";
                 _auditStatus.Text = "Không có token auditor trên máy này.";
                 return;
             }
@@ -2358,7 +2358,7 @@ public sealed class MainForm : Form
             if (stockTask is null)
             {
                 ReplaceStock(Array.Empty<StockRow>());
-                _stockStatus.Text = "Thiếu token staff.";
+                _stockStatus.Text = "Thiếu token nhân viên.";
             }
             else
             {
@@ -2395,7 +2395,7 @@ public sealed class MainForm : Form
                 }
                 else
                 {
-                    _auditStatus.Text = audit.Error ?? "Không đọc được audit log.";
+                    _auditStatus.Text = audit.Error ?? "Không đọc được nhật ký kiểm toán.";
                 }
             }
         }
@@ -2466,7 +2466,7 @@ public sealed class MainForm : Form
             if (_mockMode)
             {
                 _middlewareStatus.Text = "Middleware: MOCK";
-                _gatewayStatus.Text = "Gateway: MOCK";
+                _gatewayStatus.Text = "Cổng POS: MOCK";
                 _middlewareStatus.ForeColor = Color.FromArgb(199, 119, 0);
                 _gatewayStatus.ForeColor = Color.FromArgb(199, 119, 0);
                 return;
@@ -2475,7 +2475,7 @@ public sealed class MainForm : Form
             if (_monitorClient is null)
             {
                 _middlewareStatus.Text = "Middleware: —";
-                _gatewayStatus.Text = "Gateway: —";
+                _gatewayStatus.Text = "Cổng POS: —";
                 return;
             }
 
@@ -2487,12 +2487,12 @@ public sealed class MainForm : Form
 
             if (health.IsSuccess && string.Equals(health.Data?.Status, "ok", StringComparison.OrdinalIgnoreCase))
             {
-                _middlewareStatus.Text = $"Middleware: OK ({health.ElapsedMs:0} ms)";
+                _middlewareStatus.Text = $"Middleware: Sẵn sàng ({health.ElapsedMs:0} ms)";
                 _middlewareStatus.ForeColor = Color.FromArgb(30, 122, 52);
             }
             else
             {
-                _middlewareStatus.Text = $"Middleware: DOWN ({health.Error ?? "no answer"})";
+                _middlewareStatus.Text = $"Middleware: Mất kết nối ({health.Error ?? "không có phản hồi"})";
                 _middlewareStatus.ForeColor = Color.FromArgb(179, 38, 30);
             }
 
@@ -2506,12 +2506,12 @@ public sealed class MainForm : Form
 
             if (gateway.Up)
             {
-                _gatewayStatus.Text = $"Gateway: UP (400, {gateway.ElapsedMs:0} ms)";
+                _gatewayStatus.Text = $"Cổng POS: Sẵn sàng (400, {gateway.ElapsedMs:0} ms)";
                 _gatewayStatus.ForeColor = Color.FromArgb(30, 122, 52);
             }
             else
             {
-                _gatewayStatus.Text = $"Gateway: DOWN ({gateway.Status}, {gateway.Error ?? "no answer"})";
+                _gatewayStatus.Text = $"Cổng POS: Mất kết nối ({gateway.Status}, {gateway.Error ?? "không có phản hồi"})";
                 _gatewayStatus.ForeColor = Color.FromArgb(179, 38, 30);
             }
 
@@ -2523,7 +2523,7 @@ public sealed class MainForm : Form
         {
             if (!_closing && !IsDisposed && _mockMode == wasMock && _modeEpoch == modeEpoch)
             {
-                _middlewareStatus.Text = $"Middleware: error — {error.Message}";
+                _middlewareStatus.Text = $"Middleware: Lỗi — {error.Message}";
                 _middlewareStatus.ForeColor = Color.FromArgb(179, 38, 30);
             }
         }
@@ -2542,8 +2542,8 @@ public sealed class MainForm : Form
     {
         var localLabel = FormatLocalSettingsLabel(out var fullLocalPath);
         _filesStatus.Text = $"CA: {(File.Exists(_loaded.Paths.CaCertificate) ? "OK" : "thiếu")} · " +
-                            $"tokens: {(File.Exists(_loaded.Paths.TokensFile) ? $"{_loaded.Tokens.Count} khóa" : "thiếu")} · " +
-                            $"Local: {localLabel}";
+                            $"Token: {(File.Exists(_loaded.Paths.TokensFile) ? $"{_loaded.Tokens.Count} khóa" : "thiếu")} · " +
+                            $"Cục bộ: {localLabel}";
         _filesStatus.ToolTipText = fullLocalPath ?? "Không có appsettings.Local.json";
     }
 
@@ -2561,8 +2561,8 @@ public sealed class MainForm : Form
             Path.Combine(_loaded.Paths.RepoRoot, "clients", "demo-pos", "DemoPos", "appsettings.Local.json"));
         var fileName = Path.GetFileName(fullPath);
         return string.Equals(fullPath, inProject, StringComparison.OrdinalIgnoreCase)
-            ? $"{fileName} (project)"
-            : $"{fileName} (exe)";
+            ? $"{fileName} (thư mục dự án)"
+            : $"{fileName} (thư mục exe)";
     }
 
     private void OnRequestLogChanged()
@@ -2686,7 +2686,7 @@ public sealed class MainForm : Form
         {
             if (!_certificates[terminal.PosId].IsUsable)
             {
-                problems.Add($"Terminal {terminal.PosId} thiếu certificate/key.\nChạy:\n  {SetupCommands.GenerateCertificates}");
+                problems.Add($"Máy POS {terminal.PosId} thiếu chứng chỉ/khóa riêng.\nChạy:\n  {SetupCommands.GenerateCertificates}");
             }
 
             if (_loaded.TokenForTerminal(terminal) is null)
@@ -2696,7 +2696,7 @@ public sealed class MainForm : Form
 
             if (_loaded.StaffTokenForStore(terminal.StoreId) is null)
             {
-                problems.Add($"Thiếu token staff cho {terminal.StoreId}.\nChạy:\n  {SetupCommands.IssueTokens}");
+                problems.Add($"Thiếu token nhân viên cho {terminal.StoreId}.\nChạy:\n  {SetupCommands.IssueTokens}");
             }
         }
 

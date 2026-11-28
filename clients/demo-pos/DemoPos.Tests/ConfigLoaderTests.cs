@@ -54,7 +54,7 @@ public sealed class ConfigLoaderTests
         var overridden = ConfigLoader.Load(temporary.Path, settings);
         Assert.False(overridden.IsMock);
         Assert.NotEmpty(overridden.Problems);
-        Assert.Contains(overridden.Problems, problem => problem.Contains("token file", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(overridden.Problems, problem => problem.Contains("tệp token", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -90,8 +90,8 @@ public sealed class ConfigLoaderTests
 
         var loaded = ConfigLoader.Load(temporary.Path, settings);
 
-        Assert.Contains(loaded.Problems, problem => problem.Contains("token file", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(loaded.Problems, problem => problem.Contains("CA certificate", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(loaded.Problems, problem => problem.Contains("tệp token", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(loaded.Problems, problem => problem.Contains("chứng chỉ CA", StringComparison.OrdinalIgnoreCase));
         Assert.Empty(loaded.Tokens);
     }
 
@@ -130,7 +130,7 @@ public sealed class ConfigLoaderTests
 
         var loaded = ConfigLoader.Load(temporary.Path, settings);
 
-        Assert.Contains(loaded.Problems, problem => problem.Contains("Missing token 'POS-DN1-01'", StringComparison.Ordinal));
+        Assert.Contains(loaded.Problems, problem => problem.Contains("Thiếu token 'POS-DN1-01'", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -204,11 +204,11 @@ public sealed class ConfigLoaderTests
                 using var temporary = new TemporaryDirectory();
                 var (binDir, binSettings, projectDir) = PrepareRepoWithBinLayout(temporary.Path);
 
-                // 1. Neither present -> "Local: không có"
+                // 1. Neither present -> "Cục bộ: không có"
                 var noneLoaded = ConfigLoader.Load(binDir, binSettings);
                 using (var form = new DemoPos.UI.MainForm(noneLoaded, temporary.Path))
                 {
-                    Assert.Contains("Local: không có", form.FilesStatusText, StringComparison.Ordinal);
+                    Assert.Contains("Cục bộ: không có", form.FilesStatusText, StringComparison.Ordinal);
                 }
 
                 // 2. Project-folder fallback -> shows project appsettings.Local.json
@@ -217,7 +217,7 @@ public sealed class ConfigLoaderTests
                 var projectLoaded = ConfigLoader.Load(binDir, binSettings);
                 using (var form = new DemoPos.UI.MainForm(projectLoaded, temporary.Path))
                 {
-                    Assert.Contains("Local: appsettings.Local.json (project)", form.FilesStatusText, StringComparison.Ordinal);
+                    Assert.Contains("Cục bộ: appsettings.Local.json (thư mục dự án)", form.FilesStatusText, StringComparison.Ordinal);
                 }
 
                 // 3. Beside executable wins -> shows exe appsettings.Local.json
@@ -226,7 +226,7 @@ public sealed class ConfigLoaderTests
                 var binLoaded = ConfigLoader.Load(binDir, binSettings);
                 using (var form = new DemoPos.UI.MainForm(binLoaded, temporary.Path))
                 {
-                    Assert.Contains("Local: appsettings.Local.json (exe)", form.FilesStatusText, StringComparison.Ordinal);
+                    Assert.Contains("Cục bộ: appsettings.Local.json (thư mục exe)", form.FilesStatusText, StringComparison.Ordinal);
                 }
             }
             catch (Exception ex)

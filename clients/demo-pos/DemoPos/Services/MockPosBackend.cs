@@ -66,7 +66,7 @@ public sealed class MockPosBackend : IPosBackend
             {
                 Outcome = PosOutcome.REJECTED,
                 Code = "INVALID_EVENT",
-                Message = $"Invalid event JSON: {error.Message}",
+                Message = $"JSON sự kiện không hợp lệ: {error.Message}",
                 HttpStatus = 422,
             };
         }
@@ -125,7 +125,7 @@ public sealed class MockPosBackend : IPosBackend
         if (!storeKnown || !terminalKnown)
         {
             return Reject(posEvent, 422, "UNREGISTERED_STORE_OR_POS",
-                $"Store '{posEvent.StoreId}' or POS terminal '{posEvent.PosId}' is not registered or not active.");
+                $"Cửa hàng '{posEvent.StoreId}' hoặc máy POS '{posEvent.PosId}' chưa được đăng ký hoặc ngừng hoạt động.");
         }
 
         var signature = Signature(posEvent);
@@ -135,11 +135,11 @@ public sealed class MockPosBackend : IPosBackend
             {
                 AddAudit("DUPLICATE_EVENT", posEvent.TransactionId, null);
                 return OkResult(posEvent, "DUPLICATE", "DUPLICATE_IGNORED",
-                    "Transaction already recorded", StockOf(existing));
+                    "Giao dịch đã được ghi trước đó", StockOf(existing));
             }
 
             return Reject(posEvent, 409, "CONFLICT",
-                "Transaction ID already recorded with different content.");
+                "Trùng mã giao dịch nhưng khác nội dung");
         }
 
         return posEvent.EventType switch
@@ -147,7 +147,7 @@ public sealed class MockPosBackend : IPosBackend
             EventTypes.Sale => Sale(posEvent),
             EventTypes.Return => Return(posEvent),
             EventTypes.Cancellation => Cancellation(posEvent),
-            _ => Reject(posEvent, 422, "INVALID_EVENT", $"Unknown event type '{posEvent.EventType}'."),
+            _ => Reject(posEvent, 422, "INVALID_EVENT", $"Loại sự kiện không hợp lệ '{posEvent.EventType}'."),
         };
     }
 
@@ -156,7 +156,7 @@ public sealed class MockPosBackend : IPosBackend
         var items = posEvent.Items ?? new List<PosEventItem>();
         if (items.Count == 0)
         {
-            return Reject(posEvent, 422, "INVALID_EVENT", "At least one item is required for SALE.");
+            return Reject(posEvent, 422, "INVALID_EVENT", "Giao dịch bán hàng cần ít nhất một mặt hàng.");
         }
 
         var storeStock = _stock[posEvent.StoreId];
@@ -165,13 +165,13 @@ public sealed class MockPosBackend : IPosBackend
         {
             if (!storeStock.TryGetValue(sku, out var available))
             {
-                return Reject(posEvent, 422, "INVALID_EVENT", $"SKU '{sku}' does not exist.");
+                return Reject(posEvent, 422, "INVALID_EVENT", $"Mã sản phẩm '{sku}' không tồn tại.");
             }
 
             if (available < quantity)
             {
                 return Reject(posEvent, 409, "INSUFFICIENT_STOCK",
-                    $"Not enough stock for {sku}.");
+                    $"Không đủ tồn kho cho mã {sku}.");
             }
         }
 
@@ -196,7 +196,7 @@ public sealed class MockPosBackend : IPosBackend
         _transactions[posEvent.TransactionId] = transaction;
         AddAudit("STOCK_CHANGE", posEvent.TransactionId,
             $"{posEvent.EventType} {posEvent.PosId}: {StockText(merged, storeStock)}");
-        return OkResult(posEvent, "OK", "OK", "Event applied", CurrentStock(merged.Keys, storeStock));
+        return OkResult(posEvent, "OK", "OK", "Đã áp dụng giao dịch", CurrentStock(merged.Keys, storeStock));
     }
 
     private PosResult Return(PosEvent posEvent)
@@ -206,19 +206,19 @@ public sealed class MockPosBackend : IPosBackend
             || original.Type != EventTypes.Sale)
         {
             return Reject(posEvent, 404, "ORIGINAL_SALE_NOT_FOUND",
-                "The original sale was not found.");
+                "Không tìm thấy giao dịch bán gốc.");
         }
 
         if (original.Cancelled)
         {
             return Reject(posEvent, 409, "SALE_ALREADY_CANCELLED",
-                $"Sale '{original.Type}' has already been cancelled.");
+                "Đơn bán gốc đã bị hủy trước đó.");
         }
 
         var items = posEvent.Items ?? new List<PosEventItem>();
         if (items.Count == 0)
         {
-            return Reject(posEvent, 422, "INVALID_EVENT", "At least one item is required for RETURN.");
+            return Reject(posEvent, 422, "INVALID_EVENT", "Giao dịch trả hàng cần ít nhất một mặt hàng.");
         }
 
         var merged = Merge(items);
@@ -228,7 +228,7 @@ public sealed class MockPosBackend : IPosBackend
             if (quantity > remaining)
             {
                 return Reject(posEvent, 409, "RETURN_QTY_EXCEEDED",
-                    $"Return quantity for SKU '{sku}' exceeds the sold quantity.");
+                    $"Số lượng trả cho mã '{sku}' vượt quá số lượng đã bán.");
             }
         }
 
@@ -250,7 +250,7 @@ public sealed class MockPosBackend : IPosBackend
         };
         AddAudit("STOCK_CHANGE", posEvent.TransactionId,
             $"{posEvent.EventType} {posEvent.PosId}: {StockText(merged, storeStock)}");
-        return OkResult(posEvent, "OK", "OK", "Event applied", CurrentStock(merged.Keys, storeStock));
+        return OkResult(posEvent, "OK", "OK", "Đã áp dụng giao dịch", CurrentStock(merged.Keys, storeStock));
     }
 
     private PosResult Cancellation(PosEvent posEvent)
@@ -260,19 +260,19 @@ public sealed class MockPosBackend : IPosBackend
             || original.Type != EventTypes.Sale)
         {
             return Reject(posEvent, 404, "ORIGINAL_SALE_NOT_FOUND",
-                "The original sale was not found.");
+                "Không tìm thấy giao dịch bán gốc.");
         }
 
         if (original.Cancelled)
         {
             return Reject(posEvent, 409, "SALE_ALREADY_CANCELLED",
-                "The original sale has already been cancelled.");
+                "Đơn bán gốc đã bị hủy trước đó.");
         }
 
         if (original.Returned.Values.Any(quantity => quantity > 0))
         {
             return Reject(posEvent, 409, "SALE_HAS_RETURNS",
-                "The original sale already has returns.");
+                "Đơn bán đã có giao dịch trả hàng nên không thể hủy.");
         }
 
         var storeStock = _stock[posEvent.StoreId];
@@ -293,7 +293,7 @@ public sealed class MockPosBackend : IPosBackend
         };
         AddAudit("STOCK_CHANGE", posEvent.TransactionId,
             $"{posEvent.EventType} {posEvent.PosId}: {StockText(original.Sold, storeStock)}");
-        return OkResult(posEvent, "OK", "OK", "Event applied",
+        return OkResult(posEvent, "OK", "OK", "Đã áp dụng giao dịch",
             CurrentStock(original.Sold.Keys, storeStock));
     }
 

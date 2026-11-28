@@ -391,7 +391,7 @@ public sealed class Pb41DemoPosRetryTests
             retryTask.GetAwaiter().GetResult();
 
             var messageLabel = GetPrivateField<Label>(form.Result, "_message");
-            Assert.Contains("Retry", messageLabel.Text, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("thử lại", messageLabel.Text, StringComparison.OrdinalIgnoreCase);
             Assert.Equal(0, new DurableEventQueue(directory.Path, "POS-DN1-01").Count);
         });
     }
@@ -470,7 +470,7 @@ public sealed class Pb41DemoPosRetryTests
 
             // Existing #73 stale-result check stays intact: MOCK's INFO banner is not overwritten.
             var outcomeLabel = GetPrivateField<Label>(form.Result, "_outcome");
-            Assert.Equal("INFO", outcomeLabel.Text);
+            Assert.Equal("Thông báo", outcomeLabel.Text);
 
             // Switching back to LIVE and draining sends TXN-2 and TXN-3 in order.
             var backToLive = form.ToggleMockAsync();

@@ -1,3 +1,5 @@
+using DemoConsole.Services;
+
 namespace DemoConsole.Models;
 
 /// <summary>One HTTP answer: status 0 means no answer (unreachable or timed out).</summary>
@@ -7,10 +9,8 @@ public sealed record ApiResult(int Status, string Code, string Message, string B
 
     public bool IsUnreachable => Status == 0;
 
-    /// <summary>One line for the result bar: status, code and message.</summary>
-    public string Summary => IsUnreachable
-        ? $"no answer: {Message}"
-        : $"HTTP {Status}{(Code.Length > 0 ? " " + Code : string.Empty)}{(Message.Length > 0 ? " - " + Message : string.Empty)}";
+    /// <summary>One line for the result bar: status, code and Vietnamese explanation (or verbatim text for unknown codes).</summary>
+    public string Summary => ConsoleDisplayNames.FormatSummary(this);
 }
 
 public sealed record BatchInfo(string BatchId, DateOnly ExpiryDate, int Quantity);

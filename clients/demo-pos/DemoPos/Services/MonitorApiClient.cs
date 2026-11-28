@@ -75,7 +75,7 @@ public sealed class MonitorApiClient : IDisposable
                 if (data is null)
                 {
                     return Failure<T>((int)response.StatusCode, stopwatch.Elapsed.TotalMilliseconds,
-                        "The response body was empty.", body);
+                        "Phản hồi từ máy chủ rỗng.", body);
                 }
 
                 return new ApiCallResult<T>
@@ -90,7 +90,7 @@ public sealed class MonitorApiClient : IDisposable
             catch (JsonException error)
             {
                 return Failure<T>((int)response.StatusCode, stopwatch.Elapsed.TotalMilliseconds,
-                    $"The response was not the expected JSON: {error.Message}", body);
+                    $"Phản hồi không đúng định dạng JSON: {error.Message}", body);
             }
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -99,7 +99,7 @@ public sealed class MonitorApiClient : IDisposable
             _log.Add(Entry("GET", url, 0, stopwatch.Elapsed.TotalMilliseconds, string.Empty,
                 "Request timed out after 5 seconds.", identity, kind));
             return Failure<T>(0, stopwatch.Elapsed.TotalMilliseconds,
-                "No answer within 5 seconds.", string.Empty);
+                "Không có phản hồi trong 5 giây.", string.Empty);
         }
         catch (HttpRequestException error)
         {
@@ -107,7 +107,7 @@ public sealed class MonitorApiClient : IDisposable
             _log.Add(Entry("GET", url, 0, stopwatch.Elapsed.TotalMilliseconds, string.Empty,
                 error.Message, identity, kind));
             return Failure<T>(0, stopwatch.Elapsed.TotalMilliseconds,
-                $"Could not reach the middleware: {error.Message}", string.Empty);
+                $"Không kết nối được tới middleware: {error.Message}", string.Empty);
         }
     }
 
@@ -176,7 +176,7 @@ public sealed class GatewayProbe : IDisposable
             });
             var up = (int)response.StatusCode == 400;
             return (up, (int)response.StatusCode, stopwatch.Elapsed.TotalMilliseconds,
-                up ? null : $"Unexpected gateway status {(int)response.StatusCode}.");
+                up ? null : $"Mã trạng thái cổng POS không mong đợi: {(int)response.StatusCode}.");
         }
         catch (Exception error) when (error is HttpRequestException or OperationCanceledException)
         {

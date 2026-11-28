@@ -66,7 +66,7 @@ public class DemoApiClientTests
 
         Assert.Equal(422, result.Status);
         Assert.Equal("SNAPSHOT_REJECTED", result.Code);
-        Assert.Equal("HTTP 422 SNAPSHOT_REJECTED - HQ snapshots are not applied.", result.Summary);
+        Assert.Equal("HTTP 422 SNAPSHOT_REJECTED - Bản chụp từ HQ bị từ chối theo quy tắc bảo vệ dữ liệu", result.Summary);
         var request = handler.Requests.Single();
         Assert.Equal("Bearer hq-token", request.Auth);
         Assert.Contains("\"quantity\":999", request.Body);

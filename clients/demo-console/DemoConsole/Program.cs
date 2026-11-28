@@ -16,7 +16,7 @@ internal static class Program
             if (!File.Exists(loaded.Paths.CaCertificate))
             {
                 MessageBox.Show(string.Join("\n\n", loaded.Problems),
-                    "RetailSync demo console - thiếu chứng chỉ", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    "RetailSync Bảng điều khiển demo — thiếu chứng chỉ", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -24,12 +24,12 @@ internal static class Program
         }
         catch (ConfigurationException error)
         {
-            MessageBox.Show(error.Message, "RetailSync demo console - cấu hình chưa đúng",
+            MessageBox.Show(error.Message, "RetailSync Bảng điều khiển demo — cấu hình chưa đúng",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         catch (Exception error)
         {
-            MessageBox.Show(error.ToString(), "RetailSync demo console - lỗi khởi động",
+            MessageBox.Show(error.ToString(), "RetailSync Bảng điều khiển demo — lỗi khởi động",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }

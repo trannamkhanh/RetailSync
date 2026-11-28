@@ -11,10 +11,10 @@ public static class BusinessClock
 
     public static int DaysLeft(DateOnly expiry, DateOnly today) => expiry.DayNumber - today.DayNumber;
 
-    /// <summary>EXPIRED before today (not sellable under FEFO), else "OK, n d left".</summary>
+    /// <summary>"Đã hết hạn" before today (not sellable under FEFO), else "Còn n ngày".</summary>
     public static string BatchState(DateOnly expiry, DateOnly today)
     {
         var days = DaysLeft(expiry, today);
-        return days < 0 ? "EXPIRED" : $"OK, {days} d left";
+        return days < 0 ? "Đã hết hạn" : $"Còn {days} ngày";
     }
 }

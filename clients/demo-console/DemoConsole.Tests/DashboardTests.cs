@@ -341,7 +341,7 @@ public sealed class DashboardTests
         Assert.Equal(2, pie.PositiveSlices.Count);
         Assert.Single(pie.NegativeCategories);
         var note = DashboardTab.NoteLine(pie);
-        Assert.Contains("Thực phẩm khô", note);
+        Assert.Contains("Hàng khô", note);
         Assert.Contains("-50 đ", note);
     }
 
@@ -367,11 +367,14 @@ public sealed class DashboardTests
     [Fact]
     public void Category_labels_come_from_the_design_mapping()
     {
-        Assert.Equal("Sản phẩm từ sữa", DashboardTab.Label("Dairy"));
-        Assert.Equal("Bánh nướng", DashboardTab.Label("Bakery"));
-        Assert.Equal("Thực phẩm khô", DashboardTab.Label("Dry goods"));
+        Assert.Equal("Sữa", DashboardTab.Label("Dairy"));
+        Assert.Equal("Bánh tươi", DashboardTab.Label("Bakery"));
+        Assert.Equal("Hàng khô", DashboardTab.Label("Dry goods"));
+        Assert.Equal("Đồ uống", DashboardTab.Label("Beverages"));
+        Assert.Equal("Bánh kẹo", DashboardTab.Label("Snacks"));
+        Assert.Equal("Đồ đông lạnh", DashboardTab.Label("Frozen"));
         // An unmapped category keeps its own name rather than being hidden.
-        Assert.Equal("Frozen", DashboardTab.Label("Frozen"));
+        Assert.Equal("Household", DashboardTab.Label("Household"));
     }
 
     // --- chart 3: the store comparison --------------------------------------

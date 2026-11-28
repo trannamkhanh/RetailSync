@@ -63,7 +63,7 @@ public sealed class TerminalClient : IDisposable
                 "Request timed out after 5 seconds.", identity, RequestKind.Pos);
             return PosResultParser.NetworkError(
                 "TIMEOUT",
-                "No answer within 5 seconds. Keep the cart and Retry with the same transaction_id.",
+                "Quá 5 giây không có phản hồi. Giữ giỏ hàng và bấm Thử lại với cùng mã giao dịch.",
                 stopwatch.Elapsed.TotalMilliseconds);
         }
         catch (HttpRequestException error)
@@ -73,7 +73,7 @@ public sealed class TerminalClient : IDisposable
                 error.Message, identity, RequestKind.Pos);
             return PosResultParser.NetworkError(
                 "NETWORK_ERROR",
-                $"Could not reach the POS gateway: {error.Message}. Retry with the same transaction_id.",
+                $"Không kết nối được tới cổng POS: {error.Message}. Bấm Thử lại với cùng mã giao dịch.",
                 stopwatch.Elapsed.TotalMilliseconds);
         }
     }

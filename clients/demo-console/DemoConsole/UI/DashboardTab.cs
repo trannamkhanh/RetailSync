@@ -58,19 +58,7 @@ internal sealed class DashboardTab : UserControl
     public static int DaysForIndex(int index) =>
         index >= 0 && index < Periods.Length ? Periods[index].Days : Periods[0].Days;
 
-    /// <summary>
-    /// The category labels of the design (§6.6). Kept here rather than read from the
-    /// database: the mapping is presentation, so it must not need a migration.
-    /// </summary>
-    private static readonly Dictionary<string, string> CategoryLabels = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["Dairy"] = "Sản phẩm từ sữa",
-        ["Bakery"] = "Bánh nướng",
-        ["Dry goods"] = "Thực phẩm khô",
-    };
-
-    /// <summary>
-    /// The pie's slice colours, assigned in order and reused by the legend swatch.
+    /// <summary>The pie's slice colours, assigned in order and reused by the legend swatch.
     ///
     /// The colours are set explicitly rather than left to LiveCharts2's default
     /// palette, because the legend under the chart paints its own swatch and there is
@@ -483,9 +471,8 @@ internal sealed class DashboardTab : UserControl
                $"{quality.Unknown} thiếu mốc ({window}).";
     }
 
-    /// <summary>The design's UI label for a product category, or the raw name.</summary>
-    public static string Label(string category) =>
-        CategoryLabels.TryGetValue(category, out var label) ? label : category;
+    /// <summary>The UI label for a product category (matching StaffApp DisplayNames), or the raw name.</summary>
+    public static string Label(string category) => ConsoleDisplayNames.Category(category);
 
     /// <summary>``dd/MM`` for a bucket, in local time.</summary>
     public static string BucketLabel(DateTime fromUtc, string period)
