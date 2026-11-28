@@ -480,7 +480,8 @@ paths:
         SKUs without a forecast are omitted. sellable_stock sums positive quantities of
         batches expiring today or later, on the UTC+7 business date.
         sold_last_7_days sums SALE quantity minus RETURN and CANCELLATION quantity
-        for status OK events by effective_at in the seven completed business days:
+        for OK events, also retaining original SALE rows now marked CANCELLED so their
+        reversal nets to zero (confirmed by Sang). Use effective_at in seven completed business days:
         [business_date - 7 days at 00:00, business_date at 00:00), converted to UTC.
         Return SHORTAGE, SURPLUS, BALANCED, then sku. Categories remain stored keys.
         Numeric quantities and decimals are JSON numbers, never numeric strings.
