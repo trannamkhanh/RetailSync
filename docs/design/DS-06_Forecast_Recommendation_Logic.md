@@ -103,9 +103,9 @@ REDISTRIBUTION is only advice. It creates no transfer order.
 
 | Source | Template |
 |---|---|
-| Near expiry | `Batch {batch_id} expires in {days} day(s); {at_risk} of {remaining} units may not sell in time.` |
-| Surplus | `Forecast demand is {demand} units for 7 days; stock is {stock}.` |
-| Redistribution | `{other_store} is short of {shortage} units; this store has {surplus} extra.` |
+| Near expiry | `Lô {batch_id} hết hạn sau {days} ngày; {at_risk}/{remaining} đơn vị có thể không bán kịp.` |
+| Surplus | `Dự báo cần {demand} đơn vị trong 7 ngày; tồn {stock}.` |
+| Redistribution | `{other_store} thiếu {shortage} đơn vị; cửa hàng này thừa {surplus}.` |
 
 ### Guardrails and status
 
