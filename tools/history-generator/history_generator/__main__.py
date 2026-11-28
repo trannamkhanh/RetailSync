@@ -18,13 +18,24 @@ def main() -> None:
     parser.add_argument("--days", type=int, default=90)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--as-of", type=date.fromisoformat, help="Exclusive business date (default: today)")
+    parser.add_argument(
+        "--demo-profile",
+        action="store_true",
+        help="Use the PB-52 30-SKU demo demand profile (full 90-day history and S1/S2 scenarios).",
+    )
     args = parser.parse_args()
     if not 1 <= args.days <= 3650:
         parser.error("--days must be between 1 and 3650")
     engine = create_engine(database_url(args.database), hide_parameters=True)
     try:
         with Session(engine) as session, session.begin():
-            count = load_history(session, args.days, args.seed, args.as_of or clock.today_local())
+            count = load_history(
+                session,
+                args.days,
+                args.seed,
+                args.as_of or clock.today_local(),
+                demo_profile=args.demo_profile,
+            )
     finally:
         engine.dispose()
     print(f"Loaded {count} simulated transactions into {args.database}")

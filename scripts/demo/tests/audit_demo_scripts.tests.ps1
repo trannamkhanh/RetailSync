@@ -193,6 +193,39 @@ Invoke-Case "test_audit10_sql_password_not_on_docker_argv" {
     Assert-That ([string]::IsNullOrEmpty($env:SQLCMDPASSWORD)) "SQLCMDPASSWORD left in the environment after the run"
 }
 
+Invoke-Case "test_pb52_reset_applies_demo_seed_and_uses_demo_profile" {
+    $root = New-TempDir
+    $demo = Join-Path $root "scripts\demo"
+    $seedDemo = Join-Path $root "database\seed\demo"
+    New-Item -ItemType Directory $demo, $seedDemo | Out-Null
+    Copy-Item (Join-Path $DemoDir "reset_demo_db.ps1") $demo
+    Copy-Item (Join-Path $DemoDir "_demo_http.ps1") $demo
+    Add-Content -Encoding ASCII (Join-Path $demo "_demo_http.ps1") $FakeDemoHttp
+    Set-Content -Encoding ASCII (Join-Path $seedDemo "001_demo_catalog_30.sql") "SELECT 1;"
+    Set-Content -Encoding ASCII (Join-Path $root ".env") @("MSSQL_SA_PASSWORD=$SqlPassword", "DB_NAME=RTS_DB_DEMO", "HQ_DB_NAME=RTS_HQ")
+
+    $global:AuditDockerCalls = New-Object System.Collections.Generic.List[string]
+    $global:AuditSqlEnv = New-Object System.Collections.Generic.List[string]
+    $global:AuditHttpCalls = New-Object System.Collections.Generic.List[string]
+    $global:AuditHttpReplies = $Healthy.Clone()
+    Push-Location
+    try {
+        & (Join-Path $demo "reset_demo_db.ps1") *> $null
+        $seedCalls = @($global:AuditDockerCalls | Where-Object { $_ -like "*001_demo_catalog_30.sql*" })
+        Assert-That ($seedCalls.Count -eq 1) "expected 1 demo seed call, got $($seedCalls.Count)"
+        Assert-That ($seedCalls[0] -match '(^| )--no-deps( |$)') "demo seed call missing --no-deps: $($seedCalls[0])"
+        Assert-That ($seedCalls[0] -like "*-f 65001*") "demo seed call missing UTF-8 flag -f 65001: $($seedCalls[0])"
+        Assert-That (-not $seedCalls[0].Contains($SqlPassword)) "password leaked on demo seed argv"
+        $histCalls = @($global:AuditDockerCalls | Where-Object { $_ -like "*history_generator*" })
+        Assert-That ($histCalls.Count -eq 1) "expected 1 history_generator call, got $($histCalls.Count)"
+        Assert-That ($histCalls[0] -like "*--demo-profile*") "history_generator missing --demo-profile: $($histCalls[0])"
+    }
+    finally {
+        Pop-Location
+        Remove-Item -Recurse -Force $root
+    }
+}
+
 Remove-Item Function:\docker, Function:\Start-Sleep -ErrorAction SilentlyContinue
 
 # --- export_terminal_tokens.ps1 fixture ------------------------------------

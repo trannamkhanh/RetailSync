@@ -156,6 +156,28 @@ function Invoke-Migration {
     }
 }
 
+function Invoke-DemoSeeds {
+    param([string]$DatabaseName)
+    $demoSeedDir = Join-Path $RepoRoot "database\seed\demo"
+    if (-not (Test-Path $demoSeedDir)) { return }
+    $files = Get-ChildItem -Path $demoSeedDir -Filter "*.sql" -File | Sort-Object Name
+    foreach ($file in $files) {
+        $env:SQLCMDPASSWORD = $Password
+        try {
+            & docker compose run --rm --no-deps @PullArgs -e SQLCMDPASSWORD `
+                --entrypoint /opt/mssql-tools18/bin/sqlcmd migrate `
+                -S sqlserver -U sa -C -I -b -f 65001 -d $DatabaseName `
+                -i "/workspace/database/seed/demo/$($file.Name)"
+        }
+        finally {
+            Remove-Item Env:\SQLCMDPASSWORD -ErrorAction SilentlyContinue
+        }
+        if ($LASTEXITCODE -ne 0) {
+            throw "demo seed '$($file.Name)' failed for '$DatabaseName' with exit code $LASTEXITCODE."
+        }
+    }
+}
+
 function Invoke-MiddlewareScript {
     param([string]$DatabaseName, [string]$Script, [string]$VolumeMode)
     # --no-deps: middleware depends on migrate, which would re-run against .env's DB_NAME.
@@ -198,8 +220,11 @@ Invoke-Sql -Query "CREATE DATABASE [$Database];"
 Write-Host "==> Dropping $HqDatabase (the migration recreates it with its tables)"
 Remove-Database -Name $HqDatabase
 
-Write-Host "==> Applying migrations, the demo seed and the HQ tables"
+Write-Host "==> Applying migrations, the base seed and the HQ tables"
 Invoke-Migration -DatabaseName $Database -HqDatabaseName $HqDatabase
+
+Write-Host "==> Applying demo-only catalogue seed (PB-52: 30 Vietnamese products, 6 categories)"
+Invoke-DemoSeeds -DatabaseName $Database
 
 if ($NoBuild) {
     Write-Host "==> -NoBuild: using the existing middleware image"
@@ -219,11 +244,11 @@ Invoke-MiddlewareScript -DatabaseName $Database `
 
 $HistoryLoaded = $false
 if ($Database -ieq "RTS_DB_DEMO") {
-    Write-Host "==> Loading 90 days of sales history (seed 42)"
+    Write-Host "==> Loading 90 days of sales history (seed 42, PB-52 demo profile)"
     & docker compose run --rm --no-deps @PullArgs -e "DB_NAME=$Database" `
         --volume "${PWD}:/repo:ro" --workdir /repo/tools/history-generator `
         -e PYTHONPATH=/repo/middleware -e PYTHONDONTWRITEBYTECODE=1 `
-        middleware python -m history_generator --database $Database --days 90 --seed 42
+        middleware python -m history_generator --database $Database --days 90 --seed 42 --demo-profile
     if ($LASTEXITCODE -ne 0) {
         throw "the history generator failed for '$Database' with exit code $LASTEXITCODE."
     }
@@ -240,12 +265,14 @@ SET XACT_ABORT ON;
 DECLARE @today date = CAST(DATEADD(hour, 7, SYSUTCDATETIME()) AS date);
 BEGIN TRANSACTION;
 
--- Every early batch of the seed (suffix -1) just outside its default window.
+-- Every early batch of the 9 base SKUs (suffix -1) just outside its default window.
 UPDATE b
 SET expiry_date = DATEADD(day, CASE p.category WHEN 'Dairy' THEN 6 WHEN 'Bakery' THEN 5 ELSE 60 END, @today)
 FROM dbo.product_batch AS b
 JOIN dbo.product AS p ON p.sku = b.sku
-WHERE b.batch_id = 'B-' + b.store_id + '-' + b.sku + '-1';
+WHERE b.sku IN ('SKU-0001', 'SKU-0002', 'SKU-0003', 'SKU-0004', 'SKU-0005',
+                'SKU-0006', 'SKU-0007', 'SKU-0008', 'SKU-0009')
+  AND b.batch_id = 'B-' + b.store_id + '-' + b.sku + '-1';
 
 -- STORE-DN1 and STORE-DN2: three batches inside their window, one expired with stock.
 UPDATE dbo.product_batch
@@ -331,6 +358,9 @@ DECLARE @today date = CAST(DATEADD(hour, 7, SYSUTCDATETIME()) AS date);
 SELECT store_id AS store, SUM(quantity) AS units, COUNT(*) AS skus
 FROM dbo.inventory GROUP BY store_id ORDER BY store_id;
 
+SELECT category, COUNT(*) AS products
+FROM dbo.product GROUP BY category ORDER BY category;
+
 SELECT b.store_id AS store, b.sku, p.category, b.batch_id,
        b.expiry_date, DATEDIFF(day, @today, b.expiry_date) AS days_left, b.quantity,
        CASE WHEN b.expiry_date < @today THEN 'EXPIRED' ELSE 'NEAR_EXPIRY' END AS state
@@ -354,7 +384,7 @@ SELECT (SELECT COUNT(*) FROM dbo.hq_sync_batch) AS hq_batches,
 "@
 
 Write-Host ""
-Write-Host "Database $Database is ready: stock seeded 40/25/15, demo batches moved, HQ $HqDatabase empty."
+Write-Host "Database $Database is ready: 30 products seeded (base 9 SKUs at 40/25/15, 21 new SKUs in slow/medium/fast tiers), demo batches moved, HQ $HqDatabase empty."
 if (-not $HistoryLoaded) { Write-Host "No history was loaded." }
 Write-Host $ForecastLine
 
