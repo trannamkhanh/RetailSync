@@ -48,6 +48,8 @@ public sealed class StaffApiClient : IDisposable
 
     public Task<ApiResult> GetAlertsAsync() => SendAsync(HttpMethod.Get, "/near-expiry-alerts", null);
 
+    public Task<ApiResult> GetForecastsAsync() => SendAsync(HttpMethod.Get, "/staff/forecasts", null);
+
     public Task<ApiResult> GetRecommendationsAsync() => SendAsync(HttpMethod.Get, "/recommendations", null);
 
     public Task<ApiResult> GetRecommendationAsync(long recId) =>

@@ -6,7 +6,7 @@ using StaffApp.Services;
 namespace StaffApp.UI;
 
 /// <summary>
-/// DS-08: one window, four tabs (Tra cứu, Cảnh báo cận hạn, Đề xuất, Giảm giá), labels in Vietnamese. The title bar
+/// DS-08: one window, five tabs (Tra cứu, Cảnh báo cận hạn, Đề xuất, Giảm giá, Dự báo), labels in Vietnamese. The title bar
 /// shows the store and the staff account of the token; the status bar shows loading, errors,
 /// the last refresh time and Retry after a connection error. Every call is asynchronous.
 /// </summary>
@@ -60,6 +60,10 @@ public sealed class MainForm : Form
     private readonly Label _discountsEmpty = new() { AutoSize = true, ForeColor = Color.DimGray };
     private readonly LatestRequest _discountRequests = new();
 
+    private readonly ForecastTab _forecastView = new();
+    private readonly LatestRequest _forecastRequests = new();
+    private bool _forecastsLoaded;
+
     private bool _alertsLoaded;
     private bool _recommendationsLoaded;
     private bool _discountsLoaded;
@@ -83,6 +87,10 @@ public sealed class MainForm : Form
         tabs.TabPages.Add(AlertsTab());
         tabs.TabPages.Add(RecommendationsTab());
         tabs.TabPages.Add(DiscountsTab());
+        var forecastPage = new TabPage("Dự báo");
+        forecastPage.Controls.Add(_forecastView);
+        tabs.TabPages.Add(forecastPage);
+        _forecastView.RefreshRequested += async (_, _) => await RunAsync(LoadForecastsAsync);
         tabs.SelectedIndexChanged += async (_, _) => await OnTabChangedAsync(tabs.SelectedIndex);
 
         var statusBar = new StatusStrip();
@@ -289,6 +297,7 @@ public sealed class MainForm : Form
 
     private async Task OnTabChangedAsync(int index)
     {
+        if (index != 4) _forecastRequests.Invalidate();
         // Retry belongs to the screen that failed; a new tab starts without it.
         _retry.Visible = false;
         _lastAction = null;
@@ -303,6 +312,10 @@ public sealed class MainForm : Form
         else if (index == 3 && !_discountsLoaded)
         {
             await RunAsync(LoadDiscountsAsync);
+        }
+        else if (index == 4 && !_forecastsLoaded)
+        {
+            await RunAsync(LoadForecastsAsync);
         }
     }
 
@@ -422,6 +435,24 @@ public sealed class MainForm : Form
         _recommendationsLoaded = true;
         BindRecommendations();
         Done("Đã tải đề xuất.");
+    }
+
+    private async Task LoadForecastsAsync()
+    {
+        var ticket = _forecastRequests.Next();
+        SetStatus("Đang tải dự báo...", error: false);
+        var result = await _api.GetForecastsAsync();
+        if (!_forecastRequests.Applies(ticket, Gone)) return;
+        if (!result.IsSuccess)
+        {
+            _forecastView.Clear();
+            _forecastsLoaded = false;
+            Fail(UserMessages.For(result, ApiArea.Forecasts));
+            return;
+        }
+        _forecastView.Bind(ApiParsers.Forecasts(result.Body));
+        _forecastsLoaded = true;
+        Done("Đã tải dự báo.");
     }
 
     private async Task LoadDiscountsAsync()

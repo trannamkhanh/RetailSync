@@ -128,6 +128,19 @@ public static class ApiParsers
 
     // --- Helpers ------------------------------------------------------------
 
+    public static ForecastList Forecasts(string body)
+    {
+        using var document = Parse(body);
+        var root = document.RootElement;
+        var items = RequiredArray(root, "items").Select(item => new ForecastLine(
+            RequiredString(item, "sku"), RequiredString(item, "name"), RequiredString(item, "category"),
+            RequiredInt(item, "horizon_days"), RequiredDecimal(item, "predicted_demand"),
+            RequiredInt(item, "sellable_stock"), RequiredDecimal(item, "surplus_shortage"),
+            RequiredString(item, "balance_status"), RequiredString(item, "model_version"),
+            RequiredMoment(item, "created_at"), RequiredInt(item, "sold_last_7_days"))).ToArray();
+        return new ForecastList(RequiredDate(root, "business_date"), items);
+    }
+
     private static JsonDocument Parse(string body)
     {
         try

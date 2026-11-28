@@ -11,6 +11,7 @@ public enum ApiArea
     Detail,
     Decision,
     Discounts,
+    Forecasts,
 }
 
 /// <summary>A failed call as the user sees it. <c>CanRetry</c> offers Retry; <c>Refresh</c> reloads the list.</summary>
