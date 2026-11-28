@@ -19,6 +19,7 @@ from app.api.near_expiry_alerts import router as near_expiry_alerts_router
 from app.api.pos import router as pos_router
 from app.api.products import router as products_router
 from app.api.recommendations import router as recommendations_router
+from app.api.staff_forecasts import router as staff_forecasts_router
 from app.api.sync import router as sync_router
 from app.core.config import API_PREFIX, settings
 from app.core.errors import register_error_handlers
@@ -53,3 +54,4 @@ app.include_router(pos_router, prefix=API_PREFIX)
 app.include_router(products_router, prefix=API_PREFIX)
 app.include_router(recommendations_router, prefix=API_PREFIX)
 app.include_router(sync_router, prefix=API_PREFIX)
+app.include_router(staff_forecasts_router, prefix=API_PREFIX)
